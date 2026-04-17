@@ -1,9 +1,11 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
-
 from app.core.config import settings
 
-engine = create_engine(settings.DATABASE_URL, echo=True)
+DATABASE_URL = settings.DATABASE_URL
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -22,6 +24,12 @@ def get_db():
 
 
 def test_db_connection():
-    with engine.connect() as connection:
-        result = connection.execute(text("SELECT 1"))
-        return result.scalar()
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        print("Database connected successfully!")
+            
+        return True
+    except Exception as e:
+        print(f"Database connection failed: {e}")
+        return False
