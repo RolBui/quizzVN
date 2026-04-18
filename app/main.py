@@ -14,7 +14,8 @@ app = FastAPI(
 )
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.SESSION_SECRET_KEY
+    secret_key=settings.SESSION_SECRET_KEY,
+    https_only=settings.COOKIE_SECURE,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +29,13 @@ app.add_middleware(
 def root():
     return {
         "message": "Quiz Online API is running"
+    }
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok"
     }
 
 

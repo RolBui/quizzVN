@@ -24,5 +24,6 @@ class Settings:
     SESSION_EXPIRE_MINUTES: int = int(os.getenv("SESSION_EXPIRE_MINUTES", "30"))
     SESSION_REFRESH_DAYS: int = int(os.getenv("SESSION_REFRESH_DAYS", "7"))
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "False").lower() == "true"
+    COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
 
 settings = Settings()

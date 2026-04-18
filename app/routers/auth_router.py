@@ -38,7 +38,7 @@ def set_session_cookie(response: JSONResponse, session_token: str) -> None:
         value=session_token,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax",
+        samesite=settings.COOKIE_SAMESITE,
         max_age=settings.SESSION_REFRESH_DAYS * 24 * 60 * 60,
         path="/",
     )
