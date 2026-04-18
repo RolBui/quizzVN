@@ -28,7 +28,7 @@ app.add_middleware(
 @app.get("/")
 def root():
     return {
-        "message": "Quiz Online API is running"
+        "message": "Quiz VN API "
     }
 
 
