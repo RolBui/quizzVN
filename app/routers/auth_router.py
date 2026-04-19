@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Request, Depends, Response, status, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy.orm import Session
+from urllib.parse import urlencode
 
 from app.core.config import settings
 from app.database import get_db
@@ -10,7 +11,6 @@ from app.schemas.auth import (
     AuthSessionResponse,
     CompleteOnboardingRequest,
     CompleteOnboardingResponse,
-    GoogleCallbackResponse,
     LoginRequest,
     MeResponse,
     RefreshSessionResponse,
@@ -95,6 +95,18 @@ def set_auth_cookies(response: Response, tokens: dict) -> None:
     set_refresh_cookie(response, tokens)
 
 
+def build_frontend_auth_redirect_url(**params: str | bool) -> str:
+    base_url = f"{settings.FRONTEND_URL}{settings.FRONTEND_AUTH_CALLBACK_PATH}"
+    query_params = {
+        key: str(value).lower() if isinstance(value, bool) else value
+        for key, value in params.items()
+        if value is not None
+    }
+    if not query_params:
+        return base_url
+    return f"{base_url}?{urlencode(query_params)}"
+
+
 @router.post("/register", response_model=AuthSessionResponse)
 def register(
     payload: RegisterRequest,
@@ -149,12 +161,16 @@ async def google_login(request: Request) -> RedirectResponse:
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/google/callback", response_model=GoogleCallbackResponse)
+@router.get(
+    "/google/callback",
+    response_model=None,
+    status_code=status.HTTP_302_FOUND,
+    responses={302: {"description": "Set auth cookies and redirect to frontend"}},
+)
 async def google_callback(
     request: Request,
-    response: Response,
     db: Session = Depends(get_db),
-) -> GoogleCallbackResponse | JSONResponse:
+) -> RedirectResponse:
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get("userinfo")
 
@@ -162,18 +178,25 @@ async def google_callback(
         user_info = await oauth.google.userinfo(token=token)
 
     if not user_info:
-        return JSONResponse(
-            status_code=400,
-            content={"message": "Google user info not found"}
+        return RedirectResponse(
+            url=build_frontend_auth_redirect_url(error="google_user_info_not_found"),
+            status_code=status.HTTP_302_FOUND,
         )
 
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
     result = handle_google_callback(db, token, user_info, ip_address, user_agent)
+    redirect_response = RedirectResponse(
+        url=build_frontend_auth_redirect_url(
+            provider="google",
+            needs_onboarding=result["user"]["needs_onboarding"],
+        ),
+        status_code=status.HTTP_302_FOUND,
+    )
     request.session.clear()
-    set_auth_cookies(response, result["tokens"])
-    return result
+    set_auth_cookies(redirect_response, result["tokens"])
+    return redirect_response
 
 
 @router.get("/me", response_model=MeResponse)
