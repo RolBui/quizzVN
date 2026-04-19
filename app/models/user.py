@@ -30,3 +30,9 @@ class User(Base):
     role = relationship("Role", back_populates="users")
     oauth_accounts = relationship("OAuthAccount", back_populates="user")
     sessions = relationship("UserSession", back_populates="user")
+    profile = relationship(
+        "UserProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

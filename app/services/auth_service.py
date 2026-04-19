@@ -1,17 +1,22 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
+from app.database import SessionLocal, engine
 from app.core.security import generate_session_token, get_expiry, get_refresh_expiry, utc_now
 from app.core.security import generate_refresh_token
 from app.models.role import Role
 from app.models.user import User
+from app.models.user_profile import UserProfile
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
+
+PENDING_ROLE_NAME = "pending"
+SELECTABLE_ROLE_NAMES = ("teacher", "student")
 
 
 def _resolve_token_expires_at(token: dict):
@@ -39,15 +44,51 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     return value
 
 
-def get_default_role(db: Session):
-    role = db.query(Role).filter(Role.name == "student").first()
+def bootstrap_auth_storage() -> None:
+    UserProfile.__table__.create(bind=engine, checkfirst=True)
+
+    db = SessionLocal()
+    try:
+        for role_name in (PENDING_ROLE_NAME, *SELECTABLE_ROLE_NAMES):
+            get_or_create_role(db, role_name)
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_or_create_role(db: Session, role_name: str) -> Role:
+    role = db.query(Role).filter(Role.name == role_name).first()
     if role:
         return role
 
-    role = Role(name="student")
+    role = Role(name=role_name)
     db.add(role)
     db.flush()
     return role
+
+
+def get_default_role(db: Session):
+    return get_or_create_role(db, PENDING_ROLE_NAME)
+
+
+def get_selectable_roles(db: Session) -> list[Role]:
+    roles = []
+    for role_name in SELECTABLE_ROLE_NAMES:
+        roles.append(get_or_create_role(db, role_name))
+    return roles
+
+
+def serialize_role_option(role: Role) -> dict:
+    required_fields = ["full_name", "date_of_birth", "gender"]
+    if role.name == "student":
+        required_fields.append("school_name")
+
+    return {
+        "id": role.id,
+        "name": role.name,
+        "display_name": "Teacher" if role.name == "teacher" else "Student",
+        "required_fields": required_fields,
+    }
 
 
 def build_username_from_email(db: Session, email: str) -> str:
@@ -114,6 +155,30 @@ def find_or_create_user_from_google(db: Session, user_info: dict):
     db.flush()
 
     return user, True
+
+
+def _calculate_age(date_of_birth: date) -> int:
+    today = utc_now().date()
+    return today.year - date_of_birth.year - (
+        (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
+    )
+
+
+def get_user_profile(db: Session, user_id: int) -> UserProfile | None:
+    return db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+
+
+def serialize_user_profile(profile: UserProfile | None) -> dict | None:
+    if not profile:
+        return None
+
+    return {
+        "date_of_birth": profile.date_of_birth,
+        "age": _calculate_age(profile.date_of_birth),
+        "gender": profile.gender,
+        "school_name": profile.school_name,
+        "onboarding_completed_at": profile.onboarding_completed_at,
+    }
 
 
 def upsert_google_oauth_account(db: Session, user, provider, token: dict, user_info: dict):
@@ -186,11 +251,12 @@ def create_user_session(
     return session
 
 
-def serialize_user(user: User) -> dict:
+def serialize_user(user: User, profile: UserProfile | None = None) -> dict:
+    role_name = user.role.name if user.role else None
     return {
         "id": user.id,
         "role_id": user.role_id,
-        "role_name": user.role.name if user.role else None,
+        "role_name": role_name,
         "full_name": user.full_name,
         "username": user.username,
         "email": user.email,
@@ -205,6 +271,8 @@ def serialize_user(user: User) -> dict:
         "last_login_at": user.last_login_at,
         "created_at": user.created_at,
         "updated_at": user.updated_at,
+        "needs_onboarding": role_name == PENDING_ROLE_NAME,
+        "profile": serialize_user_profile(profile),
     }
 
 
@@ -334,6 +402,71 @@ def revoke_user_session_by_id(db: Session, current_user_id: int, session_id: int
     return session
 
 
+def build_user_payload(db: Session, user: User) -> dict:
+    profile = get_user_profile(db, user.id)
+    return serialize_user(user, profile)
+
+
+def complete_user_onboarding(
+    db: Session,
+    user: User,
+    role_name: str,
+    full_name: str,
+    date_of_birth: date,
+    gender: str,
+    school_name: str | None,
+) -> dict:
+    current_role_name = user.role.name if user.role else None
+    if current_role_name and current_role_name != PENDING_ROLE_NAME:
+        raise HTTPException(status_code=400, detail="Role has already been selected")
+
+    if role_name not in SELECTABLE_ROLE_NAMES:
+        raise HTTPException(status_code=400, detail="Invalid role selected")
+
+    full_name = full_name.strip()
+    school_name = school_name.strip() if school_name else None
+
+    if not full_name:
+        raise HTTPException(status_code=400, detail="full_name is required")
+
+    if date_of_birth > utc_now().date():
+        raise HTTPException(status_code=400, detail="date_of_birth cannot be in the future")
+
+    if role_name == "student" and not school_name:
+        raise HTTPException(status_code=400, detail="school_name is required for student")
+
+    role = get_or_create_role(db, role_name)
+    profile = get_user_profile(db, user.id)
+    if not profile:
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date_of_birth,
+            gender=gender,
+            school_name=school_name if role_name == "student" else None,
+            onboarding_completed_at=utc_now(),
+        )
+        db.add(profile)
+    else:
+        profile.date_of_birth = date_of_birth
+        profile.gender = gender
+        profile.school_name = school_name if role_name == "student" else None
+        profile.onboarding_completed_at = utc_now()
+
+    user.role_id = role.id
+    user.full_name = full_name
+    user.is_first_login = False
+    user.updated_at = utc_now()
+
+    db.commit()
+    db.refresh(user)
+    db.refresh(profile)
+
+    return {
+        "message": "Onboarding completed successfully",
+        "user": serialize_user(user, profile),
+    }
+
+
 def handle_google_callback(
     db: Session,
     token: dict,
@@ -376,7 +509,7 @@ def handle_google_callback(
         return {
             "message": "Google login success",
             "is_new_user": is_new_user,
-            "user": serialize_user(user),
+            "user": build_user_payload(db, user),
             "session": serialize_session(session),
         }
     except HTTPException:

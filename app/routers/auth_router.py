@@ -7,21 +7,27 @@ from app.core.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_session, get_current_user, get_refreshable_session
 from app.schemas.auth import (
+    CompleteOnboardingRequest,
+    CompleteOnboardingResponse,
     GoogleCallbackResponse,
     MeResponse,
     RefreshSessionResponse,
     RevokeSessionResponse,
+    RoleListResponse,
     SessionListResponse,
 )
 from app.schemas.common import MessageResponse
 from app.services.auth_service import (
+    build_user_payload,
+    complete_user_onboarding,
     handle_google_callback,
+    get_selectable_roles,
     list_user_sessions,
     logout_user_session,
     refresh_user_session,
     revoke_user_session_by_id,
+    serialize_role_option,
     serialize_session,
-    serialize_user,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -96,12 +102,21 @@ async def google_callback(
 
 @router.get("/me", response_model=MeResponse)
 def get_me(
+    db: Session = Depends(get_db),
     current_session=Depends(get_current_session),
     current_user=Depends(get_current_user),
 ) -> MeResponse:
     return {
-        "user": serialize_user(current_user),
+        "user": build_user_payload(db, current_user),
         "session": serialize_session(current_session),
+    }
+
+
+@router.get("/roles", response_model=RoleListResponse)
+def get_available_roles(db: Session = Depends(get_db)) -> RoleListResponse:
+    roles = get_selectable_roles(db)
+    return {
+        "roles": [serialize_role_option(role) for role in roles],
     }
 
 
@@ -158,3 +173,20 @@ def revoke_session(
         "message": "Session revoked successfully",
         "session": serialize_session(session),
     }
+
+
+@router.post("/onboarding/complete", response_model=CompleteOnboardingResponse)
+def complete_onboarding(
+    payload: CompleteOnboardingRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> CompleteOnboardingResponse:
+    return complete_user_onboarding(
+        db=db,
+        user=current_user,
+        role_name=payload.role,
+        full_name=payload.full_name,
+        date_of_birth=payload.date_of_birth,
+        gender=payload.gender,
+        school_name=payload.school_name,
+    )

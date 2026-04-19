@@ -1,11 +1,27 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
+from typing import Literal
+
+
+class UserProfileSchema(BaseModel):
+    date_of_birth: date
+    age: int
+    gender: Literal["male", "female", "other"]
+    school_name: str | None = None
+    onboarding_completed_at: datetime
+
+
+class RoleOptionSchema(BaseModel):
+    id: int
+    name: Literal["teacher", "student"]
+    display_name: str
+    required_fields: list[str]
 
 
 class UserSchema(BaseModel):
     id: int
-    role_id: int
+    role_id: int | None = None
     role_name: str | None = None
     full_name: str
     username: str
@@ -21,6 +37,8 @@ class UserSchema(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    needs_onboarding: bool
+    profile: UserProfileSchema | None = None
 
 
 class SessionSchema(BaseModel):
@@ -60,3 +78,20 @@ class SessionListResponse(BaseModel):
 class RevokeSessionResponse(BaseModel):
     message: str
     session: SessionSchema
+
+
+class RoleListResponse(BaseModel):
+    roles: list[RoleOptionSchema]
+
+
+class CompleteOnboardingRequest(BaseModel):
+    role: Literal["teacher", "student"]
+    full_name: str
+    date_of_birth: date
+    gender: Literal["male", "female", "other"]
+    school_name: str | None = None
+
+
+class CompleteOnboardingResponse(BaseModel):
+    message: str
+    user: UserSchema

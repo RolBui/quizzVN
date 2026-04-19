@@ -6,6 +6,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
 from app.database import test_db_connection
 from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
+from app.services.auth_service import bootstrap_auth_storage
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -25,6 +26,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup_bootstrap() -> None:
+    bootstrap_auth_storage()
 
 @app.get("/", response_model=RootResponse)
 def root() -> RootResponse:
