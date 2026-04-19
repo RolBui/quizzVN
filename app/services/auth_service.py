@@ -253,10 +253,19 @@ def create_user_session(
 
 def serialize_user(user: User, profile: UserProfile | None = None) -> dict:
     role_name = user.role.name if user.role else None
+    exposed_role_id = user.role_id
+    exposed_role_name = role_name
+
+    # Keep the internal "pending" role in DB, but expose it as null so FE
+    # can drive the onboarding flow based on needs_onboarding.
+    if role_name == PENDING_ROLE_NAME:
+        exposed_role_id = None
+        exposed_role_name = None
+
     return {
         "id": user.id,
-        "role_id": user.role_id,
-        "role_name": role_name,
+        "role_id": exposed_role_id,
+        "role_name": exposed_role_name,
         "full_name": user.full_name,
         "username": user.username,
         "email": user.email,
