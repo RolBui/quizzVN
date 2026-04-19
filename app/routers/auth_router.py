@@ -1,12 +1,19 @@
-from fastapi import APIRouter, Request, Depends
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request, Depends, Response, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_session, get_current_user, get_refreshable_session
+from app.schemas.auth import (
+    GoogleCallbackResponse,
+    MeResponse,
+    RefreshSessionResponse,
+    RevokeSessionResponse,
+    SessionListResponse,
+)
+from app.schemas.common import MessageResponse
 from app.services.auth_service import (
     handle_google_callback,
     list_user_sessions,
@@ -32,7 +39,7 @@ oauth.register(
 )
 
 
-def set_session_cookie(response: JSONResponse, session_token: str) -> None:
+def set_session_cookie(response: Response, session_token: str) -> None:
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
         value=session_token,
@@ -44,21 +51,29 @@ def set_session_cookie(response: JSONResponse, session_token: str) -> None:
     )
 
 
-def clear_session_cookie(response: JSONResponse) -> None:
+def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(
         key=settings.SESSION_COOKIE_NAME,
         path="/",
     )
 
 
-@router.get("/google/login")
-async def google_login(request: Request):
+@router.get(
+    "/google/login",
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    responses={307: {"description": "Redirect to Google OAuth"}},
+)
+async def google_login(request: Request) -> RedirectResponse:
     redirect_uri = settings.GOOGLE_REDIRECT_URI
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/google/callback")
-async def google_callback(request: Request, db: Session = Depends(get_db)):
+@router.get("/google/callback", response_model=GoogleCallbackResponse)
+async def google_callback(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> GoogleCallbackResponse | JSONResponse:
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get("userinfo")
 
@@ -75,71 +90,71 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
     user_agent = request.headers.get("user-agent")
 
     result = handle_google_callback(db, token, user_info, ip_address, user_agent)
-    response = JSONResponse(content=jsonable_encoder(result))
     set_session_cookie(response, result["session"]["session_token"])
-    return response
+    return result
 
 
-@router.get("/me")
+@router.get("/me", response_model=MeResponse)
 def get_me(
     current_session=Depends(get_current_session),
     current_user=Depends(get_current_user),
-):
+) -> MeResponse:
     return {
         "user": serialize_user(current_user),
         "session": serialize_session(current_session),
     }
 
 
-@router.post("/refresh")
-def refresh_session(current_session=Depends(get_refreshable_session), db: Session = Depends(get_db)):
+@router.post("/refresh", response_model=RefreshSessionResponse)
+def refresh_session(
+    response: Response,
+    current_session=Depends(get_refreshable_session),
+    db: Session = Depends(get_db),
+) -> RefreshSessionResponse:
     refreshed_session = refresh_user_session(db, current_session)
-    response = JSONResponse(
-        content=jsonable_encoder(
-            {
-                "message": "Session refreshed successfully",
-                "session": serialize_session(refreshed_session),
-            }
-        )
-    )
     set_session_cookie(response, refreshed_session.session_token)
-    return response
+    return {
+        "message": "Session refreshed successfully",
+        "session": serialize_session(refreshed_session),
+    }
 
 
-@router.post("/logout")
-def logout(current_session=Depends(get_current_session), db: Session = Depends(get_db)):
+@router.post("/logout", response_model=MessageResponse)
+def logout(
+    response: Response,
+    current_session=Depends(get_current_session),
+    db: Session = Depends(get_db),
+) -> MessageResponse:
     logout_user_session(db, current_session)
-    response = JSONResponse(content={"message": "Logout successful"})
     clear_session_cookie(response)
-    return response
+    return {"message": "Logout successful"}
 
 
-@router.get("/sessions")
-def get_my_sessions(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/sessions", response_model=SessionListResponse)
+def get_my_sessions(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SessionListResponse:
     sessions = list_user_sessions(db, current_user.id)
     return {
         "sessions": [serialize_session(session) for session in sessions],
     }
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/sessions/{session_id}", response_model=RevokeSessionResponse)
 def revoke_session(
     session_id: int,
+    response: Response,
     current_session=Depends(get_current_session),
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> RevokeSessionResponse:
     session = revoke_user_session_by_id(db, current_user.id, session_id)
-    response = JSONResponse(
-        content=jsonable_encoder(
-            {
-                "message": "Session revoked successfully",
-                "session": serialize_session(session),
-            }
-        )
-    )
 
     if session.id == current_session.id:
         clear_session_cookie(response)
 
-    return response
+    return {
+        "message": "Session revoked successfully",
+        "session": serialize_session(session),
+    }

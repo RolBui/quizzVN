@@ -5,12 +5,13 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.database import test_db_connection
+from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     debug=settings.DEBUG,
-    description="Backend API cho hệ thống thi online"
+    description="Backend API cho quizz vn"
 )
 app.add_middleware(
     SessionMiddleware,
@@ -25,22 +26,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
+@app.get("/", response_model=RootResponse)
+def root() -> RootResponse:
     return {
         "message": "Quiz VN API "
     }
 
 
-@app.get("/health")
-def health_check():
+@app.get("/health", response_model=HealthResponse)
+def health_check() -> HealthResponse:
     return {
         "status": "ok"
     }
 
 
-@app.get("/db-check")
-def db_check():
+@app.get("/db-check", response_model=DbCheckResponse)
+def db_check() -> DbCheckResponse:
     result = test_db_connection()
     return {
         "database": "connected" if result else "failed"
