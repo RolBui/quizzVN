@@ -6,7 +6,14 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal, engine
-from app.core.security import generate_session_token, get_expiry, get_refresh_expiry, utc_now
+from app.core.security import (
+    generate_session_token,
+    get_expiry,
+    get_refresh_expiry,
+    hash_password,
+    utc_now,
+    verify_password,
+)
 from app.core.security import generate_refresh_token
 from app.models.role import Role
 from app.models.user import User
@@ -296,7 +303,13 @@ def serialize_session(session: UserSession) -> dict:
         "refresh_expires_at": session.refresh_expires_at,
         "created_at": session.created_at,
         "last_used_at": session.last_used_at,
+    }
+
+
+def serialize_session_tokens(session: UserSession) -> dict:
+    return {
         "session_token": session.session_token,
+        "refresh_token": session.refresh_token,
     }
 
 
@@ -310,6 +323,14 @@ def get_session_by_token(db: Session, session_token: str):
     return (
         _get_session_query(db)
         .filter(UserSession.session_token == session_token)
+        .first()
+    )
+
+
+def get_session_by_refresh_token(db: Session, refresh_token: str):
+    return (
+        _get_session_query(db)
+        .filter(UserSession.refresh_token == refresh_token)
         .first()
     )
 
@@ -416,6 +437,98 @@ def build_user_payload(db: Session, user: User) -> dict:
     return serialize_user(user, profile)
 
 
+def register_local_user(
+    db: Session,
+    full_name: str,
+    email: str,
+    password: str,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> dict:
+    normalized_email = email.strip().lower()
+    full_name = full_name.strip()
+
+    if not full_name:
+        raise HTTPException(status_code=400, detail="full_name is required")
+
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    existing_user = db.query(User).filter(User.email == normalized_email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    default_role = get_default_role(db)
+    user = User(
+        role_id=default_role.id,
+        full_name=full_name,
+        username=build_username_from_email(db, normalized_email),
+        email=normalized_email,
+        password_hash=hash_password(password),
+        auth_type="local",
+        email_verified=False,
+        status="active",
+        is_first_login=True,
+        max_exam_create=50,
+        max_document_create=50,
+        last_login_at=utc_now(),
+    )
+    db.add(user)
+    db.flush()
+
+    session = create_user_session(db, user, "local", ip_address, user_agent)
+    db.commit()
+    db.refresh(user)
+    db.refresh(session)
+
+    return {
+        "message": "Register successful",
+        "user": build_user_payload(db, user),
+        "session": serialize_session(session),
+        "tokens": serialize_session_tokens(session),
+    }
+
+
+def login_local_user(
+    db: Session,
+    email: str,
+    password: str,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> dict:
+    normalized_email = email.strip().lower()
+    user = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.email == normalized_email)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.auth_type == "oauth" and not user.password_hash:
+        raise HTTPException(status_code=400, detail="Use Google login for this account")
+
+    if not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.auth_type == "oauth":
+        user.auth_type = "mixed"
+
+    session = create_user_session(db, user, "local", ip_address, user_agent)
+    user.last_login_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    db.refresh(session)
+
+    return {
+        "message": "Login successful",
+        "user": build_user_payload(db, user),
+        "session": serialize_session(session),
+        "tokens": serialize_session_tokens(session),
+    }
+
+
 def complete_user_onboarding(
     db: Session,
     user: User,
@@ -520,6 +633,7 @@ def handle_google_callback(
             "is_new_user": is_new_user,
             "user": build_user_payload(db, user),
             "session": serialize_session(session),
+            "tokens": serialize_session_tokens(session),
         }
     except HTTPException:
         db.rollback()

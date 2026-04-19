@@ -51,12 +51,17 @@ class SessionSchema(BaseModel):
     refresh_expires_at: datetime | None = None
     created_at: datetime
     last_used_at: datetime | None = None
-    session_token: str
 
 
 class GoogleCallbackResponse(BaseModel):
     message: str
     is_new_user: bool
+    user: UserSchema
+    session: SessionSchema
+
+
+class AuthSessionResponse(BaseModel):
+    message: str
     user: UserSchema
     session: SessionSchema
 
@@ -95,3 +100,15 @@ class CompleteOnboardingRequest(BaseModel):
 class CompleteOnboardingResponse(BaseModel):
     message: str
     user: UserSchema
+
+
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    confirm_password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str

@@ -21,6 +21,8 @@ class Settings:
     ]
     SESSION_SECRET_KEY: str = os.getenv("SESSION_SECRET_KEY", "change_me")
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "session_token")
+    OAUTH_SESSION_COOKIE_NAME: str = os.getenv("OAUTH_SESSION_COOKIE_NAME", "oauth_session")
+    REFRESH_COOKIE_NAME: str = os.getenv("REFRESH_COOKIE_NAME", "refresh_token")
     SESSION_EXPIRE_MINUTES: int = int(os.getenv("SESSION_EXPIRE_MINUTES", "30"))
     SESSION_REFRESH_DAYS: int = int(os.getenv("SESSION_REFRESH_DAYS", "7"))
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "False").lower() == "true"

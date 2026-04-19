@@ -5,13 +5,14 @@ from app.core.config import settings
 from app.database import get_db
 from app.services.auth_service import (
     get_session_by_token,
+    get_session_by_refresh_token,
     require_active_session,
     require_refreshable_session,
     touch_user_session,
 )
 
 
-def get_session_token_from_request(request: Request) -> str:
+def get_access_token_from_request(request: Request) -> str:
     cookie_token = request.cookies.get(settings.SESSION_COOKIE_NAME)
     if cookie_token:
         return cookie_token
@@ -28,11 +29,22 @@ def get_session_token_from_request(request: Request) -> str:
     )
 
 
+def get_refresh_token_from_request(request: Request) -> str:
+    cookie_token = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Refresh token not found",
+    )
+
+
 def get_current_session(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    session_token = get_session_token_from_request(request)
+    session_token = get_access_token_from_request(request)
     session = get_session_by_token(db, session_token)
     session = require_active_session(session)
     return touch_user_session(db, session)
@@ -42,8 +54,8 @@ def get_refreshable_session(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    session_token = get_session_token_from_request(request)
-    session = get_session_by_token(db, session_token)
+    refresh_token = get_refresh_token_from_request(request)
+    session = get_session_by_refresh_token(db, refresh_token)
     return require_refreshable_session(session)
 
 

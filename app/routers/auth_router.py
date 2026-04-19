@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Depends, Response, status
+from fastapi import APIRouter, Request, Depends, Response, status, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy.orm import Session
@@ -7,11 +7,14 @@ from app.core.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_session, get_current_user, get_refreshable_session
 from app.schemas.auth import (
+    AuthSessionResponse,
     CompleteOnboardingRequest,
     CompleteOnboardingResponse,
     GoogleCallbackResponse,
+    LoginRequest,
     MeResponse,
     RefreshSessionResponse,
+    RegisterRequest,
     RevokeSessionResponse,
     RoleListResponse,
     SessionListResponse,
@@ -23,11 +26,14 @@ from app.services.auth_service import (
     handle_google_callback,
     get_selectable_roles,
     list_user_sessions,
+    login_local_user,
     logout_user_session,
+    register_local_user,
     refresh_user_session,
     revoke_user_session_by_id,
     serialize_role_option,
     serialize_session,
+    serialize_session_tokens,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -45,10 +51,22 @@ oauth.register(
 )
 
 
-def set_session_cookie(response: Response, session_token: str) -> None:
+def set_access_cookie(response: Response, tokens: dict) -> None:
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
-        value=session_token,
+        value=tokens["session_token"],
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.SESSION_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+
+
+def set_refresh_cookie(response: Response, tokens: dict) -> None:
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=tokens["refresh_token"],
         httponly=True,
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
@@ -57,11 +75,68 @@ def set_session_cookie(response: Response, session_token: str) -> None:
     )
 
 
-def clear_session_cookie(response: Response) -> None:
+def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(
         key=settings.SESSION_COOKIE_NAME,
         path="/",
     )
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        path="/",
+    )
+    response.delete_cookie(
+        key=settings.OAUTH_SESSION_COOKIE_NAME,
+        path="/",
+    )
+
+
+def set_auth_cookies(response: Response, tokens: dict) -> None:
+    set_access_cookie(response, tokens)
+    set_refresh_cookie(response, tokens)
+
+
+@router.post("/register", response_model=AuthSessionResponse)
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthSessionResponse:
+    if payload.password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    result = register_local_user(
+        db=db,
+        full_name=payload.full_name,
+        email=payload.email,
+        password=payload.password,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    set_auth_cookies(response, result["tokens"])
+    return result
+
+
+@router.post("/login", response_model=AuthSessionResponse)
+def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthSessionResponse:
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    result = login_local_user(
+        db=db,
+        email=payload.email,
+        password=payload.password,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    set_auth_cookies(response, result["tokens"])
+    return result
 
 
 @router.get(
@@ -96,7 +171,8 @@ async def google_callback(
     user_agent = request.headers.get("user-agent")
 
     result = handle_google_callback(db, token, user_info, ip_address, user_agent)
-    set_session_cookie(response, result["session"]["session_token"])
+    request.session.clear()
+    set_auth_cookies(response, result["tokens"])
     return result
 
 
@@ -127,7 +203,7 @@ def refresh_session(
     db: Session = Depends(get_db),
 ) -> RefreshSessionResponse:
     refreshed_session = refresh_user_session(db, current_session)
-    set_session_cookie(response, refreshed_session.session_token)
+    set_auth_cookies(response, serialize_session_tokens(refreshed_session))
     return {
         "message": "Session refreshed successfully",
         "session": serialize_session(refreshed_session),
@@ -136,12 +212,14 @@ def refresh_session(
 
 @router.post("/logout", response_model=MessageResponse)
 def logout(
+    request: Request,
     response: Response,
     current_session=Depends(get_current_session),
     db: Session = Depends(get_db),
 ) -> MessageResponse:
     logout_user_session(db, current_session)
-    clear_session_cookie(response)
+    request.session.clear()
+    clear_auth_cookies(response)
     return {"message": "Logout successful"}
 
 
@@ -167,7 +245,7 @@ def revoke_session(
     session = revoke_user_session_by_id(db, current_user.id, session_id)
 
     if session.id == current_session.id:
-        clear_session_cookie(response)
+        clear_auth_cookies(response)
 
     return {
         "message": "Session revoked successfully",

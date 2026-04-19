@@ -12,12 +12,16 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     debug=settings.DEBUG,
-    description="Backend API cho quizz vn"
+    description="Backend API cho quizz vn",
+    swagger_ui_parameters={
+        "withCredentials": True,
+    },
 )
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.SESSION_SECRET_KEY,
     https_only=settings.COOKIE_SECURE,
+    session_cookie=settings.OAUTH_SESSION_COOKIE_NAME,
 )
 app.add_middleware(
     CORSMiddleware,
