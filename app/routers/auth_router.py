@@ -51,6 +51,66 @@ oauth.register(
 )
 
 
+def _frontend_auth_callback_target() -> str:
+    return f"{settings.FRONTEND_URL}{settings.FRONTEND_AUTH_CALLBACK_PATH}"
+
+
+def _google_login_responses() -> dict:
+    return {
+        302: {
+            "description": (
+                "Redirects the browser to Google OAuth, stores a temporary "
+                f"`{settings.OAUTH_SESSION_COOKIE_NAME}` cookie for the OAuth handshake, "
+                "and requests `prompt=select_account` so Google shows the account chooser "
+                "when a Google session already exists."
+            ),
+            "headers": {
+                "Location": {
+                    "description": "Google OAuth authorization URL.",
+                    "schema": {"type": "string"},
+                },
+                "Set-Cookie": {
+                    "description": (
+                        f"Temporary `{settings.OAUTH_SESSION_COOKIE_NAME}` cookie used "
+                        "to validate the OAuth flow."
+                    ),
+                    "schema": {"type": "string"},
+                },
+            },
+        }
+    }
+
+
+def _google_callback_responses() -> dict:
+    frontend_callback = _frontend_auth_callback_target()
+    return {
+        302: {
+            "description": (
+                "Sets the auth cookies and redirects the browser back to the frontend "
+                f"callback at `{frontend_callback}`. On success the redirect query string "
+                "includes `provider=google` and `needs_onboarding=true|false`. On failure "
+                "the redirect query string includes `error=<code>`."
+            ),
+            "headers": {
+                "Location": {
+                    "description": (
+                        f"Frontend callback URL `{frontend_callback}`. Success query params: "
+                        "`provider`, `needs_onboarding`. Error query param: `error`."
+                    ),
+                    "schema": {"type": "string"},
+                },
+                "Set-Cookie": {
+                    "description": (
+                        f"HTTP-only auth cookies `{settings.SESSION_COOKIE_NAME}` and "
+                        f"`{settings.REFRESH_COOKIE_NAME}` are set before redirecting."
+                    ),
+                    "schema": {"type": "string"},
+                },
+            },
+        }
+    }
+
+
 def set_access_cookie(response: Response, tokens: dict) -> None:
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
@@ -153,19 +213,26 @@ def login(
 
 @router.get(
     "/google/login",
-    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-    responses={307: {"description": "Redirect to Google OAuth"}},
+    response_model=None,
+    status_code=status.HTTP_302_FOUND,
+    responses=_google_login_responses(),
 )
 async def google_login(request: Request) -> RedirectResponse:
     redirect_uri = settings.GOOGLE_REDIRECT_URI
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    redirect_response = await oauth.google.authorize_redirect(
+        request,
+        redirect_uri,
+        prompt=settings.GOOGLE_OAUTH_PROMPT,
+    )
+    redirect_response.status_code = status.HTTP_302_FOUND
+    return redirect_response
 
 
 @router.get(
     "/google/callback",
     response_model=None,
     status_code=status.HTTP_302_FOUND,
-    responses={302: {"description": "Set auth cookies and redirect to frontend"}},
+    responses=_google_callback_responses(),
 )
 async def google_callback(
     request: Request,
