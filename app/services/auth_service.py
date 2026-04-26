@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -21,9 +22,11 @@ from app.models.user_profile import UserProfile
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
+from app.services.email_verification_service import send_email_verification_email
 
 PENDING_ROLE_NAME = "pending"
 SELECTABLE_ROLE_NAMES = ("teacher", "student")
+logger = logging.getLogger(__name__)
 
 
 def _resolve_token_expires_at(token: dict):
@@ -481,8 +484,13 @@ def register_local_user(
     db.refresh(user)
     db.refresh(session)
 
+    try:
+        send_email_verification_email(user)
+    except Exception:
+        logger.exception("Failed to send email verification for user_id=%s", user.id)
+
     return {
-        "message": "Register successful",
+        "message": "Register successful. Please verify your email.",
         "user": build_user_payload(db, user),
         "session": serialize_session(session),
         "tokens": serialize_session_tokens(session),

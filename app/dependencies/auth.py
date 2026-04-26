@@ -1,8 +1,9 @@
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.database import get_db
+from app.models.user import User
 from app.services.auth_service import (
     get_session_by_token,
     get_session_by_refresh_token,
@@ -61,3 +62,39 @@ def get_refreshable_session(
 
 def get_current_user(session=Depends(get_current_session)):
     return session.user
+
+
+def get_current_student(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.id == current_user.id)
+        .first()
+    )
+    if not user or not user.role or user.role.name != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student role is required",
+        )
+    return user
+
+
+def get_current_teacher(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.id == current_user.id)
+        .first()
+    )
+    if not user or not user.role or user.role.name != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Teacher role is required",
+        )
+    return user

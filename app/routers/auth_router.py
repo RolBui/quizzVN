@@ -35,6 +35,11 @@ from app.services.auth_service import (
     serialize_session,
     serialize_session_tokens,
 )
+from app.services.email_verification_service import (
+    build_frontend_email_verification_redirect_url,
+    send_email_verification_email,
+    verify_email_token,
+)
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -106,6 +111,28 @@ def _google_callback_responses() -> dict:
                     ),
                     "schema": {"type": "string"},
                 },
+            },
+        }
+    }
+
+
+def _verify_email_responses() -> dict:
+    frontend_target = f"{settings.FRONTEND_URL}{settings.FRONTEND_EMAIL_VERIFICATION_PATH}"
+    return {
+        302: {
+            "description": (
+                "Verifies the email token and redirects the browser to the frontend "
+                f"verification page at `{frontend_target}` with a `status` query param. "
+                "Possible values include `verified`, `already_verified`, "
+                "`verification_token_invalid`, and `verification_token_expired`."
+            ),
+            "headers": {
+                "Location": {
+                    "description": (
+                        f"Frontend verification page `{frontend_target}` with `status=<value>`."
+                    ),
+                    "schema": {"type": "string"},
+                }
             },
         }
     }
@@ -264,6 +291,38 @@ async def google_callback(
     request.session.clear()
     set_auth_cookies(redirect_response, result["tokens"])
     return redirect_response
+
+
+@router.get(
+    "/verify-email",
+    response_model=None,
+    status_code=status.HTTP_302_FOUND,
+    responses=_verify_email_responses(),
+)
+def verify_email(
+    token: str,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    try:
+        verification_status = verify_email_token(db, token)
+    except HTTPException as exc:
+        verification_status = str(exc.detail)
+
+    return RedirectResponse(
+        url=build_frontend_email_verification_redirect_url(verification_status),
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.post("/email-verification/resend", response_model=MessageResponse)
+def resend_email_verification(
+    current_user=Depends(get_current_user),
+) -> MessageResponse:
+    if current_user.email_verified:
+        return {"message": "Email is already verified"}
+
+    send_email_verification_email(current_user)
+    return {"message": "Verification email sent"}
 
 
 @router.get("/me", response_model=MeResponse)

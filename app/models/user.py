@@ -36,3 +36,13 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    classroom_memberships = relationship(
+        "ClassroomMembership",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    exam_attempts = relationship(
+        "ExamAttempt",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

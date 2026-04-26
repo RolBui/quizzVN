@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,6 +28,18 @@ def _parse_bool(raw_value: str | None, default: bool = False) -> bool:
     return raw_value.strip().lower() == "true"
 
 
+def _derive_origin_from_url(url: str) -> str | None:
+    raw_url = url.strip()
+    if not raw_url:
+        return None
+
+    parsed = urlparse(raw_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _build_allowed_origins(
     frontend_url: str,
     raw_origins: str,
@@ -53,8 +66,17 @@ class Settings:
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "")
     GOOGLE_OAUTH_PROMPT: str = os.getenv("GOOGLE_OAUTH_PROMPT", "select_account").strip() or "select_account"
+    BACKEND_URL: str = _normalize_origin(
+        os.getenv(
+            "BACKEND_URL",
+            _derive_origin_from_url(os.getenv("GOOGLE_REDIRECT_URI", "")) or "http://localhost:8000",
+        )
+    )
     FRONTEND_URL: str = _normalize_origin(os.getenv("FRONTEND_URL", "http://localhost:3000"))
     FRONTEND_AUTH_CALLBACK_PATH: str = os.getenv("FRONTEND_AUTH_CALLBACK_PATH", "/auth/callback").strip() or "/auth/callback"
+    FRONTEND_EMAIL_VERIFICATION_PATH: str = (
+        os.getenv("FRONTEND_EMAIL_VERIFICATION_PATH", "/verify-email").strip() or "/verify-email"
+    )
     INCLUDE_LOCAL_DEV_CORS_ORIGINS: bool = _parse_bool(
         os.getenv("INCLUDE_LOCAL_DEV_CORS_ORIGINS"),
         True,
@@ -73,5 +95,18 @@ class Settings:
     SESSION_REFRESH_DAYS: int = int(os.getenv("SESSION_REFRESH_DAYS", "7"))
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "False").lower() == "true"
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
+    EMAIL_DELIVERY_MODE: str = os.getenv("EMAIL_DELIVERY_MODE", "log").strip().lower() or "log"
+    EMAIL_FROM_ADDRESS: str = os.getenv("EMAIL_FROM_ADDRESS", "").strip()
+    EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", APP_NAME).strip() or APP_NAME
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "").strip()
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME: str = os.getenv("SMTP_USERNAME", "").strip()
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    SMTP_USE_TLS: bool = _parse_bool(os.getenv("SMTP_USE_TLS"), True)
+    SMTP_USE_SSL: bool = _parse_bool(os.getenv("SMTP_USE_SSL"), False)
+    EMAIL_VERIFICATION_SECRET: str = (
+        os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET_KEY).strip() or SESSION_SECRET_KEY
+    )
+    EMAIL_VERIFICATION_EXPIRE_HOURS: int = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))
 
 settings = Settings()

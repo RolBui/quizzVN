@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.auth_router import router as auth_router
+from app.routers.student_router import router as student_router
+from app.routers.teacher_router import router as teacher_router
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.database import test_db_connection
 from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
 from app.services.auth_service import bootstrap_auth_storage
+from app.services.student_service import bootstrap_student_learning_storage
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -36,26 +39,29 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_bootstrap() -> None:
     bootstrap_auth_storage()
+    bootstrap_student_learning_storage()
 
-@app.get("/", response_model=RootResponse)
-def root() -> RootResponse:
-    return {
-        "message": "Quiz VN API "
-    }
-
-
-@app.get("/health", response_model=HealthResponse)
-def health_check() -> HealthResponse:
-    return {
-        "status": "ok"
-    }
+# @app.get("/", response_model=RootResponse)
+# def root() -> RootResponse:
+#     return {
+#         "message": "Quiz VN API "
+#     }
 
 
-@app.get("/db-check", response_model=DbCheckResponse)
-def db_check() -> DbCheckResponse:
-    result = test_db_connection()
-    return {
-        "database": "connected" if result else "failed"
-    }
+# @app.get("/health", response_model=HealthResponse)
+# def health_check() -> HealthResponse:
+#     return {
+#         "status": "ok"
+#     }
+
+
+# @app.get("/db-check", response_model=DbCheckResponse)
+# def db_check() -> DbCheckResponse:
+#     result = test_db_connection()
+#     return {
+#         "database": "connected" if result else "failed"
+#     }
 
 app.include_router(auth_router)
+app.include_router(student_router)
+app.include_router(teacher_router)
