@@ -48,11 +48,11 @@ def startup_bootstrap() -> None:
 #     }
 
 
-# @app.get("/health", response_model=HealthResponse)
-# def health_check() -> HealthResponse:
-#     return {
-#         "status": "ok"
-#     }
+@app.get("/health", response_model=HealthResponse)
+def health_check() -> HealthResponse:
+    return {
+        "status": "ok"
+    }
 
 
 # @app.get("/db-check", response_model=DbCheckResponse)
