@@ -28,6 +28,14 @@ def _parse_bool(raw_value: str | None, default: bool = False) -> bool:
     return raw_value.strip().lower() == "true"
 
 
+def _parse_session_expire_minutes() -> int:
+    raw_days = os.getenv("SESSION_EXPIRE_DAYS")
+    if raw_days is not None and raw_days.strip():
+        return int(raw_days.strip()) * 24 * 60
+
+    return int(os.getenv("SESSION_EXPIRE_MINUTES", "30"))
+
+
 def _derive_origin_from_url(url: str) -> str | None:
     raw_url = url.strip()
     if not raw_url:
@@ -91,7 +99,7 @@ class Settings:
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "session_token")
     OAUTH_SESSION_COOKIE_NAME: str = os.getenv("OAUTH_SESSION_COOKIE_NAME", "oauth_session")
     REFRESH_COOKIE_NAME: str = os.getenv("REFRESH_COOKIE_NAME", "refresh_token")
-    SESSION_EXPIRE_MINUTES: int = int(os.getenv("SESSION_EXPIRE_MINUTES", "30"))
+    SESSION_EXPIRE_MINUTES: int = _parse_session_expire_minutes()
     SESSION_REFRESH_DAYS: int = int(os.getenv("SESSION_REFRESH_DAYS", "7"))
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "False").lower() == "true"
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
