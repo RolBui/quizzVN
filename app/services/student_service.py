@@ -89,8 +89,8 @@ def _serialize_classroom(membership: ClassroomMembership) -> dict:
         "description": classroom.description,
         "join_code": classroom.join_code,
         "joined_at": membership.joined_at,
-        "exam_count": len(classroom.exams),
-        "document_count": len(classroom.documents),
+        "exam_count": len([exam for exam in classroom.exams if exam.is_published]),
+        "document_count": len([document for document in classroom.documents if document.is_published]),
     }
 
 
@@ -206,7 +206,7 @@ def list_student_exams(db: Session, student: User, scope: str, classroom_id: int
         db.query(Exam)
         .options(joinedload(Exam.classroom))
         .options(joinedload(Exam.questions))
-        .filter(Exam.scope == scope, Exam.is_active.is_(True))
+        .filter(Exam.scope == scope, Exam.is_published.is_(True))
     )
 
     if scope == SCOPE_CLASS:
@@ -229,6 +229,9 @@ def _get_visible_exam(db: Session, student: User, exam_id: int) -> Exam:
         .first()
     )
     if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    if not exam.is_published:
         raise HTTPException(status_code=404, detail="Exam not found")
 
     if exam.scope == SCOPE_CLASS:

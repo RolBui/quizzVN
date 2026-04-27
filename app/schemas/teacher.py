@@ -124,6 +124,7 @@ class TeacherExamSummarySchema(BaseModel):
     total_points: int
     question_count: int
     attempt_count: int
+    is_published: bool
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -154,6 +155,7 @@ class CreateTeacherExamRequest(BaseModel):
     title: str
     description: str | None = None
     duration_minutes: int = Field(default=30, ge=1)
+    is_published: bool = False
     is_active: bool = False
     questions: list[TeacherExamQuestionInput]
 
@@ -164,6 +166,7 @@ class UpdateTeacherExamRequest(BaseModel):
     scope: TeacherScope | None = None
     classroom_id: int | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
+    is_published: bool | None = None
     is_active: bool | None = None
     questions: list[TeacherExamQuestionInput] | None = None
 

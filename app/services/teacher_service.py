@@ -456,6 +456,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "total_points": _get_exam_total_points(exam),
         "question_count": len(exam.questions),
         "attempt_count": len(exam.attempts),
+        "is_published": exam.is_published,
         "is_active": exam.is_active,
         "created_at": exam.created_at,
         "updated_at": exam.updated_at,
@@ -625,6 +626,7 @@ def create_teacher_exam(
     scope: str,
     classroom_id: int | None,
     duration_minutes: int,
+    is_published: bool,
     is_active: bool,
     questions: list[dict],
 ) -> dict:
@@ -643,6 +645,7 @@ def create_teacher_exam(
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
         total_points=0,
+        is_published=is_published,
         is_active=is_active,
         created_at=utc_now(),
         updated_at=utc_now(),
@@ -667,6 +670,7 @@ def update_teacher_exam(
     scope: str | None,
     classroom_id: int | None,
     duration_minutes: int | None,
+    is_published: bool | None,
     is_active: bool | None,
     questions: list[dict] | None,
 ) -> dict:
@@ -691,6 +695,9 @@ def update_teacher_exam(
 
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes
+
+    if is_published is not None:
+        exam.is_published = is_published
 
     if is_active is not None:
         exam.is_active = is_active
@@ -733,15 +740,15 @@ def set_teacher_exam_visibility(
     db: Session,
     teacher: User,
     exam_id: int,
-    is_active: bool,
+    is_published: bool,
 ) -> dict:
     exam = _get_teacher_exam(db, teacher, exam_id)
-    exam.is_active = is_active
+    exam.is_published = is_published
     exam.updated_at = utc_now()
     db.commit()
     db.refresh(exam)
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
-        "message": "Exam published successfully" if is_active else "Exam set to private successfully",
+        "message": "Exam published successfully" if is_published else "Exam set to private successfully",
         "exam": _serialize_exam_detail(exam),
     }

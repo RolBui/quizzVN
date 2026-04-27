@@ -196,6 +196,7 @@ def post_teacher_system_exam(
         "system",
         None,
         payload.duration_minutes,
+        payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
     )
@@ -216,6 +217,7 @@ def post_teacher_class_exam(
         "class",
         class_id,
         payload.duration_minutes,
+        payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
     )
@@ -238,6 +240,7 @@ def put_teacher_exam(
         payload.scope,
         payload.classroom_id,
         payload.duration_minutes,
+        payload.is_published,
         payload.is_active,
         questions,
     )
