@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 TeacherScope = Literal["system", "class"]
+TeacherQuestionType = Literal["single_choice", "text"]
 
 
 class TeacherClassSchema(BaseModel):
@@ -107,10 +108,12 @@ class TeacherExamOptionSchema(BaseModel):
 
 class TeacherExamQuestionSchema(BaseModel):
     id: int
+    question_type: TeacherQuestionType
     order_index: int
     prompt: str
     points: int
     options: list[TeacherExamOptionSchema]
+    accepted_answers: list[str]
 
 
 class TeacherExamSummarySchema(BaseModel):
@@ -145,10 +148,12 @@ class TeacherExamOptionInput(BaseModel):
 
 
 class TeacherExamQuestionInput(BaseModel):
+    question_type: TeacherQuestionType = "single_choice"
     prompt: str
     order_index: int | None = None
     points: int = Field(default=1, ge=1)
-    options: list[TeacherExamOptionInput]
+    options: list[TeacherExamOptionInput] = Field(default_factory=list)
+    accepted_answers: list[str] = Field(default_factory=list)
 
 
 class CreateTeacherExamRequest(BaseModel):

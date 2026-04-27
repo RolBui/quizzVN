@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 StudentScope = Literal["system", "class"]
 AttemptStatus = Literal["in_progress", "submitted"]
+StudentQuestionType = Literal["single_choice", "text"]
 
 
 class StudentClassSchema(BaseModel):
@@ -54,6 +55,7 @@ class StudentExamOptionSchema(BaseModel):
 
 class StudentExamQuestionSchema(BaseModel):
     id: int
+    question_type: StudentQuestionType
     order_index: int
     prompt: str
     points: int
@@ -103,6 +105,7 @@ class StartAttemptResponse(BaseModel):
 class AttemptAnswerInput(BaseModel):
     question_id: int
     selected_option_id: int | None = None
+    answer_text: str | None = None
 
 
 class SaveAttemptAnswersRequest(BaseModel):
@@ -116,11 +119,14 @@ class SaveAttemptAnswersResponse(BaseModel):
 
 class AttemptResultAnswerSchema(BaseModel):
     question_id: int
+    question_type: StudentQuestionType
     prompt: str
     selected_option_id: int | None = None
     selected_option_text: str | None = None
+    submitted_answer_text: str | None = None
     correct_option_id: int | None = None
     correct_option_text: str | None = None
+    accepted_answers: list[str]
     is_correct: bool
     points_earned: int
     max_points: int

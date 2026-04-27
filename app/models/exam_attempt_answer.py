@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -15,6 +15,7 @@ class ExamAttemptAnswer(Base):
     attempt_id = Column(Integer, ForeignKey("exam_attempts.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("exam_questions.id"), nullable=False)
     selected_option_id = Column(Integer, ForeignKey("exam_question_options.id"), nullable=True)
+    answer_text = Column(Text, nullable=True)
     answered_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     attempt = relationship("ExamAttempt", back_populates="answers")

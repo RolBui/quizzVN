@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -9,6 +9,7 @@ class ExamQuestion(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
+    question_type = Column(String, nullable=False, default="single_choice")
     prompt = Column(Text, nullable=False)
     order_index = Column(Integer, nullable=False)
     points = Column(Integer, nullable=False, default=1)

@@ -1,5 +1,6 @@
 import secrets
 import string
+import unicodedata
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -18,6 +19,8 @@ TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
 SCOPE_SYSTEM = "system"
 SCOPE_CLASS = "class"
+QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+QUESTION_TYPE_TEXT = "text"
 
 
 def require_teacher_user(db: Session, user_id: int) -> User:
@@ -468,6 +471,7 @@ def _serialize_exam_detail(exam: Exam) -> dict:
     detail["questions"] = [
         {
             "id": question.id,
+            "question_type": _normalize_question_type(question.question_type),
             "order_index": question.order_index,
             "prompt": question.prompt,
             "points": question.points,
@@ -479,7 +483,15 @@ def _serialize_exam_detail(exam: Exam) -> dict:
                     "is_correct": option.is_correct,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
+                if _normalize_question_type(question.question_type) == QUESTION_TYPE_SINGLE_CHOICE
             ],
+            "accepted_answers": [
+                option.option_text
+                for option in sorted(question.options, key=lambda item: item.id)
+                if option.is_correct
+            ]
+            if _normalize_question_type(question.question_type) == QUESTION_TYPE_TEXT
+            else [],
         }
         for question in sorted(exam.questions, key=lambda item: item.order_index)
     ]
@@ -546,46 +558,75 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
 
     normalized_questions: list[dict] = []
     for index, question in enumerate(questions, start=1):
+        question_type = _normalize_question_type(question.get("question_type"))
         prompt = question["prompt"].strip()
         if not prompt:
             raise HTTPException(status_code=400, detail=f"Question {index} prompt is required")
 
         points = question["points"]
-        options = question["options"]
-        if len(options) < 2:
-            raise HTTPException(status_code=400, detail=f"Question {index} must have at least 2 options")
-
-        correct_options = [option for option in options if option["is_correct"]]
-        if len(correct_options) != 1:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Question {index} must have exactly 1 correct option",
-            )
-
         normalized_options = []
-        for option_index, option in enumerate(options, start=1):
-            option_key = option["option_key"].strip()
-            option_text = option["option_text"].strip()
-            if not option_key:
+        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+            options = question["options"]
+            if len(options) < 2:
+                raise HTTPException(status_code=400, detail=f"Question {index} must have at least 2 options")
+
+            correct_options = [option for option in options if option["is_correct"]]
+            if len(correct_options) != 1:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Question {index} option {option_index} key is required",
+                    detail=f"Question {index} must have exactly 1 correct option",
                 )
-            if not option_text:
+
+            for option_index, option in enumerate(options, start=1):
+                option_key = option["option_key"].strip()
+                option_text = option["option_text"].strip()
+                if not option_key:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Question {index} option {option_index} key is required",
+                    )
+                if not option_text:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Question {index} option {option_index} text is required",
+                    )
+                normalized_options.append(
+                    {
+                        "option_key": option_key,
+                        "option_text": option_text,
+                        "is_correct": option["is_correct"],
+                    }
+                )
+        else:
+            accepted_answers = question.get("accepted_answers") or []
+            if not accepted_answers:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Question {index} option {option_index} text is required",
+                    detail=f"Question {index} must have at least 1 accepted answer",
                 )
-            normalized_options.append(
-                {
-                    "option_key": option_key,
-                    "option_text": option_text,
-                    "is_correct": option["is_correct"],
-                }
-            )
+
+            seen_answers: set[str] = set()
+            for answer_index, answer in enumerate(accepted_answers, start=1):
+                normalized_answer = _normalize_text_answer(answer)
+                if not normalized_answer:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Question {index} accepted answer {answer_index} cannot be empty",
+                    )
+                if normalized_answer in seen_answers:
+                    continue
+                seen_answers.add(normalized_answer)
+                normalized_options.append(
+                    {
+                        "option_key": f"TEXT_{len(normalized_options) + 1}",
+                        "option_text": answer.strip(),
+                        "is_correct": True,
+                    }
+                )
 
         normalized_questions.append(
             {
+                "question_type": question_type,
                 "prompt": prompt,
                 "order_index": question.get("order_index") or index,
                 "points": points,
@@ -601,6 +642,7 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> int:
     exam.questions.clear()
     for question in questions:
         exam_question = ExamQuestion(
+            question_type=question["question_type"],
             prompt=question["prompt"],
             order_index=question["order_index"],
             points=question["points"],
@@ -616,6 +658,20 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> int:
         exam.questions.append(exam_question)
         total_points += question["points"]
     return total_points
+
+
+def _normalize_question_type(question_type: str | None) -> str:
+    if question_type == QUESTION_TYPE_TEXT:
+        return QUESTION_TYPE_TEXT
+    return QUESTION_TYPE_SINGLE_CHOICE
+
+
+def _normalize_text_answer(value: str | None) -> str:
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFKC", str(value))
+    normalized = " ".join(normalized.strip().lower().split())
+    return normalized
 
 
 def create_teacher_exam(

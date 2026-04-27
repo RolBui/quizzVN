@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+import unicodedata
 
 from app.core.security import utc_now
 from app.database import engine
@@ -18,6 +19,8 @@ SCOPE_SYSTEM = "system"
 SCOPE_CLASS = "class"
 ATTEMPT_STATUS_IN_PROGRESS = "in_progress"
 ATTEMPT_STATUS_SUBMITTED = "submitted"
+QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+QUESTION_TYPE_TEXT = "text"
 
 
 def bootstrap_student_learning_storage() -> None:
@@ -199,6 +202,20 @@ def _serialize_exam_summary(exam: Exam) -> dict:
     }
 
 
+def _normalize_question_type(question_type: str | None) -> str:
+    if question_type == QUESTION_TYPE_TEXT:
+        return QUESTION_TYPE_TEXT
+    return QUESTION_TYPE_SINGLE_CHOICE
+
+
+def _normalize_text_answer(value: str | None) -> str:
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFKC", str(value))
+    normalized = " ".join(normalized.strip().lower().split())
+    return normalized
+
+
 def list_student_exams(db: Session, student: User, scope: str, classroom_id: int | None) -> dict:
     _validate_scope(scope, classroom_id)
 
@@ -259,6 +276,7 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
     detail["questions"] = [
         {
             "id": question.id,
+            "question_type": _normalize_question_type(question.question_type),
             "order_index": question.order_index,
             "prompt": question.prompt,
             "points": question.points,
@@ -269,6 +287,7 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
                     "option_text": option.option_text,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
+                if _normalize_question_type(question.question_type) == QUESTION_TYPE_SINGLE_CHOICE
             ],
         }
         for question in sorted(exam.questions, key=lambda item: item.order_index)
@@ -291,7 +310,13 @@ def _get_attempt_for_student(db: Session, student: User, attempt_id: int) -> Exa
 
 
 def _serialize_attempt_summary(attempt: ExamAttempt) -> dict:
-    answered_count = len([answer for answer in attempt.answers if answer.selected_option_id is not None])
+    answered_count = len(
+        [
+            answer
+            for answer in attempt.answers
+            if answer.selected_option_id is not None or _normalize_text_answer(answer.answer_text)
+        ]
+    )
     return {
         "id": attempt.id,
         "exam_id": attempt.exam_id,
@@ -368,17 +393,31 @@ def save_student_attempt_answers(
     for answer_input in answers:
         question_id = answer_input["question_id"]
         selected_option_id = answer_input.get("selected_option_id")
+        answer_text = answer_input.get("answer_text")
         question = question_map.get(question_id)
         if not question:
             raise HTTPException(status_code=400, detail=f"Question {question_id} does not belong to this exam")
 
-        if selected_option_id is not None and not any(
-            option.id == selected_option_id for option in question.options
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Option {selected_option_id} does not belong to question {question_id}",
-            )
+        question_type = _normalize_question_type(question.question_type)
+        normalized_answer_text = answer_text.strip() if isinstance(answer_text, str) else None
+
+        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+            if selected_option_id is not None and not any(
+                option.id == selected_option_id for option in question.options
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Option {selected_option_id} does not belong to question {question_id}",
+                )
+            normalized_answer_text = None
+        else:
+            if selected_option_id is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Question {question_id} only accepts text answers",
+                )
+            if normalized_answer_text == "":
+                normalized_answer_text = None
 
         attempt_answer = existing_answers.get(question_id)
         if not attempt_answer:
@@ -386,12 +425,14 @@ def save_student_attempt_answers(
                 attempt_id=attempt.id,
                 question_id=question_id,
                 selected_option_id=selected_option_id,
+                answer_text=normalized_answer_text,
                 answered_at=utc_now(),
             )
             db.add(attempt_answer)
             continue
 
         attempt_answer.selected_option_id = selected_option_id
+        attempt_answer.answer_text = normalized_answer_text
         attempt_answer.answered_at = utc_now()
 
     attempt.updated_at = utc_now()
@@ -409,22 +450,34 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
     result_answers = []
 
     for question in sorted(attempt.exam.questions, key=lambda item: item.order_index):
-        correct_option = next((option for option in question.options if option.is_correct), None)
+        question_type = _normalize_question_type(question.question_type)
+        correct_options = [option for option in question.options if option.is_correct]
+        correct_option = correct_options[0] if correct_options else None
         selected_answer = answer_map.get(question.id)
         selected_option = selected_answer.selected_option if selected_answer else None
-        is_correct = bool(
-            selected_option
-            and correct_option
-            and selected_option.id == correct_option.id
-        )
+        normalized_submitted_text = _normalize_text_answer(selected_answer.answer_text if selected_answer else None)
+        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+            is_correct = bool(
+                selected_option
+                and correct_option
+                and selected_option.id == correct_option.id
+            )
+        else:
+            accepted_answers = {_normalize_text_answer(option.option_text) for option in correct_options}
+            is_correct = bool(normalized_submitted_text and normalized_submitted_text in accepted_answers)
         result_answers.append(
             {
                 "question_id": question.id,
+                "question_type": question_type,
                 "prompt": question.prompt,
                 "selected_option_id": selected_option.id if selected_option else None,
                 "selected_option_text": selected_option.option_text if selected_option else None,
+                "submitted_answer_text": selected_answer.answer_text if selected_answer else None,
                 "correct_option_id": correct_option.id if correct_option else None,
                 "correct_option_text": correct_option.option_text if correct_option else None,
+                "accepted_answers": [option.option_text for option in correct_options]
+                if question_type == QUESTION_TYPE_TEXT
+                else [],
                 "is_correct": is_correct,
                 "points_earned": question.points if is_correct else 0,
                 "max_points": question.points,
@@ -460,14 +513,23 @@ def submit_student_attempt(db: Session, student: User, attempt_id: int) -> dict:
     correct_answers_count = 0
 
     for question in attempt.exam.questions:
-        correct_option = next((option for option in question.options if option.is_correct), None)
+        question_type = _normalize_question_type(question.question_type)
+        correct_options = [option for option in question.options if option.is_correct]
+        correct_option = correct_options[0] if correct_options else None
         selected_answer = answer_map.get(question.id)
         selected_option = selected_answer.selected_option if selected_answer else None
-        is_correct = bool(
-            selected_option
-            and correct_option
-            and selected_option.id == correct_option.id
-        )
+        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+            is_correct = bool(
+                selected_option
+                and correct_option
+                and selected_option.id == correct_option.id
+            )
+        else:
+            accepted_answers = {_normalize_text_answer(option.option_text) for option in correct_options}
+            is_correct = bool(
+                selected_answer
+                and _normalize_text_answer(selected_answer.answer_text) in accepted_answers
+            )
         if is_correct:
             score += question.points
             correct_answers_count += 1
