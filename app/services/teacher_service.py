@@ -447,6 +447,8 @@ def _get_exam_total_points(exam: Exam) -> int:
 
 
 def _get_exam_preview_image_url(exam: Exam) -> str | None:
+    if exam.image_url:
+        return exam.image_url
     for question in sorted(exam.questions, key=lambda item: item.order_index):
         if question.image_url:
             return question.image_url
@@ -459,7 +461,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "id": exam.id,
         "title": exam.title,
         "description": exam.description,
-        "image_url": _get_exam_preview_image_url(exam),
+        "image_url": exam.image_url or _get_exam_preview_image_url(exam),
         "scope": exam.scope,
         "classroom_id": exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
@@ -698,6 +700,7 @@ def create_teacher_exam(
     teacher: User,
     title: str,
     description: str | None,
+    image_url: str | None,
     scope: str,
     classroom_id: int | None,
     duration_minutes: int,
@@ -707,6 +710,7 @@ def create_teacher_exam(
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
     normalized_title = title.strip()
+    normalized_image_url = image_url.strip() if image_url else None
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
 
@@ -716,6 +720,7 @@ def create_teacher_exam(
         created_by_user_id=teacher.id,
         title=normalized_title,
         description=description.strip() if description else None,
+        image_url=normalized_image_url or None,
         scope=scope,
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
@@ -742,6 +747,7 @@ def update_teacher_exam(
     exam_id: int,
     title: str | None,
     description: str | None,
+    image_url: str | None,
     scope: str | None,
     classroom_id: int | None,
     duration_minutes: int | None,
@@ -767,6 +773,9 @@ def update_teacher_exam(
 
     if description is not None:
         exam.description = description.strip() if description else None
+
+    if image_url is not None:
+        exam.image_url = image_url.strip() or None
 
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes

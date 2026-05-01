@@ -12,6 +12,7 @@ class Exam(Base):
     created_by_user_id = Column("created_by", Integer, ForeignKey("users.id"), nullable=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
+    image_url = Column(Text, nullable=True)
     scope = Column(String, nullable=False)
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True)
     duration_minutes = Column(Integer, nullable=False, default=30)

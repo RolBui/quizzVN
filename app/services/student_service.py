@@ -193,6 +193,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "id": exam.id,
         "title": exam.title,
         "description": exam.description,
+        "image_url": exam.image_url or _get_exam_preview_image_url(exam),
         "scope": exam.scope,
         "classroom_id": exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
@@ -204,6 +205,8 @@ def _serialize_exam_summary(exam: Exam) -> dict:
 
 
 def _get_exam_preview_image_url(exam: Exam) -> str | None:
+    if exam.image_url:
+        return exam.image_url
     for question in sorted(exam.questions, key=lambda item: item.order_index):
         if question.image_url:
             return question.image_url
@@ -229,7 +232,7 @@ def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
         "exam_description": attempt.exam.description,
-        "exam_image_url": _get_exam_preview_image_url(attempt.exam),
+        "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "scope": attempt.exam.scope,
         "classroom_id": attempt.exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
@@ -587,6 +590,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
         "attempt_id": attempt.id,
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
+        "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "status": attempt.status,
         "score": attempt.score or 0,
         "total_points": attempt.total_points or _get_exam_total_points(attempt.exam),

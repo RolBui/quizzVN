@@ -164,6 +164,7 @@ class TeacherExamQuestionInput(BaseModel):
 class CreateTeacherExamRequest(BaseModel):
     title: str
     description: str | None = None
+    image_url: str | None = None
     duration_minutes: int = Field(default=30, ge=1)
     is_published: bool = False
     is_active: bool = False
@@ -173,6 +174,7 @@ class CreateTeacherExamRequest(BaseModel):
 class UpdateTeacherExamRequest(BaseModel):
     title: str | None = None
     description: str | None = None
+    image_url: str | None = None
     scope: TeacherScope | None = None
     classroom_id: int | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
