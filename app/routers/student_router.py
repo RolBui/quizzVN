@@ -14,6 +14,7 @@ from app.schemas.student import (
     StudentDocumentListResponse,
     StudentExamDetailSchema,
     StudentExamListResponse,
+    StudentExamResultListResponse,
     SubmitAttemptResponse,
 )
 from app.services.student_service import (
@@ -23,6 +24,7 @@ from app.services.student_service import (
     list_student_classes,
     list_student_documents,
     list_student_exams,
+    list_student_exam_results,
     save_student_attempt_answers,
     start_student_exam_attempt,
     submit_student_attempt,
@@ -80,6 +82,31 @@ def get_class_exams(
     current_student=Depends(get_current_student),
 ) -> StudentExamListResponse:
     return list_student_exams(db, current_student, "class", class_id)
+
+
+@router.get("/results", response_model=StudentExamResultListResponse)
+def get_exam_results(
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentExamResultListResponse:
+    return list_student_exam_results(db, current_student)
+
+
+@router.get("/system/results", response_model=StudentExamResultListResponse)
+def get_system_exam_results(
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentExamResultListResponse:
+    return list_student_exam_results(db, current_student, "system", None)
+
+
+@router.get("/classes/{class_id}/results", response_model=StudentExamResultListResponse)
+def get_class_exam_results(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentExamResultListResponse:
+    return list_student_exam_results(db, current_student, "class", class_id)
 
 
 @router.get("/exams/{exam_id}", response_model=StudentExamDetailSchema)

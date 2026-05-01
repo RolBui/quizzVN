@@ -21,6 +21,7 @@ ATTEMPT_STATUS_IN_PROGRESS = "in_progress"
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
 QUESTION_TYPE_TEXT = "text"
+PASSING_SCORE_PERCENT = 50.0
 
 
 def bootstrap_student_learning_storage() -> None:
@@ -202,6 +203,47 @@ def _serialize_exam_summary(exam: Exam) -> dict:
     }
 
 
+def _get_exam_preview_image_url(exam: Exam) -> str | None:
+    for question in sorted(exam.questions, key=lambda item: item.order_index):
+        if question.image_url:
+            return question.image_url
+    return None
+
+
+def _calculate_score_percent(score: int | None, total_points: int | None) -> float:
+    normalized_total_points = total_points or 0
+    if normalized_total_points <= 0:
+        return 0.0
+    normalized_score = score or 0
+    return round((normalized_score / normalized_total_points) * 100, 2)
+
+
+def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
+    score = attempt.score or 0
+    total_points = attempt.total_points or _get_exam_total_points(attempt.exam)
+    score_percent = _calculate_score_percent(score, total_points)
+    correct_answers_count = attempt.correct_answers_count or 0
+    classroom = attempt.exam.classroom
+    return {
+        "attempt_id": attempt.id,
+        "exam_id": attempt.exam.id,
+        "exam_title": attempt.exam.title,
+        "exam_description": attempt.exam.description,
+        "exam_image_url": _get_exam_preview_image_url(attempt.exam),
+        "scope": attempt.exam.scope,
+        "classroom_id": attempt.exam.classroom_id,
+        "classroom_name": classroom.name if classroom else None,
+        "score": score,
+        "total_points": total_points,
+        "score_percent": score_percent,
+        "correct_answers_count": correct_answers_count,
+        "total_questions": len(attempt.exam.questions),
+        "is_passed": score_percent >= PASSING_SCORE_PERCENT,
+        "started_at": attempt.started_at,
+        "submitted_at": attempt.submitted_at,
+    }
+
+
 def _normalize_question_type(question_type: str | None) -> str:
     if question_type == QUESTION_TYPE_TEXT:
         return QUESTION_TYPE_TEXT
@@ -235,6 +277,58 @@ def list_student_exams(db: Session, student: User, scope: str, classroom_id: int
 
     exams = query.order_by(Exam.created_at.desc()).all()
     return {"items": [_serialize_exam_summary(exam) for exam in exams]}
+
+
+def list_student_exam_results(
+    db: Session,
+    student: User,
+    scope: str | None = None,
+    classroom_id: int | None = None,
+) -> dict:
+    if scope is not None:
+        _validate_scope(scope, classroom_id)
+
+    query = (
+        db.query(ExamAttempt)
+        .join(ExamAttempt.exam)
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.classroom))
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions))
+        .filter(
+            ExamAttempt.user_id == student.id,
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+        )
+    )
+
+    if scope == SCOPE_CLASS:
+        _require_class_membership(db, student.id, classroom_id)
+        query = query.filter(
+            Exam.scope == SCOPE_CLASS,
+            Exam.classroom_id == classroom_id,
+        )
+    elif scope == SCOPE_SYSTEM:
+        query = query.filter(
+            Exam.scope == SCOPE_SYSTEM,
+            Exam.classroom_id.is_(None),
+        )
+
+    attempts = query.order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.id.desc()).all()
+
+    items = [_serialize_attempt_history_item(attempt) for attempt in attempts]
+    total_completed_exams = len(items)
+    passed_exams = len([item for item in items if item["is_passed"]])
+    average_score_percent = round(
+        sum(item["score_percent"] for item in items) / total_completed_exams,
+        2,
+    ) if total_completed_exams else 0.0
+
+    return {
+        "summary": {
+            "total_completed_exams": total_completed_exams,
+            "passed_exams": passed_exams,
+            "average_score_percent": average_score_percent,
+        },
+        "items": items,
+    }
 
 
 def _get_visible_exam(db: Session, student: User, exam_id: int) -> Exam:
@@ -279,12 +373,14 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
             "question_type": _normalize_question_type(question.question_type),
             "order_index": question.order_index,
             "prompt": question.prompt,
+            "image_url": question.image_url,
             "points": question.points,
             "options": [
                 {
                     "id": option.id,
                     "option_key": option.option_key,
                     "option_text": option.option_text,
+                    "image_url": option.image_url,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
                 if _normalize_question_type(question.question_type) == QUESTION_TYPE_SINGLE_CHOICE
@@ -470,11 +566,14 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
                 "question_id": question.id,
                 "question_type": question_type,
                 "prompt": question.prompt,
+                "question_image_url": question.image_url,
                 "selected_option_id": selected_option.id if selected_option else None,
                 "selected_option_text": selected_option.option_text if selected_option else None,
+                "selected_option_image_url": selected_option.image_url if selected_option else None,
                 "submitted_answer_text": selected_answer.answer_text if selected_answer else None,
                 "correct_option_id": correct_option.id if correct_option else None,
                 "correct_option_text": correct_option.option_text if correct_option else None,
+                "correct_option_image_url": correct_option.image_url if correct_option else None,
                 "accepted_answers": [option.option_text for option in correct_options]
                 if question_type == QUESTION_TYPE_TEXT
                 else [],

@@ -446,12 +446,20 @@ def _get_exam_total_points(exam: Exam) -> int:
     return computed_total if computed_total > 0 else exam.total_points
 
 
+def _get_exam_preview_image_url(exam: Exam) -> str | None:
+    for question in sorted(exam.questions, key=lambda item: item.order_index):
+        if question.image_url:
+            return question.image_url
+    return None
+
+
 def _serialize_exam_summary(exam: Exam) -> dict:
     classroom = exam.classroom
     return {
         "id": exam.id,
         "title": exam.title,
         "description": exam.description,
+        "image_url": _get_exam_preview_image_url(exam),
         "scope": exam.scope,
         "classroom_id": exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
@@ -474,12 +482,14 @@ def _serialize_exam_detail(exam: Exam) -> dict:
             "question_type": _normalize_question_type(question.question_type),
             "order_index": question.order_index,
             "prompt": question.prompt,
+            "image_url": question.image_url,
             "points": question.points,
             "options": [
                 {
                     "id": option.id,
                     "option_key": option.option_key,
                     "option_text": option.option_text,
+                    "image_url": option.image_url,
                     "is_correct": option.is_correct,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
@@ -559,9 +569,13 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
     normalized_questions: list[dict] = []
     for index, question in enumerate(questions, start=1):
         question_type = _normalize_question_type(question.get("question_type"))
-        prompt = question["prompt"].strip()
-        if not prompt:
-            raise HTTPException(status_code=400, detail=f"Question {index} prompt is required")
+        prompt = (question.get("prompt") or "").strip()
+        question_image_url = (question.get("image_url") or "").strip() or None
+        if not prompt and not question_image_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {index} must include prompt or image_url",
+            )
 
         points = question["points"]
         normalized_options = []
@@ -579,21 +593,23 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
 
             for option_index, option in enumerate(options, start=1):
                 option_key = option["option_key"].strip()
-                option_text = option["option_text"].strip()
+                option_text = (option.get("option_text") or "").strip()
+                option_image_url = (option.get("image_url") or "").strip() or None
                 if not option_key:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Question {index} option {option_index} key is required",
                     )
-                if not option_text:
+                if not option_text and not option_image_url:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Question {index} option {option_index} text is required",
+                        detail=f"Question {index} option {option_index} must include option_text or image_url",
                     )
                 normalized_options.append(
                     {
                         "option_key": option_key,
                         "option_text": option_text,
+                        "image_url": option_image_url,
                         "is_correct": option["is_correct"],
                     }
                 )
@@ -628,6 +644,7 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
             {
                 "question_type": question_type,
                 "prompt": prompt,
+                "image_url": question_image_url,
                 "order_index": question.get("order_index") or index,
                 "points": points,
                 "options": normalized_options,
@@ -644,6 +661,7 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> int:
         exam_question = ExamQuestion(
             question_type=question["question_type"],
             prompt=question["prompt"],
+            image_url=question.get("image_url"),
             order_index=question["order_index"],
             points=question["points"],
         )
@@ -652,6 +670,7 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> int:
                 ExamQuestionOption(
                     option_key=option["option_key"],
                     option_text=option["option_text"],
+                    image_url=option.get("image_url"),
                     is_correct=option["is_correct"],
                 )
             )

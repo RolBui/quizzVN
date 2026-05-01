@@ -51,6 +51,7 @@ class StudentExamOptionSchema(BaseModel):
     id: int
     option_key: str
     option_text: str
+    image_url: str | None = None
 
 
 class StudentExamQuestionSchema(BaseModel):
@@ -58,6 +59,7 @@ class StudentExamQuestionSchema(BaseModel):
     question_type: StudentQuestionType
     order_index: int
     prompt: str
+    image_url: str | None = None
     points: int
     options: list[StudentExamOptionSchema]
 
@@ -82,6 +84,36 @@ class StudentExamListResponse(BaseModel):
 class StudentExamDetailSchema(StudentExamSummarySchema):
     questions: list[StudentExamQuestionSchema]
     in_progress_attempt_id: int | None = None
+
+
+class StudentExamResultSummarySchema(BaseModel):
+    total_completed_exams: int
+    passed_exams: int
+    average_score_percent: float
+
+
+class StudentExamResultListItemSchema(BaseModel):
+    attempt_id: int
+    exam_id: int
+    exam_title: str
+    exam_description: str | None = None
+    exam_image_url: str | None = None
+    scope: StudentScope
+    classroom_id: int | None = None
+    classroom_name: str | None = None
+    score: int
+    total_points: int
+    score_percent: float
+    correct_answers_count: int
+    total_questions: int
+    is_passed: bool
+    started_at: datetime
+    submitted_at: datetime
+
+
+class StudentExamResultListResponse(BaseModel):
+    summary: StudentExamResultSummarySchema
+    items: list[StudentExamResultListItemSchema]
 
 
 class AttemptSummarySchema(BaseModel):
@@ -121,11 +153,14 @@ class AttemptResultAnswerSchema(BaseModel):
     question_id: int
     question_type: StudentQuestionType
     prompt: str
+    question_image_url: str | None = None
     selected_option_id: int | None = None
     selected_option_text: str | None = None
+    selected_option_image_url: str | None = None
     submitted_answer_text: str | None = None
     correct_option_id: int | None = None
     correct_option_text: str | None = None
+    correct_option_image_url: str | None = None
     accepted_answers: list[str]
     is_correct: bool
     points_earned: int

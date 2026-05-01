@@ -11,6 +11,7 @@ class ExamQuestionOption(Base):
     question_id = Column(Integer, ForeignKey("exam_questions.id"), nullable=False)
     option_key = Column(String, nullable=False)
     option_text = Column(Text, nullable=False)
+    image_url = Column(Text, nullable=True)
     is_correct = Column(Boolean, nullable=False, default=False)
 
     question = relationship("ExamQuestion", back_populates="options")

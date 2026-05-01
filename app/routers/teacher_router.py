@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -16,11 +16,13 @@ from app.schemas.teacher import (
     TeacherExamDetailSchema,
     TeacherExamListResponse,
     TeacherExamResponse,
+    TeacherImageUploadResponse,
     TeacherStudentListResponse,
     TeacherStudentResponse,
     UpdateTeacherDocumentRequest,
     UpdateTeacherExamRequest,
 )
+from app.services.media_service import save_exam_image
 from app.services.teacher_service import (
     add_student_to_teacher_class,
     create_teacher_class,
@@ -63,6 +65,19 @@ def post_teacher_class(
         payload.description,
         payload.join_code,
     )
+
+
+@router.post("/exams/images", response_model=TeacherImageUploadResponse)
+def post_teacher_exam_image(
+    image: UploadFile = File(...),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherImageUploadResponse:
+    # Auth guard happens through dependency; the uploaded file is stored in Cloudinary and returned as a public URL.
+    _ = current_teacher
+    return {
+        "message": "Image uploaded successfully",
+        "image": save_exam_image(image),
+    }
 
 
 @router.get("/students", response_model=TeacherStudentListResponse)

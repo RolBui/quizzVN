@@ -116,5 +116,11 @@ class Settings:
         os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET_KEY).strip() or SESSION_SECRET_KEY
     )
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))
+    MAX_IMAGE_UPLOAD_BYTES: int = int(os.getenv("MAX_IMAGE_UPLOAD_BYTES", str(5 * 1024 * 1024)))
+    CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "").strip()
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "").strip()
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "").strip()
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "").strip()
+    CLOUDINARY_UPLOAD_FOLDER: str = os.getenv("CLOUDINARY_UPLOAD_FOLDER", "quiz/exam-images").strip() or "quiz/exam-images"
 
 settings = Settings()

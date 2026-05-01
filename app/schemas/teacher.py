@@ -103,6 +103,7 @@ class TeacherExamOptionSchema(BaseModel):
     id: int
     option_key: str
     option_text: str
+    image_url: str | None = None
     is_correct: bool
 
 
@@ -111,6 +112,7 @@ class TeacherExamQuestionSchema(BaseModel):
     question_type: TeacherQuestionType
     order_index: int
     prompt: str
+    image_url: str | None = None
     points: int
     options: list[TeacherExamOptionSchema]
     accepted_answers: list[str]
@@ -120,6 +122,7 @@ class TeacherExamSummarySchema(BaseModel):
     id: int
     title: str
     description: str | None = None
+    image_url: str | None = None
     scope: TeacherScope
     classroom_id: int | None = None
     classroom_name: str | None = None
@@ -143,13 +146,15 @@ class TeacherExamDetailSchema(TeacherExamSummarySchema):
 
 class TeacherExamOptionInput(BaseModel):
     option_key: str
-    option_text: str
+    option_text: str = ""
+    image_url: str | None = None
     is_correct: bool = False
 
 
 class TeacherExamQuestionInput(BaseModel):
     question_type: TeacherQuestionType = "single_choice"
-    prompt: str
+    prompt: str = ""
+    image_url: str | None = None
     order_index: int | None = None
     points: int = Field(default=1, ge=1)
     options: list[TeacherExamOptionInput] = Field(default_factory=list)
@@ -179,3 +184,16 @@ class UpdateTeacherExamRequest(BaseModel):
 class TeacherExamResponse(BaseModel):
     message: str
     exam: TeacherExamDetailSchema
+
+
+class TeacherUploadedImageSchema(BaseModel):
+    filename: str
+    content_type: str
+    size_bytes: int
+    public_id: str
+    url: str
+
+
+class TeacherImageUploadResponse(BaseModel):
+    message: str
+    image: TeacherUploadedImageSchema

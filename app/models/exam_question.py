@@ -11,6 +11,7 @@ class ExamQuestion(Base):
     exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
     question_type = Column(String, nullable=False, default="single_choice")
     prompt = Column(Text, nullable=False)
+    image_url = Column(Text, nullable=True)
     order_index = Column(Integer, nullable=False)
     points = Column(Integer, nullable=False, default=1)
 
