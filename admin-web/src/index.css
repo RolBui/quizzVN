@@ -1,0 +1,124 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #35438c;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #4e5ba6;
+  --color-on-primary-container: #d6daff;
+  --color-primary-fixed: #dee0ff;
+  --color-on-primary-fixed: #00105b;
+  --color-primary-fixed-dim: #bac3ff;
+
+  --color-secondary: #4858ab;
+  --color-secondary-container: #96a5ff;
+  --color-on-secondary-container: #27378a;
+
+  --color-tertiary: #644200;
+
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+
+  --color-background: #f3f6f9;
+  --color-on-background: #1b1b20;
+
+  --color-surface: #fbf8ff;
+  --color-surface-dim: #dbd9e0;
+  --color-surface-bright: #fbf8ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f5f2fa;
+  --color-surface-container: #efedf4;
+  --color-surface-container-high: #e9e7ee;
+  --color-surface-container-highest: #e4e1e8;
+
+  --color-on-surface: #1b1b20;
+  --color-on-surface-variant: #454651;
+  --color-outline: #767682;
+  --color-outline-variant: #e2e8f0;
+  --color-surface-variant: #f1f5f9;
+
+  --color-sidebar-active-text: #2e3ba0;
+  --color-sidebar-active-icon: #2e3ba0;
+  --color-sidebar-active-bg: #eaeff9;
+  --color-kpi-title: #2e3ba0;
+  --color-kpi-link: #2e3ba0;
+
+  --shadow-level-1: 0px 4px 12px rgba(0, 0, 0, 0.03);
+  --shadow-level-2: 0px 8px 24px rgba(0, 0, 0, 0.06);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  .dark {
+    --color-primary: #8fa1ff;
+    --color-on-primary: #00105b;
+    --color-primary-container: #1b2972;
+    --color-on-primary-container: #dee0ff;
+    --color-primary-fixed: #dee0ff;
+    --color-on-primary-fixed: #00105b;
+    --color-primary-fixed-dim: #bac3ff;
+
+    --color-secondary: #8fa1ff;
+    --color-secondary-container: #2f3f8f;
+    --color-on-secondary-container: #dce0ff;
+
+    --color-tertiary: #ffba25;
+
+    --color-error: #ffbdab;
+    --color-on-error: #540003;
+    --color-error-container: #93000a;
+    --color-on-error-container: #ffdad6;
+
+    --color-background: #181924;
+    --color-on-background: #ffffff;
+
+    --color-surface: #181924;
+    --color-surface-dim: #181924;
+    --color-surface-bright: #3a393f;
+    --color-surface-container-lowest: #212330;
+    --color-surface-container-low: #282a3b;
+    --color-surface-container: #2e3146;
+    --color-surface-container-high: #383c54;
+    --color-surface-container-highest: #434863;
+
+    --color-on-surface: #ffffff;
+    --color-on-surface-variant: #cbd5e1;
+    --color-outline: #9ca3af;
+    --color-outline-variant: #4b5563;
+    --color-surface-variant: #32354a;
+
+    --color-sidebar-active-text: #ffffff;
+    --color-sidebar-active-icon: #8fa1ff;
+    --color-sidebar-active-bg: rgba(143, 161, 255, 0.15);
+    --color-kpi-title: #ffffff;
+    --color-kpi-link: #9ca3af;
+
+    --shadow-level-1: 0px 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-level-2: 0px 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-dim);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-outline);
+}

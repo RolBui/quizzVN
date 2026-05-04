@@ -1,5 +1,10 @@
 venv/
+.venv/
+node_modules/
+dist/
 .env
-sql/
 __pycache__/
 *.pyc
+
+apps/api/__pycache__/
+apps/admin-web/dist/

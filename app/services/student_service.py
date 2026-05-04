@@ -214,10 +214,10 @@ def _get_exam_preview_image_url(exam: Exam) -> str | None:
 
 
 def _calculate_score_percent(score: int | None, total_points: int | None) -> float:
-    normalized_total_points = total_points or 0
+    normalized_total_points = float(total_points or 0)
     if normalized_total_points <= 0:
         return 0.0
-    normalized_score = score or 0
+    normalized_score = float(score or 0)
     return round((normalized_score / normalized_total_points) * 100, 2)
 
 
