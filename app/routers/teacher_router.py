@@ -19,6 +19,7 @@ from app.schemas.teacher import (
     TeacherImageUploadResponse,
     TeacherStudentListResponse,
     TeacherStudentResponse,
+    UpdateTeacherClassRequest,
     UpdateTeacherDocumentRequest,
     UpdateTeacherExamRequest,
 )
@@ -28,6 +29,7 @@ from app.services.teacher_service import (
     create_teacher_class,
     create_teacher_document,
     create_teacher_exam,
+    delete_teacher_class,
     delete_teacher_document,
     delete_teacher_exam,
     get_teacher_exam_detail,
@@ -36,7 +38,9 @@ from app.services.teacher_service import (
     list_teacher_documents,
     list_teacher_exams,
     list_teacher_students,
+    remove_student_from_teacher_class,
     set_teacher_exam_visibility,
+    update_teacher_class,
     update_teacher_document,
     update_teacher_exam,
 )
@@ -65,6 +69,32 @@ def post_teacher_class(
         payload.description,
         payload.join_code,
     )
+
+
+@router.put("/classes/{class_id}", response_model=TeacherClassResponse)
+def put_teacher_class(
+    class_id: int,
+    payload: UpdateTeacherClassRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherClassResponse:
+    return update_teacher_class(
+        db,
+        current_teacher,
+        class_id,
+        payload.name,
+        payload.description,
+        payload.join_code,
+    )
+
+
+@router.delete("/classes/{class_id}", response_model=MessageResponse)
+def delete_teacher_class_route(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> MessageResponse:
+    return delete_teacher_class(db, current_teacher, class_id)
 
 
 @router.post("/exams/images", response_model=TeacherImageUploadResponse)
@@ -105,6 +135,16 @@ def post_teacher_class_student(
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherStudentResponse:
     return add_student_to_teacher_class(db, current_teacher, class_id, payload.student_id)
+
+
+@router.delete("/classes/{class_id}/students/{student_id}", response_model=MessageResponse)
+def delete_teacher_class_student(
+    class_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> MessageResponse:
+    return remove_student_from_teacher_class(db, current_teacher, class_id, student_id)
 
 
 @router.get("/system/documents", response_model=TeacherDocumentListResponse)

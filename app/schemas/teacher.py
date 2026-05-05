@@ -29,6 +29,12 @@ class CreateTeacherClassRequest(BaseModel):
     join_code: str | None = None
 
 
+class UpdateTeacherClassRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    join_code: str | None = None
+
+
 class TeacherClassResponse(BaseModel):
     message: str
     classroom: TeacherClassSchema

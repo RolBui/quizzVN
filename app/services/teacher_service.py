@@ -3,6 +3,7 @@ import string
 import unicodedata
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import utc_now
@@ -51,15 +52,37 @@ def _generate_join_code(db: Session, length: int = 6) -> str:
             return candidate
 
 
-def _serialize_classroom(classroom: Classroom) -> dict:
+def _serialize_classroom(db: Session, classroom: Classroom) -> dict:
+    student_count = int(
+        db.query(func.count(ClassroomMembership.id))
+        .join(User, User.id == ClassroomMembership.user_id)
+        .filter(
+            ClassroomMembership.classroom_id == classroom.id,
+            User.role.has(name=STUDENT_ROLE_NAME),
+        )
+        .scalar()
+        or 0
+    )
+    exam_count = int(
+        db.query(func.count(Exam.id))
+        .filter(Exam.classroom_id == classroom.id)
+        .scalar()
+        or 0
+    )
+    document_count = int(
+        db.query(func.count(LearningDocument.id))
+        .filter(LearningDocument.classroom_id == classroom.id)
+        .scalar()
+        or 0
+    )
     return {
         "id": classroom.id,
         "name": classroom.name,
         "description": classroom.description,
         "join_code": classroom.join_code,
-        "student_count": len(classroom.memberships),
-        "exam_count": len(classroom.exams),
-        "document_count": len(classroom.documents),
+        "student_count": student_count,
+        "exam_count": exam_count,
+        "document_count": document_count,
         "created_at": classroom.created_at,
     }
 
@@ -67,9 +90,6 @@ def _serialize_classroom(classroom: Classroom) -> dict:
 def _require_teacher_classroom(db: Session, teacher_id: int, class_id: int) -> Classroom:
     classroom = (
         db.query(Classroom)
-        .options(joinedload(Classroom.memberships))
-        .options(joinedload(Classroom.exams))
-        .options(joinedload(Classroom.documents))
         .filter(
             Classroom.id == class_id,
             Classroom.created_by_user_id == teacher_id,
@@ -91,7 +111,7 @@ def list_teacher_classes(db: Session, teacher: User) -> dict:
         .order_by(Classroom.created_at.desc())
         .all()
     )
-    return {"items": [_serialize_classroom(classroom) for classroom in classrooms]}
+    return {"items": [_serialize_classroom(db, classroom) for classroom in classrooms]}
 
 
 def create_teacher_class(
@@ -127,8 +147,89 @@ def create_teacher_class(
     classroom = _require_teacher_classroom(db, teacher.id, classroom.id)
     return {
         "message": "Class created successfully",
-        "classroom": _serialize_classroom(classroom),
+        "classroom": _serialize_classroom(db, classroom),
     }
+
+
+def update_teacher_class(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    name: str | None,
+    description: str | None,
+    join_code: str | None,
+) -> dict:
+    classroom = _require_teacher_classroom(db, teacher.id, class_id)
+
+    if name is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        classroom.name = normalized_name
+
+    if description is not None:
+        classroom.description = description.strip() if description else None
+
+    if join_code is not None:
+        normalized_join_code = join_code.strip().upper()
+        if not normalized_join_code:
+            raise HTTPException(status_code=400, detail="join_code cannot be empty")
+
+        existing = (
+            db.query(Classroom)
+            .filter(
+                Classroom.join_code == normalized_join_code,
+                Classroom.id != classroom.id,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="join_code already exists")
+
+        classroom.join_code = normalized_join_code
+
+    classroom.updated_at = utc_now()
+    db.commit()
+    db.refresh(classroom)
+    classroom = _require_teacher_classroom(db, teacher.id, classroom.id)
+    return {
+        "message": "Class updated successfully",
+        "classroom": _serialize_classroom(db, classroom),
+    }
+
+
+def delete_teacher_class(db: Session, teacher: User, class_id: int) -> dict:
+    classroom = _require_teacher_classroom(db, teacher.id, class_id)
+    attempt_count = (
+        db.query(ExamAttempt)
+        .join(Exam, Exam.id == ExamAttempt.exam_id)
+        .filter(Exam.classroom_id == classroom.id)
+        .count()
+    )
+    if attempt_count:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete class after students have started exam attempts",
+        )
+
+    exam_ids = select(Exam.id).where(Exam.classroom_id == classroom.id)
+    question_ids = select(ExamQuestion.id).where(ExamQuestion.exam_id.in_(exam_ids))
+    db.query(ExamQuestionOption).filter(ExamQuestionOption.question_id.in_(question_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(ExamQuestion).filter(ExamQuestion.exam_id.in_(exam_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(Exam).filter(Exam.classroom_id == classroom.id).delete(synchronize_session=False)
+    db.query(LearningDocument).filter(LearningDocument.classroom_id == classroom.id).delete(
+        synchronize_session=False
+    )
+    db.query(ClassroomMembership).filter(ClassroomMembership.classroom_id == classroom.id).delete(
+        synchronize_session=False
+    )
+    db.query(Classroom).filter(Classroom.id == classroom.id).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Class deleted successfully"}
 
 
 def _is_student_membership(membership: ClassroomMembership) -> bool:
@@ -258,6 +359,30 @@ def list_teacher_class_students(db: Session, teacher: User, class_id: int) -> di
         items.append(_serialize_teacher_student(membership))
 
     return {"items": items}
+
+
+def remove_student_from_teacher_class(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    student_id: int,
+) -> dict:
+    _require_teacher_classroom(db, teacher.id, class_id)
+    membership = (
+        db.query(ClassroomMembership)
+        .options(joinedload(ClassroomMembership.user).joinedload(User.role))
+        .filter(
+            ClassroomMembership.classroom_id == class_id,
+            ClassroomMembership.user_id == student_id,
+        )
+        .first()
+    )
+    if not membership or not _is_student_membership(membership):
+        raise HTTPException(status_code=404, detail="Student membership not found")
+
+    db.delete(membership)
+    db.commit()
+    return {"message": "Student removed from class successfully"}
 
 
 def _validate_scope_for_teacher(
