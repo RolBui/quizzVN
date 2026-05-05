@@ -7,6 +7,7 @@ from app.schemas.common import MessageResponse
 from app.schemas.teacher import (
     AddTeacherStudentRequest,
     CreateTeacherClassRequest,
+    CreateTeacherClassDocumentRequest,
     CreateTeacherDocumentRequest,
     CreateTeacherExamRequest,
     TeacherClassListResponse,
@@ -20,6 +21,8 @@ from app.schemas.teacher import (
     TeacherStudentListResponse,
     TeacherStudentResponse,
     UpdateTeacherClassRequest,
+    UpdateTeacherClassDocumentRequest,
+    UpdateTeacherClassExamRequest,
     UpdateTeacherDocumentRequest,
     UpdateTeacherExamRequest,
 )
@@ -27,9 +30,11 @@ from app.services.media_service import save_exam_image
 from app.services.teacher_service import (
     add_student_to_teacher_class,
     create_teacher_class,
+    create_teacher_class_document,
     create_teacher_document,
     create_teacher_exam,
     delete_teacher_class,
+    delete_teacher_class_document,
     delete_teacher_document,
     delete_teacher_exam,
     get_teacher_exam_detail,
@@ -41,6 +46,8 @@ from app.services.teacher_service import (
     remove_student_from_teacher_class,
     set_teacher_exam_visibility,
     update_teacher_class,
+    update_teacher_class_document,
+    update_teacher_class_exam,
     update_teacher_document,
     update_teacher_exam,
 )
@@ -164,6 +171,54 @@ def get_teacher_class_documents(
     return list_teacher_documents(db, current_teacher, "class", class_id)
 
 
+@router.post("/classes/{class_id}/documents", response_model=TeacherDocumentResponse)
+def post_teacher_class_document(
+    class_id: int,
+    payload: CreateTeacherClassDocumentRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherDocumentResponse:
+    return create_teacher_class_document(
+        db,
+        current_teacher,
+        class_id,
+        payload.title,
+        payload.summary,
+        payload.content,
+        payload.is_published,
+    )
+
+
+@router.put("/classes/{class_id}/documents/{document_id}", response_model=TeacherDocumentResponse)
+def put_teacher_class_document(
+    class_id: int,
+    document_id: int,
+    payload: UpdateTeacherClassDocumentRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherDocumentResponse:
+    return update_teacher_class_document(
+        db,
+        current_teacher,
+        class_id,
+        document_id,
+        payload.title,
+        payload.summary,
+        payload.content,
+        payload.is_published,
+    )
+
+
+@router.delete("/classes/{class_id}/documents/{document_id}", response_model=MessageResponse)
+def delete_teacher_class_document_route(
+    class_id: int,
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> MessageResponse:
+    return delete_teacher_class_document(db, current_teacher, class_id, document_id)
+
+
 @router.post("/documents", response_model=TeacherDocumentResponse)
 def post_teacher_document(
     payload: CreateTeacherDocumentRequest,
@@ -277,6 +332,30 @@ def post_teacher_class_exam(
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
+    )
+
+
+@router.put("/classes/{class_id}/exams/{exam_id}", response_model=TeacherExamResponse)
+def put_teacher_class_exam(
+    class_id: int,
+    exam_id: int,
+    payload: UpdateTeacherClassExamRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamResponse:
+    questions = [question.model_dump() for question in payload.questions] if payload.questions is not None else None
+    return update_teacher_class_exam(
+        db,
+        current_teacher,
+        class_id,
+        exam_id,
+        payload.title,
+        payload.description,
+        payload.image_url,
+        payload.duration_minutes,
+        payload.is_published,
+        payload.is_active,
+        questions,
     )
 
 

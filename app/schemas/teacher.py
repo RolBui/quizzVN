@@ -91,12 +91,26 @@ class CreateTeacherDocumentRequest(BaseModel):
     is_published: bool = False
 
 
+class CreateTeacherClassDocumentRequest(BaseModel):
+    title: str
+    summary: str | None = None
+    content: str
+    is_published: bool = False
+
+
 class UpdateTeacherDocumentRequest(BaseModel):
     title: str | None = None
     summary: str | None = None
     content: str | None = None
     scope: TeacherScope | None = None
     classroom_id: int | None = None
+    is_published: bool | None = None
+
+
+class UpdateTeacherClassDocumentRequest(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+    content: str | None = None
     is_published: bool | None = None
 
 
@@ -183,6 +197,16 @@ class UpdateTeacherExamRequest(BaseModel):
     image_url: str | None = None
     scope: TeacherScope | None = None
     classroom_id: int | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    is_published: bool | None = None
+    is_active: bool | None = None
+    questions: list[TeacherExamQuestionInput] | None = None
+
+
+class UpdateTeacherClassExamRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    image_url: str | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
     is_published: bool | None = None
     is_active: bool | None = None

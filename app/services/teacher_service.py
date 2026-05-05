@@ -467,6 +467,19 @@ def _get_teacher_document(db: Session, teacher: User, document_id: int) -> Learn
     return document
 
 
+def _get_teacher_class_document(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    document_id: int,
+) -> LearningDocument:
+    _require_teacher_classroom(db, teacher.id, class_id)
+    document = _get_teacher_document(db, teacher, document_id)
+    if document.scope != SCOPE_CLASS or document.classroom_id != class_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return document
+
+
 def create_teacher_document(
     db: Session,
     teacher: User,
@@ -505,6 +518,27 @@ def create_teacher_document(
         "message": "Document created successfully",
         "document": _serialize_document(document),
     }
+
+
+def create_teacher_class_document(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    title: str,
+    summary: str | None,
+    content: str,
+    is_published: bool,
+) -> dict:
+    return create_teacher_document(
+        db,
+        teacher,
+        title,
+        summary,
+        content,
+        SCOPE_CLASS,
+        class_id,
+        is_published,
+    )
 
 
 def update_teacher_document(
@@ -559,11 +593,45 @@ def update_teacher_document(
     }
 
 
+def update_teacher_class_document(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    document_id: int,
+    title: str | None,
+    summary: str | None,
+    content: str | None,
+    is_published: bool | None,
+) -> dict:
+    _get_teacher_class_document(db, teacher, class_id, document_id)
+    return update_teacher_document(
+        db,
+        teacher,
+        document_id,
+        title,
+        summary,
+        content,
+        SCOPE_CLASS,
+        class_id,
+        is_published,
+    )
+
+
 def delete_teacher_document(db: Session, teacher: User, document_id: int) -> dict:
     document = _get_teacher_document(db, teacher, document_id)
     db.delete(document)
     db.commit()
     return {"message": "Document deleted successfully"}
+
+
+def delete_teacher_class_document(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    document_id: int,
+) -> dict:
+    _get_teacher_class_document(db, teacher, class_id, document_id)
+    return delete_teacher_document(db, teacher, document_id)
 
 
 def _get_exam_total_points(exam: Exam) -> int:
@@ -656,6 +724,14 @@ def _get_teacher_exam(db: Session, teacher: User, exam_id: int) -> Exam:
         raise HTTPException(status_code=400, detail="Class exam is misconfigured")
 
     _require_teacher_classroom(db, teacher.id, exam.classroom_id)
+    return exam
+
+
+def _get_teacher_class_exam(db: Session, teacher: User, class_id: int, exam_id: int) -> Exam:
+    _require_teacher_classroom(db, teacher.id, class_id)
+    exam = _get_teacher_exam(db, teacher, exam_id)
+    if exam.scope != SCOPE_CLASS or exam.classroom_id != class_id:
+        raise HTTPException(status_code=404, detail="Exam not found")
     return exam
 
 
@@ -931,6 +1007,36 @@ def update_teacher_exam(
         "message": "Exam updated successfully",
         "exam": _serialize_exam_detail(exam),
     }
+
+
+def update_teacher_class_exam(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    exam_id: int,
+    title: str | None,
+    description: str | None,
+    image_url: str | None,
+    duration_minutes: int | None,
+    is_published: bool | None,
+    is_active: bool | None,
+    questions: list[dict] | None,
+) -> dict:
+    _get_teacher_class_exam(db, teacher, class_id, exam_id)
+    return update_teacher_exam(
+        db,
+        teacher,
+        exam_id,
+        title,
+        description,
+        image_url,
+        SCOPE_CLASS,
+        class_id,
+        duration_minutes,
+        is_published,
+        is_active,
+        questions,
+    )
 
 
 def delete_teacher_exam(db: Session, teacher: User, exam_id: int) -> dict:
