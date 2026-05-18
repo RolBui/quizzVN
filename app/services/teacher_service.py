@@ -765,6 +765,16 @@ def get_teacher_exam_detail(db: Session, teacher: User, exam_id: int) -> dict:
     return _serialize_exam_detail(exam)
 
 
+def get_teacher_class_exam_detail(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    exam_id: int,
+) -> dict:
+    exam = _get_teacher_class_exam(db, teacher, class_id, exam_id)
+    return _serialize_exam_detail(exam)
+
+
 def _validate_exam_questions(questions: list[dict]) -> list[dict]:
     if not questions:
         raise HTTPException(status_code=400, detail="At least one question is required")
