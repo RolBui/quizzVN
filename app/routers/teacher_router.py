@@ -37,6 +37,7 @@ from app.services.teacher_service import (
     delete_teacher_class_document,
     delete_teacher_document,
     delete_teacher_exam,
+    get_teacher_class_exam_detail,
     get_teacher_exam_detail,
     list_teacher_class_students,
     list_teacher_classes,
@@ -281,6 +282,16 @@ def get_teacher_class_exams(
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
     return list_teacher_exams(db, current_teacher, "class", class_id)
+
+
+@router.get("/classes/{class_id}/exams/{exam_id}", response_model=TeacherExamDetailSchema)
+def get_teacher_class_exam(
+    class_id: int,
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamDetailSchema:
+    return get_teacher_class_exam_detail(db, current_teacher, class_id, exam_id)
 
 
 @router.get("/exams/{exam_id}", response_model=TeacherExamDetailSchema)
