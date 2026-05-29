@@ -18,6 +18,13 @@ from app.schemas.auth import (
     RevokeSessionResponse,
     RoleListResponse,
     SessionListResponse,
+    UpdateProfileRequest,
+    UpdateProfileResponse,
+    ProfileResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
+    AvatarListResponse,
+    ProfileImageUploadResponse,
 )
 from app.schemas.common import MessageResponse
 from app.services.auth_service import (
@@ -34,12 +41,17 @@ from app.services.auth_service import (
     serialize_role_option,
     serialize_session,
     serialize_session_tokens,
+    update_user_profile,
+    change_user_password,
+    update_user_avatar,
 )
 from app.services.email_verification_service import (
     build_frontend_email_verification_redirect_url,
     send_email_verification_email,
     verify_email_token,
 )
+from app.services.media_service import save_avatar_image, list_uploaded_images
+from fastapi import UploadFile, File
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -417,3 +429,62 @@ def complete_onboarding(
         gender=payload.gender,
         school_name=payload.school_name,
     )
+
+
+@router.get("/profile", response_model=ProfileResponse)
+def get_profile(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProfileResponse:
+    return {"user": build_user_payload(db, current_user)}
+
+
+@router.put("/profile", response_model=UpdateProfileResponse)
+def update_profile(
+    payload: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> UpdateProfileResponse:
+    return update_user_profile(
+        db=db,
+        user=current_user,
+        full_name=payload.full_name,
+        phone=payload.phone,
+        date_of_birth=payload.date_of_birth,
+        gender=payload.gender,
+        school_name=payload.school_name,
+    )
+
+
+@router.put("/password", response_model=ChangePasswordResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ChangePasswordResponse:
+    return change_user_password(
+        db=db,
+        user=current_user,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+        confirm_password=payload.confirm_password,
+    )
+
+
+@router.get("/profile/avatar", response_model=AvatarListResponse)
+def get_avatars(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> AvatarListResponse:
+    items = list_uploaded_images(db, current_user.id, category="avatar")
+    return {"items": items}
+
+
+@router.post("/profile/avatar", response_model=ProfileImageUploadResponse)
+def upload_avatar(
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProfileImageUploadResponse:
+    image_data = save_avatar_image(db, current_user.id, image)
+    return update_user_avatar(db, current_user, image_data["url"])

@@ -5,6 +5,17 @@ dist/
 .env
 __pycache__/
 *.pyc
+*.pyo
 
-apps/api/__pycache__/
-apps/admin-web/dist/
+.vscode/
+.idea/
+*.code-workspace
+*.log
+
+# Media files uploaded by users
+media/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3

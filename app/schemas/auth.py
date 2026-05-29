@@ -112,3 +112,50 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+    date_of_birth: date | None = None
+    gender: Literal["male", "female", "other"] | None = None
+    school_name: str | None = None
+
+
+class UpdateProfileResponse(BaseModel):
+    message: str
+    user: UserSchema
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+
+class ChangePasswordResponse(BaseModel):
+    message: str
+
+
+class ProfileResponse(BaseModel):
+    user: UserSchema
+
+
+class AvatarSchema(BaseModel):
+    id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    public_id: str
+    url: str
+    created_at: str | None = None
+
+
+class AvatarListResponse(BaseModel):
+    items: list[AvatarSchema]
+
+
+class ProfileImageUploadResponse(BaseModel):
+    message: str
+    avatar_url: str
+    user: UserSchema

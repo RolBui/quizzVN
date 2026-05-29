@@ -3,7 +3,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal, engine
@@ -25,8 +25,12 @@ from app.models.user_session import UserSession
 from app.services.email_verification_service import send_email_verification_email
 
 PENDING_ROLE_NAME = "pending"
+ADMINISTRATOR_ROLE_NAME = "administrator"
+ADMIN_ROLE_NAME = "admin"
+ADMIN_ACCESS_ROLE_NAMES = (ADMINISTRATOR_ROLE_NAME, ADMIN_ROLE_NAME)
 SELECTABLE_ROLE_NAMES = ("teacher", "student")
 logger = logging.getLogger(__name__)
+USER_STATUSES = ("active", "inactive", "blocked", "disabled", "deleted")
 
 
 def _resolve_token_expires_at(token: dict):
@@ -56,14 +60,32 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
 
 def bootstrap_auth_storage() -> None:
     UserProfile.__table__.create(bind=engine, checkfirst=True)
+    _ensure_user_status_constraint()
 
     db = SessionLocal()
     try:
-        for role_name in (PENDING_ROLE_NAME, *SELECTABLE_ROLE_NAMES):
+        for role_name in (
+            PENDING_ROLE_NAME,
+            ADMINISTRATOR_ROLE_NAME,
+            ADMIN_ROLE_NAME,
+            *SELECTABLE_ROLE_NAMES,
+        ):
             get_or_create_role(db, role_name)
         db.commit()
     finally:
         db.close()
+
+
+def _ensure_user_status_constraint() -> None:
+    allowed_statuses = ", ".join(f"'{status}'" for status in USER_STATUSES)
+    statement = f"""
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_status_check;
+        ALTER TABLE users
+        ADD CONSTRAINT users_status_check
+        CHECK (status IN ({allowed_statuses}));
+    """
+    with engine.begin() as connection:
+        connection.execute(text(statement))
 
 
 def get_or_create_role(db: Session, role_name: str) -> Role:
@@ -520,6 +542,9 @@ def login_local_user(
     if not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="User account is disabled")
+
     if user.auth_type == "oauth":
         user.auth_type = "mixed"
 
@@ -572,14 +597,14 @@ def complete_user_onboarding(
             user_id=user.id,
             date_of_birth=date_of_birth,
             gender=gender,
-            school_name=school_name if role_name == "student" else None,
+            school_name=school_name,
             onboarding_completed_at=utc_now(),
         )
         db.add(profile)
     else:
         profile.date_of_birth = date_of_birth
         profile.gender = gender
-        profile.school_name = school_name if role_name == "student" else None
+        profile.school_name = school_name
         profile.onboarding_completed_at = utc_now()
 
     user.role_id = role.id
@@ -649,3 +674,90 @@ def handle_google_callback(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail="Google login failed") from exc
+
+
+def update_user_profile(
+    db: Session,
+    user: User,
+    full_name: str | None = None,
+    phone: str | None = None,
+    date_of_birth: date | None = None,
+    gender: str | None = None,
+    school_name: str | None = None,
+) -> dict:
+    if full_name is not None:
+        if not full_name.strip():
+            raise HTTPException(status_code=400, detail="full_name cannot be empty")
+        user.full_name = full_name.strip()
+
+    if phone is not None:
+        user.phone = phone.strip()
+
+    profile = get_user_profile(db, user.id)
+    if profile:
+        if date_of_birth is not None:
+            if date_of_birth > utc_now().date():
+                raise HTTPException(status_code=400, detail="date_of_birth cannot be in the future")
+            profile.date_of_birth = date_of_birth
+        
+        if gender is not None:
+            profile.gender = gender
+
+        if school_name is not None:
+            profile.school_name = school_name.strip()
+
+    user.updated_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    if profile:
+        db.refresh(profile)
+
+    return {
+        "message": "Profile updated successfully",
+        "user": serialize_user(user, profile),
+    }
+
+
+def change_user_password(
+    db: Session,
+    user: User,
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+) -> dict:
+    if user.auth_type == "oauth" and not user.password_hash:
+        raise HTTPException(status_code=400, detail="Use Google login for this account")
+
+    if not verify_password(current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không chính xác")
+
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="Mật khẩu mới không khớp")
+
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải có ít nhất 6 ký tự")
+
+    user.password_hash = hash_password(new_password)
+    user.updated_at = utc_now()
+    db.commit()
+
+    return {"message": "Đổi mật khẩu thành công"}
+
+
+def update_user_avatar(
+    db: Session,
+    user: User,
+    avatar_url: str,
+) -> dict:
+    user.avatar_url = avatar_url
+    user.updated_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    
+    profile = get_user_profile(db, user.id)
+
+    return {
+        "message": "Cập nhật ảnh đại diện thành công",
+        "avatar_url": avatar_url,
+        "user": serialize_user(user, profile),
+    }

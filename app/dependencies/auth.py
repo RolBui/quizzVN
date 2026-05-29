@@ -5,6 +5,8 @@ from app.core.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.services.auth_service import (
+    ADMIN_ACCESS_ROLE_NAMES,
+    ADMINISTRATOR_ROLE_NAME,
     get_session_by_token,
     get_session_by_refresh_token,
     require_active_session,
@@ -96,5 +98,41 @@ def get_current_teacher(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Teacher role is required",
+        )
+    return user
+
+
+def get_current_admin(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.id == current_user.id)
+        .first()
+    )
+    if not user or user.status != "active" or not user.role or user.role.name not in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role is required",
+        )
+    return user
+
+
+def get_current_administrator(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.id == current_user.id)
+        .first()
+    )
+    if not user or user.status != "active" or not user.role or user.role.name != ADMINISTRATOR_ROLE_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator role is required",
         )
     return user

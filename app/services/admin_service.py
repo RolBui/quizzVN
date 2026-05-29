@@ -1,0 +1,2270 @@
+from datetime import date, datetime, timedelta, timezone
+
+from fastapi import HTTPException
+from sqlalchemy import func, or_, text
+from sqlalchemy.orm import Session, joinedload
+
+from app.core.security import hash_password, utc_now
+from app.database import engine
+from app.models.admin_banner import AdminBanner
+from app.models.classroom import Classroom
+from app.models.classroom_membership import ClassroomMembership
+from app.models.exam import Exam
+from app.models.exam_attempt import ExamAttempt
+from app.models.exam_attempt_answer import ExamAttemptAnswer  # noqa: F401 - registers SQLAlchemy relationships.
+from app.models.exam_question import ExamQuestion
+from app.models.exam_question_option import ExamQuestionOption  # noqa: F401 - registers SQLAlchemy relationships.
+from app.models.learning_document import LearningDocument
+from app.models.oauth_account import OAuthAccount  # noqa: F401 - registers SQLAlchemy relationships.
+from app.models.oauth_provider import OAuthProvider  # noqa: F401 - registers SQLAlchemy relationships.
+from app.models.role import Role
+from app.models.user import User
+from app.models.user_profile import UserProfile
+from app.models.user_session import UserSession
+from app.services.auth_service import (
+    ADMIN_ACCESS_ROLE_NAMES,
+    ADMIN_ROLE_NAME,
+    ADMINISTRATOR_ROLE_NAME,
+    build_username_from_email,
+    get_or_create_role,
+)
+
+ATTEMPT_STATUS_SUBMITTED = "submitted"
+ADMIN_MUTABLE_STATUSES = {"active", "disabled"}
+TEACHER_ROLE_NAME = "teacher"
+STUDENT_ROLE_NAME = "student"
+BANNER_AUDIENCES = {"all", "teachers", "students"}
+USER_ACTIVITY_WINDOW = timedelta(hours=1)
+
+
+def bootstrap_admin_storage() -> None:
+    AdminBanner.__table__.create(bind=engine, checkfirst=True)
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _recent_activity_user_ids(db: Session, user_ids: list[int]) -> set[int]:
+    if not user_ids:
+        return set()
+
+    active_after = utc_now() - USER_ACTIVITY_WINDOW
+    return {
+        user_id
+        for (user_id,) in db.query(UserSession.user_id)
+        .filter(
+            UserSession.user_id.in_(user_ids),
+            UserSession.is_revoked.is_(False),
+            func.coalesce(UserSession.last_used_at, UserSession.created_at) >= active_after,
+        )
+        .all()
+    }
+
+
+def _start_of_month(value: datetime) -> datetime:
+    return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _start_of_day(value: datetime) -> datetime:
+    return value.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(year=year, month=month, day=1)
+
+
+def _start_of_year(value: datetime) -> datetime:
+    return value.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _count_between(db: Session, model, column, start: datetime, end: datetime) -> int:
+    return int(
+        db.query(func.count(model.id))
+        .filter(column >= start, column < end)
+        .scalar()
+        or 0
+    )
+
+
+def _crm_period_window(now: datetime, period: str) -> dict:
+    if period == "30d":
+        day_count = 30
+        current_start = _start_of_day(now) - timedelta(days=day_count - 1)
+        previous_start = current_start - timedelta(days=day_count)
+        return {
+            "period": "30d",
+            "label": "30 ngày qua",
+            "current_start": current_start,
+            "current_end": now,
+            "previous_start": previous_start,
+            "previous_end": current_start,
+            "day_count": day_count,
+            "granularity": "day",
+        }
+
+    if period == "year":
+        current_start = _start_of_year(now)
+        previous_start = current_start.replace(year=current_start.year - 1)
+        previous_end = previous_start + (now - current_start)
+        return {
+            "period": "year",
+            "label": "năm nay",
+            "current_start": current_start,
+            "current_end": now,
+            "previous_start": previous_start,
+            "previous_end": previous_end,
+            "day_count": None,
+            "granularity": "month",
+        }
+
+    day_count = 7
+    current_start = _start_of_day(now) - timedelta(days=day_count - 1)
+    previous_start = current_start - timedelta(days=day_count)
+    return {
+        "period": "7d",
+        "label": "7 ngày qua",
+        "current_start": current_start,
+        "current_end": now,
+        "previous_start": previous_start,
+        "previous_end": current_start,
+        "day_count": day_count,
+        "granularity": "day",
+    }
+
+
+def _count_active_users_between(db: Session, start: datetime, end: datetime) -> int:
+    rows = (
+        db.query(UserSession.user_id, UserSession.created_at, UserSession.last_used_at)
+        .join(User, User.id == UserSession.user_id)
+        .filter(
+            User.status == "active",
+            UserSession.is_revoked.is_(False),
+            or_(UserSession.created_at >= start, UserSession.last_used_at >= start),
+            or_(UserSession.created_at < end, UserSession.last_used_at < end),
+        )
+        .all()
+    )
+
+    active_user_ids = set()
+    for user_id, created_at, last_used_at in rows:
+        activity_at = _normalize_datetime(last_used_at) or _normalize_datetime(created_at)
+        if activity_at is not None and start <= activity_at < end:
+            active_user_ids.add(user_id)
+    return len(active_user_ids)
+
+
+def _recent_month_starts(now: datetime, count: int = 12) -> list[datetime]:
+    current_month_start = _start_of_month(now)
+    return [
+        _add_months(current_month_start, offset)
+        for offset in range(-(count - 1), 1)
+    ]
+
+
+def _build_monthly_counts(
+    db: Session,
+    model,
+    column,
+    starts: list[datetime],
+    *criteria,
+) -> list[int]:
+    if not starts:
+        return []
+
+    end = _add_months(starts[-1], 1)
+    counts = {(start.year, start.month): 0 for start in starts}
+    query = db.query(column).filter(column >= starts[0], column < end)
+    if criteria:
+        query = query.filter(*criteria)
+    rows = query.all()
+
+    for (created_at,) in rows:
+        normalized = _normalize_datetime(created_at)
+        if normalized is None:
+            continue
+        key = (normalized.year, normalized.month)
+        if key in counts:
+            counts[key] += 1
+
+    return [counts[(start.year, start.month)] for start in starts]
+
+
+def _build_cumulative_monthly_counts(
+    db: Session,
+    model,
+    column,
+    starts: list[datetime],
+    *criteria,
+) -> list[int]:
+    if not starts:
+        return []
+
+    query = db.query(func.count(model.id)).filter(column < starts[0])
+    if criteria:
+        query = query.filter(*criteria)
+    running_total = int(query.scalar() or 0)
+    monthly_counts = _build_monthly_counts(db, model, column, starts, *criteria)
+    totals = []
+
+    for count in monthly_counts:
+        running_total += count
+        totals.append(running_total)
+
+    return totals
+
+
+def _build_monthly_active_user_counts(db: Session, starts: list[datetime]) -> list[int]:
+    if not starts:
+        return []
+
+    end = _add_months(starts[-1], 1)
+    buckets = {(start.year, start.month): set() for start in starts}
+    rows = (
+        db.query(
+            UserSession.user_id,
+            UserSession.created_at,
+            UserSession.last_used_at,
+        )
+        .join(User, User.id == UserSession.user_id)
+        .filter(
+            User.status == "active",
+            UserSession.is_revoked.is_(False),
+            or_(
+                UserSession.created_at >= starts[0],
+                UserSession.last_used_at >= starts[0],
+            ),
+            or_(UserSession.created_at < end, UserSession.last_used_at < end),
+        )
+        .all()
+    )
+
+    for user_id, created_at, last_used_at in rows:
+        activity_at = _normalize_datetime(last_used_at) or _normalize_datetime(created_at)
+        if activity_at is None or activity_at < starts[0] or activity_at >= end:
+            continue
+        key = (activity_at.year, activity_at.month)
+        if key in buckets:
+            buckets[key].add(user_id)
+
+    return [len(buckets[(start.year, start.month)]) for start in starts]
+
+
+def _status_label(status: str | None) -> str:
+    if status == "active":
+        return "Hoạt động"
+    if status == "disabled":
+        return "Vô hiệu hóa"
+    return status or "Không rõ"
+
+
+def _metric(
+    key: str,
+    label: str,
+    value: float,
+    suffix: str = "",
+    trend: str = "0%",
+    is_up: bool = True,
+    subtext: str = "",
+    sparkline: list[int] | None = None,
+) -> dict:
+    return {
+        "key": key,
+        "label": label,
+        "value": value,
+        "suffix": suffix,
+        "trend": trend,
+        "is_up": is_up,
+        "subtext": subtext,
+        "sparkline": sparkline or [],
+    }
+
+
+def _count_by(rows: list[tuple[int | None, int]]) -> dict[int, int]:
+    return {key: int(value or 0) for key, value in rows if key is not None}
+
+
+def _format_percent_trend(current: int, previous: int) -> str:
+    if previous == 0:
+        if current == 0:
+            return "0%"
+        return "+100%"
+    return f"{((current - previous) / previous) * 100:+.1f}%"
+
+
+def _format_number_trend(current: int, previous: int) -> str:
+    return f"{current - previous:+d}"
+
+
+def _score_percent(score: float | None, total_points: float | None) -> float:
+    if not total_points:
+        return 0.0
+    return round(((score or 0) / total_points) * 100, 2)
+
+
+def _score_label(score_percent: float) -> str:
+    return f"{score_percent / 10:.1f}"
+
+
+def _build_metrics(db: Session, now: datetime, period: str = "7d") -> list[dict]:
+    window = _crm_period_window(now, period)
+    current_start = window["current_start"]
+    current_end = window["current_end"]
+    previous_start = window["previous_start"]
+    previous_end = window["previous_end"]
+    period_label = window["label"]
+    sparkline_months = _recent_month_starts(now)
+
+    current_period_exams = _count_between(
+        db, Exam, Exam.created_at, current_start, current_end
+    )
+    previous_period_exams = _count_between(
+        db, Exam, Exam.created_at, previous_start, previous_end
+    )
+
+    current_period_users = _count_between(
+        db, User, User.created_at, current_start, current_end
+    )
+    previous_period_users = _count_between(
+        db, User, User.created_at, previous_start, previous_end
+    )
+
+    active_users = _count_active_users_between(db, current_start, current_end)
+    previous_active_users = _count_active_users_between(db, previous_start, previous_end)
+    total_users = int(db.query(func.count(User.id)).scalar() or 0)
+    monthly_exam_creations = _build_monthly_counts(
+        db, Exam, Exam.created_at, sparkline_months
+    )
+    monthly_user_creations = _build_monthly_counts(
+        db, User, User.created_at, sparkline_months
+    )
+    monthly_active_users = _build_monthly_active_user_counts(db, sparkline_months)
+    monthly_total_users = _build_cumulative_monthly_counts(
+        db, User, User.created_at, sparkline_months
+    )
+
+    return [
+        {
+            "key": "total_exams",
+            "label": "Tổng đề thi",
+            "value": current_period_exams,
+            "trend": _format_percent_trend(current_period_exams, previous_period_exams),
+            "is_up": current_period_exams >= previous_period_exams,
+            "sparkline": monthly_exam_creations,
+            "subtext": period_label,
+        },
+        {
+            "key": "new_users",
+            "label": "User mới",
+            "value": current_period_users,
+            "trend": _format_percent_trend(current_period_users, previous_period_users),
+            "is_up": current_period_users >= previous_period_users,
+            "sparkline": monthly_user_creations,
+            "subtext": period_label,
+        },
+        {
+            "key": "active_users",
+            "label": "Đang hoạt động",
+            "value": active_users,
+            "trend": _format_percent_trend(active_users, previous_active_users),
+            "is_up": active_users >= previous_active_users,
+            "sparkline": monthly_active_users,
+            "subtext": period_label,
+        },
+        {
+            "key": "total_users",
+            "label": "Tổng user",
+            "value": total_users,
+            "trend": _format_percent_trend(current_period_users, previous_period_users),
+            "is_up": current_period_users >= previous_period_users,
+            "sparkline": monthly_total_users,
+            "subtext": "tổng tài khoản hệ thống",
+        },
+    ]
+
+
+def _build_daily_traffic(db: Session, now: datetime, period: str) -> list[dict]:
+    window = _crm_period_window(now, period)
+    day_count = int(window["day_count"] or 7)
+    current_start = window["current_start"]
+    previous_start = window["previous_start"]
+    current_counts = [0 for _ in range(day_count)]
+    previous_counts = [0 for _ in range(day_count)]
+    current_end = current_start + timedelta(days=day_count)
+
+    rows = (
+        db.query(ExamAttempt.created_at)
+        .filter(
+            ExamAttempt.created_at >= previous_start,
+            ExamAttempt.created_at < current_end,
+        )
+        .all()
+    )
+
+    for (created_at,) in rows:
+        normalized = _normalize_datetime(created_at)
+        if normalized is None:
+            continue
+        if current_start <= normalized < current_end:
+            current_counts[(normalized.date() - current_start.date()).days] += 1
+        elif previous_start <= normalized < current_start:
+            previous_counts[(normalized.date() - previous_start.date()).days] += 1
+
+    return [
+        {
+            "name": (current_start + timedelta(days=index)).strftime("%d/%m"),
+            "current": current_counts[index],
+            "last": previous_counts[index],
+        }
+        for index in range(day_count)
+    ]
+
+
+def _build_traffic(db: Session, now: datetime, period: str = "year") -> list[dict]:
+    if period in {"7d", "30d"}:
+        return _build_daily_traffic(db, now, period)
+
+    current_year_start = _start_of_year(now)
+    previous_year_start = current_year_start.replace(year=current_year_start.year - 1)
+    next_year_start = current_year_start.replace(year=current_year_start.year + 1)
+    current_counts = [0 for _ in range(12)]
+    previous_counts = [0 for _ in range(12)]
+
+    rows = (
+        db.query(ExamAttempt.created_at)
+        .filter(
+            ExamAttempt.created_at >= previous_year_start,
+            ExamAttempt.created_at < next_year_start,
+        )
+        .all()
+    )
+
+    for (created_at,) in rows:
+        normalized = _normalize_datetime(created_at)
+        if normalized is None:
+            continue
+        if normalized.year == current_year_start.year:
+            current_counts[normalized.month - 1] += 1
+        elif normalized.year == previous_year_start.year:
+            previous_counts[normalized.month - 1] += 1
+
+    return [
+        {
+            "name": f"T{month}",
+            "current": current_counts[month - 1],
+            "last": previous_counts[month - 1],
+        }
+        for month in range(1, 13)
+    ]
+
+
+def _build_score_distribution(
+    db: Session,
+    start: datetime,
+    end: datetime,
+) -> list[dict]:
+    bucket_names = ["< 5", "5-6", "6-7", "7-8", "8-9", "9-10"]
+    bucket_counts = {name: 0 for name in bucket_names}
+    rows = (
+        db.query(ExamAttempt.score, ExamAttempt.total_points)
+        .filter(
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+            ExamAttempt.submitted_at >= start,
+            ExamAttempt.submitted_at < end,
+        )
+        .all()
+    )
+
+    for score, total_points in rows:
+        percent = _score_percent(score, total_points)
+        if percent < 50:
+            bucket_counts["< 5"] += 1
+        elif percent < 60:
+            bucket_counts["5-6"] += 1
+        elif percent < 70:
+            bucket_counts["6-7"] += 1
+        elif percent < 80:
+            bucket_counts["7-8"] += 1
+        elif percent < 90:
+            bucket_counts["8-9"] += 1
+        else:
+            bucket_counts["9-10"] += 1
+
+    return [{"name": name, "users": bucket_counts[name]} for name in bucket_names]
+
+
+def _build_recent_results(
+    db: Session,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[dict]:
+    query = (
+        db.query(
+            ExamAttempt.id,
+            ExamAttempt.score,
+            ExamAttempt.total_points,
+            ExamAttempt.submitted_at,
+            User.full_name,
+            Exam.title,
+        )
+        .join(User, User.id == ExamAttempt.user_id)
+        .join(Exam, Exam.id == ExamAttempt.exam_id)
+        .filter(
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+            ExamAttempt.submitted_at.isnot(None),
+        )
+    )
+    if start is not None:
+        query = query.filter(ExamAttempt.submitted_at >= start)
+    if end is not None:
+        query = query.filter(ExamAttempt.submitted_at < end)
+
+    rows = query.order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.id.desc()).limit(5).all()
+
+    results = []
+    for attempt_id, score, total_points, submitted_at, student_name, exam_title in rows:
+        score_percent = _score_percent(score, total_points)
+        results.append(
+            {
+                "attempt_id": attempt_id,
+                "code": f"#EX{attempt_id:04d}",
+                "student_name": student_name,
+                "exam_title": exam_title,
+                "submitted_at": submitted_at,
+                "score_label": _score_label(score_percent),
+                "score_percent": score_percent,
+                "status": "Hoàn thành" if score_percent >= 50 else "Cần cải thiện",
+            }
+        )
+    return results
+
+
+def get_admin_crm_overview(db: Session, period: str = "7d") -> dict:
+    now = utc_now()
+    window = _crm_period_window(now, period)
+    return {
+        "metrics": _build_metrics(db, now, window["period"]),
+        "traffic": _build_traffic(db, now, window["period"]),
+        "score_distribution": _build_score_distribution(
+            db,
+            window["current_start"],
+            window["current_end"],
+        ),
+        "recent_results": _build_recent_results(
+            db,
+            window["current_start"],
+            window["current_end"],
+        ),
+        "last_updated_at": now,
+    }
+
+
+def get_admin_teachers_overview(db: Session) -> dict:
+    now = utc_now()
+    month_start = _start_of_month(now)
+    previous_month_start = _add_months(month_start, -1)
+    sparkline_months = _recent_month_starts(now)
+
+    teachers = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.role))
+        .filter(
+            User.role.has(Role.name == TEACHER_ROLE_NAME),
+            User.status != "deleted",
+        )
+        .order_by(User.created_at.desc(), User.id.desc())
+        .all()
+    )
+    teacher_ids = [teacher.id for teacher in teachers]
+
+    class_counts: dict[int, int] = {}
+    exam_counts: dict[int, int] = {}
+    document_counts: dict[int, int] = {}
+    if teacher_ids:
+        class_counts = _count_by(
+            db.query(Classroom.created_by_user_id, func.count(Classroom.id))
+            .filter(Classroom.created_by_user_id.in_(teacher_ids))
+            .group_by(Classroom.created_by_user_id)
+            .all()
+        )
+        exam_counts = _count_by(
+            db.query(Exam.created_by_user_id, func.count(Exam.id))
+            .filter(Exam.created_by_user_id.in_(teacher_ids))
+            .group_by(Exam.created_by_user_id)
+            .all()
+        )
+        document_counts = _count_by(
+            db.query(LearningDocument.created_by_user_id, func.count(LearningDocument.id))
+            .filter(LearningDocument.created_by_user_id.in_(teacher_ids))
+            .group_by(LearningDocument.created_by_user_id)
+            .all()
+        )
+
+    current_month_teachers = int(
+        db.query(func.count(User.id))
+        .filter(
+            User.role.has(Role.name == TEACHER_ROLE_NAME),
+            User.status != "deleted",
+            User.created_at >= month_start,
+        )
+        .scalar()
+        or 0
+    )
+    previous_month_teachers = int(
+        db.query(func.count(User.id))
+        .filter(
+            User.role.has(Role.name == TEACHER_ROLE_NAME),
+            User.status != "deleted",
+            User.created_at >= previous_month_start,
+            User.created_at < month_start,
+        )
+        .scalar()
+        or 0
+    )
+    active_teachers = 0
+    total_teacher_sparkline = _build_cumulative_monthly_counts(
+        db,
+        User,
+        User.created_at,
+        sparkline_months,
+        User.role.has(Role.name == TEACHER_ROLE_NAME),
+        User.status != "deleted",
+    )
+    active_teacher_sparkline = [0 for _ in sparkline_months]
+    teacher_exam_sparkline = (
+        _build_cumulative_monthly_counts(
+            db,
+            Exam,
+            Exam.created_at,
+            sparkline_months,
+            Exam.created_by_user_id.in_(teacher_ids),
+        )
+        if teacher_ids
+        else [0 for _ in sparkline_months]
+    )
+    teacher_class_sparkline = (
+        _build_cumulative_monthly_counts(
+            db,
+            Classroom,
+            Classroom.created_at,
+            sparkline_months,
+            Classroom.created_by_user_id.in_(teacher_ids),
+        )
+        if teacher_ids
+        else [0 for _ in sparkline_months]
+    )
+
+    active_session_user_ids = _recent_activity_user_ids(db, teacher_ids)
+    active_teachers = len(active_session_user_ids)
+    active_teacher_sparkline = [active_teachers for _ in sparkline_months]
+
+    return {
+        "metrics": [
+            _metric("total_teachers", "Tổng giáo viên", len(teachers), trend=_format_percent_trend(current_month_teachers, previous_month_teachers), is_up=current_month_teachers >= previous_month_teachers, subtext="so với tháng trước", sparkline=total_teacher_sparkline),
+            _metric("active_teachers", "Đang hoạt động", active_teachers, subtext="có tương tác trong 1 giờ qua", sparkline=active_teacher_sparkline),
+            _metric("total_exams", "Đề thi đã tạo", sum(exam_counts.values()), subtext="từ tài khoản giáo viên", sparkline=teacher_exam_sparkline),
+            _metric("total_classes", "Lớp đang quản lý", sum(class_counts.values()), subtext="lớp do giáo viên tạo", sparkline=teacher_class_sparkline),
+        ],
+        "items": [
+            {
+                "id": teacher.id,
+                "code": f"TCH-{teacher.id:04d}",
+                "full_name": teacher.full_name,
+                "username": teacher.username,
+                "email": teacher.email,
+                "phone": teacher.phone,
+                "avatar_url": teacher.avatar_url,
+                "status": teacher.status,
+                "is_online": teacher.id in active_session_user_ids,
+                "school_name": teacher.profile.school_name if teacher.profile else None,
+                "date_of_birth": teacher.profile.date_of_birth if teacher.profile else None,
+                "gender": teacher.profile.gender if teacher.profile else None,
+                "class_count": class_counts.get(teacher.id, 0),
+                "exam_count": exam_counts.get(teacher.id, 0),
+                "document_count": document_counts.get(teacher.id, 0),
+                "last_login_at": teacher.last_login_at,
+                "created_at": teacher.created_at,
+            }
+            for teacher in teachers
+        ],
+    }
+
+
+def get_admin_students_overview(db: Session) -> dict:
+    now = utc_now()
+    month_start = _start_of_month(now)
+    previous_month_start = _add_months(month_start, -1)
+    sparkline_months = _recent_month_starts(now)
+
+    students = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.role))
+        .filter(
+            User.role.has(Role.name == STUDENT_ROLE_NAME),
+            User.status != "deleted",
+        )
+        .order_by(User.created_at.desc(), User.id.desc())
+        .all()
+    )
+    student_ids = [student.id for student in students]
+
+    class_counts: dict[int, int] = {}
+    attempt_counts: dict[int, int] = {}
+    average_scores: dict[int, float | None] = {}
+    if student_ids:
+        class_counts = _count_by(
+            db.query(ClassroomMembership.user_id, func.count(ClassroomMembership.id))
+            .filter(ClassroomMembership.user_id.in_(student_ids))
+            .group_by(ClassroomMembership.user_id)
+            .all()
+        )
+        attempt_counts = _count_by(
+            db.query(ExamAttempt.user_id, func.count(ExamAttempt.id))
+            .filter(ExamAttempt.user_id.in_(student_ids))
+            .group_by(ExamAttempt.user_id)
+            .all()
+        )
+        average_scores = {
+            user_id: round(float(value), 1) if value is not None else None
+            for user_id, value in (
+                db.query(
+                    ExamAttempt.user_id,
+                    func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)),
+                )
+                .filter(
+                    ExamAttempt.user_id.in_(student_ids),
+                    ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+                    ExamAttempt.total_points > 0,
+                )
+                .group_by(ExamAttempt.user_id)
+                .all()
+            )
+        }
+
+    current_month_students = int(
+        db.query(func.count(User.id))
+        .filter(
+            User.role.has(Role.name == STUDENT_ROLE_NAME),
+            User.status != "deleted",
+            User.created_at >= month_start,
+        )
+        .scalar()
+        or 0
+    )
+    previous_month_students = int(
+        db.query(func.count(User.id))
+        .filter(
+            User.role.has(Role.name == STUDENT_ROLE_NAME),
+            User.status != "deleted",
+            User.created_at >= previous_month_start,
+            User.created_at < month_start,
+        )
+        .scalar()
+        or 0
+    )
+    active_students = 0
+    disabled_students = sum(1 for student in students if student.status == "disabled")
+    total_student_sparkline = _build_cumulative_monthly_counts(
+        db,
+        User,
+        User.created_at,
+        sparkline_months,
+        User.role.has(Role.name == STUDENT_ROLE_NAME),
+        User.status != "deleted",
+    )
+    new_student_sparkline = _build_monthly_counts(
+        db,
+        User,
+        User.created_at,
+        sparkline_months,
+        User.role.has(Role.name == STUDENT_ROLE_NAME),
+        User.status != "deleted",
+    )
+    active_student_sparkline = [0 for _ in sparkline_months]
+    disabled_student_sparkline = _build_cumulative_monthly_counts(
+        db,
+        User,
+        User.created_at,
+        sparkline_months,
+        User.role.has(Role.name == STUDENT_ROLE_NAME),
+        User.status == "disabled",
+    )
+
+    active_session_user_ids = _recent_activity_user_ids(db, student_ids)
+    active_students = len(active_session_user_ids)
+    active_student_sparkline = [active_students for _ in sparkline_months]
+
+    return {
+        "metrics": [
+            _metric("total_students", "Tổng học sinh", len(students), trend=_format_percent_trend(current_month_students, previous_month_students), is_up=current_month_students >= previous_month_students, subtext="so với tháng trước", sparkline=total_student_sparkline),
+            _metric("new_students", "Học sinh mới", current_month_students, subtext="trong tháng này", sparkline=new_student_sparkline),
+            _metric("active_students", "Đang hoạt động", active_students, subtext="có tương tác trong 1 giờ qua", sparkline=active_student_sparkline),
+            _metric("disabled_students", "Bị khóa", disabled_students, trend=_format_number_trend(disabled_students, 0), is_up=False, subtext="không thể đăng nhập", sparkline=disabled_student_sparkline),
+        ],
+        "items": [
+            {
+                "id": student.id,
+                "code": f"STU-{student.id:05d}",
+                "full_name": student.full_name,
+                "username": student.username,
+                "email": student.email,
+                "phone": student.phone,
+                "avatar_url": student.avatar_url,
+                "status": student.status,
+                "is_online": student.id in active_session_user_ids,
+                "school_name": student.profile.school_name if student.profile else None,
+                "date_of_birth": student.profile.date_of_birth if student.profile else None,
+                "gender": student.profile.gender if student.profile else None,
+                "class_count": class_counts.get(student.id, 0),
+                "attempt_count": attempt_counts.get(student.id, 0),
+                "average_score": average_scores.get(student.id),
+                "last_login_at": student.last_login_at,
+                "created_at": student.created_at,
+            }
+            for student in students
+        ],
+    }
+
+
+def get_admin_classes_overview(db: Session) -> dict:
+    classrooms = (
+        db.query(Classroom)
+        .order_by(Classroom.created_at.desc(), Classroom.id.desc())
+        .all()
+    )
+    classroom_ids = [classroom.id for classroom in classrooms]
+    teacher_ids = [classroom.created_by_user_id for classroom in classrooms if classroom.created_by_user_id]
+
+    teachers = {}
+    if teacher_ids:
+        teachers = {
+            teacher.id: teacher
+            for teacher in db.query(User).filter(User.id.in_(teacher_ids)).all()
+        }
+
+    student_counts: dict[int, int] = {}
+    exam_counts: dict[int, int] = {}
+    document_counts: dict[int, int] = {}
+    if classroom_ids:
+        student_counts = _count_by(
+            db.query(ClassroomMembership.classroom_id, func.count(ClassroomMembership.id))
+            .join(User, User.id == ClassroomMembership.user_id)
+            .filter(
+                ClassroomMembership.classroom_id.in_(classroom_ids),
+                User.role.has(Role.name == STUDENT_ROLE_NAME),
+            )
+            .group_by(ClassroomMembership.classroom_id)
+            .all()
+        )
+        exam_counts = _count_by(
+            db.query(Exam.classroom_id, func.count(Exam.id))
+            .filter(Exam.classroom_id.in_(classroom_ids))
+            .group_by(Exam.classroom_id)
+            .all()
+        )
+        document_counts = _count_by(
+            db.query(LearningDocument.classroom_id, func.count(LearningDocument.id))
+            .filter(LearningDocument.classroom_id.in_(classroom_ids))
+            .group_by(LearningDocument.classroom_id)
+            .all()
+        )
+
+    return {
+        "metrics": [
+            _metric("total_classes", "Tổng lớp học", len(classrooms), subtext="tất cả lớp trên hệ thống"),
+            _metric("active_classes", "Đang hoạt động", len(classrooms), subtext="lớp có thể tham gia"),
+            _metric("total_students", "Lượt học sinh", sum(student_counts.values()), subtext="theo membership lớp"),
+            _metric("class_exams", "Bài thi trong lớp", sum(exam_counts.values()), subtext="scope class"),
+        ],
+        "items": [
+            {
+                "id": classroom.id,
+                "name": classroom.name,
+                "description": classroom.description,
+                "join_code": classroom.join_code,
+                "teacher_id": classroom.created_by_user_id,
+                "teacher_name": teachers[classroom.created_by_user_id].full_name if classroom.created_by_user_id in teachers else None,
+                "teacher_avatar_url": teachers[classroom.created_by_user_id].avatar_url if classroom.created_by_user_id in teachers else None,
+                "student_count": student_counts.get(classroom.id, 0),
+                "exam_count": exam_counts.get(classroom.id, 0),
+                "document_count": document_counts.get(classroom.id, 0),
+                "status": "active",
+                "created_at": classroom.created_at,
+                "updated_at": classroom.updated_at,
+            }
+            for classroom in classrooms
+        ],
+    }
+
+
+def get_admin_exams_overview(db: Session) -> dict:
+    question_counts = _count_by(
+        db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
+        .group_by(ExamQuestion.exam_id)
+        .all()
+    )
+    attempt_counts = _count_by(
+        db.query(ExamAttempt.exam_id, func.count(ExamAttempt.id))
+        .group_by(ExamAttempt.exam_id)
+        .all()
+    )
+    average_scores = {
+        exam_id: round(float(value), 1) if value is not None else None
+        for exam_id, value in (
+            db.query(
+                ExamAttempt.exam_id,
+                func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)),
+            )
+            .filter(
+                ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+                ExamAttempt.total_points > 0,
+            )
+            .group_by(ExamAttempt.exam_id)
+            .all()
+        )
+    }
+
+    rows = (
+        db.query(
+            Exam.id,
+            Exam.created_by_user_id,
+            Exam.title,
+            Exam.description,
+            Exam.scope,
+            Exam.classroom_id,
+            Exam.duration_minutes,
+            Exam.total_points,
+            Exam.is_published,
+            Exam.is_active,
+            Exam.created_at,
+            Exam.updated_at,
+            User.full_name.label("teacher_name"),
+            Classroom.name.label("classroom_name"),
+        )
+        .outerjoin(User, User.id == Exam.created_by_user_id)
+        .outerjoin(Classroom, Classroom.id == Exam.classroom_id)
+        .order_by(Exam.created_at.desc(), Exam.id.desc())
+        .all()
+    )
+
+    total_submitted = int(
+        db.query(func.count(ExamAttempt.id))
+        .filter(ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED)
+        .scalar()
+        or 0
+    )
+    completed_average = (
+        db.query(func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)))
+        .filter(ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED, ExamAttempt.total_points > 0)
+        .scalar()
+    )
+    completed_average_value = round(float(completed_average), 1) if completed_average is not None else 0.0
+
+    return {
+        "metrics": [
+            _metric("average_score", "Điểm trung bình", completed_average_value, suffix="%", subtext="trên bài đã nộp"),
+            _metric("submitted_attempts", "Lượt hoàn thành", total_submitted, subtext="bài làm đã submit"),
+            _metric("active_exams", "Bài thi đang mở", sum(1 for row in rows if row.is_published and row.is_active), subtext="published và active"),
+        ],
+        "items": [
+            {
+                "id": row.id,
+                "title": row.title,
+                "description": row.description,
+                "scope": row.scope,
+                "classroom_id": row.classroom_id,
+                "classroom_name": row.classroom_name,
+                "teacher_id": row.created_by_user_id,
+                "teacher_name": row.teacher_name,
+                "duration_minutes": row.duration_minutes,
+                "total_points": row.total_points,
+                "question_count": question_counts.get(row.id, 0),
+                "attempt_count": attempt_counts.get(row.id, 0),
+                "average_score": average_scores.get(row.id),
+                "is_published": row.is_published,
+                "is_active": row.is_active,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+def get_admin_documents_overview(db: Session) -> dict:
+    rows = (
+        db.query(
+            LearningDocument.id,
+            LearningDocument.title,
+            LearningDocument.summary,
+            LearningDocument.content,
+            LearningDocument.scope,
+            LearningDocument.classroom_id,
+            LearningDocument.created_by_user_id,
+            LearningDocument.is_published,
+            LearningDocument.created_at,
+            LearningDocument.updated_at,
+            User.full_name.label("teacher_name"),
+            Classroom.name.label("classroom_name"),
+        )
+        .outerjoin(User, User.id == LearningDocument.created_by_user_id)
+        .outerjoin(Classroom, Classroom.id == LearningDocument.classroom_id)
+        .order_by(LearningDocument.created_at.desc(), LearningDocument.id.desc())
+        .all()
+    )
+
+    published_count = sum(1 for row in rows if row.is_published)
+    class_count = sum(1 for row in rows if row.scope == "class")
+    system_count = sum(1 for row in rows if row.scope == "system")
+
+    return {
+        "metrics": [
+            _metric("total_documents", "Tổng tài liệu", len(rows), subtext="tất cả tài liệu"),
+            _metric("published_documents", "Đã xuất bản", published_count, subtext="học sinh có thể xem"),
+            _metric("class_documents", "Tài liệu lớp", class_count, subtext="gắn với lớp học"),
+            _metric("system_documents", "Tài liệu hệ thống", system_count, subtext="scope system"),
+        ],
+        "items": [
+            {
+                "id": row.id,
+                "title": row.title,
+                "summary": row.summary,
+                "content_preview": (row.summary or row.content or "")[:160],
+                "scope": row.scope,
+                "classroom_id": row.classroom_id,
+                "classroom_name": row.classroom_name,
+                "teacher_id": row.created_by_user_id,
+                "teacher_name": row.teacher_name,
+                "is_published": row.is_published,
+                "content_length": len(row.content or ""),
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+def _banner_status(banner: AdminBanner, now: datetime) -> str:
+    start_at = _normalize_datetime(banner.start_at)
+    end_at = _normalize_datetime(banner.end_at)
+    if not banner.is_active:
+        return "disabled"
+    if start_at and start_at > now:
+        return "scheduled"
+    if end_at and end_at < now:
+        return "expired"
+    return "active"
+
+
+def _serialize_banner(banner: AdminBanner, now: datetime | None = None) -> dict:
+    current_time = now or utc_now()
+    return {
+        "id": banner.id,
+        "title": banner.title,
+        "image_url": banner.image_url,
+        "link_url": banner.link_url,
+        "audience": banner.audience,
+        "status": _banner_status(banner, current_time),
+        "is_active": banner.is_active,
+        "start_at": banner.start_at,
+        "end_at": banner.end_at,
+        "created_at": banner.created_at,
+        "updated_at": banner.updated_at,
+    }
+
+
+def get_admin_appearance_overview(db: Session) -> dict:
+    now = utc_now()
+    banners = db.query(AdminBanner).order_by(AdminBanner.start_at.desc(), AdminBanner.id.desc()).all()
+    serialized = [_serialize_banner(banner, now) for banner in banners]
+    return {
+        "metrics": [
+            _metric("total_banners", "Tổng banner", len(serialized), subtext="lưu trong DB"),
+            _metric("active_banners", "Đang hoạt động", sum(1 for item in serialized if item["status"] == "active"), subtext="đang hiển thị"),
+            _metric("scheduled_banners", "Đã lên lịch", sum(1 for item in serialized if item["status"] == "scheduled"), subtext="chờ đến ngày bắt đầu"),
+        ],
+        "banners": serialized,
+    }
+
+
+def create_admin_banner(
+    db: Session,
+    current_admin: User,
+    title: str,
+    image_url: str | None,
+    link_url: str | None,
+    audience: str,
+    start_at: datetime,
+    end_at: datetime,
+    is_active: bool,
+) -> dict:
+    normalized_title = title.strip()
+    normalized_audience = audience.strip().lower() if audience else "all"
+    if not normalized_title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if normalized_audience not in BANNER_AUDIENCES:
+        raise HTTPException(status_code=400, detail="Invalid audience")
+
+    start_value = _normalize_datetime(start_at)
+    end_value = _normalize_datetime(end_at)
+    if start_value is None or end_value is None:
+        raise HTTPException(status_code=400, detail="start_at and end_at are required")
+    if end_value <= start_value:
+        raise HTTPException(status_code=400, detail="end_at must be after start_at")
+
+    banner = AdminBanner(
+        title=normalized_title,
+        image_url=image_url.strip() if image_url else None,
+        link_url=link_url.strip() if link_url else None,
+        audience=normalized_audience,
+        start_at=start_value,
+        end_at=end_value,
+        is_active=is_active,
+        created_by_user_id=current_admin.id,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    db.add(banner)
+    db.commit()
+    db.refresh(banner)
+    return {
+        "message": "Banner created successfully",
+        "banner": _serialize_banner(banner),
+    }
+
+
+def _serialize_admin_account(user: User, active_user_ids: set[int] | None = None) -> dict:
+    role_name = user.role.name if user.role else ADMIN_ROLE_NAME
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "username": user.username,
+        "email": user.email,
+        "role_name": role_name,
+        "status": user.status,
+        "is_online": user.status == "active" and bool(active_user_ids and user.id in active_user_ids),
+        "email_verified": user.email_verified,
+        "auth_type": user.auth_type,
+        "avatar_url": user.avatar_url,
+        "last_login_at": user.last_login_at,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
+
+
+def _get_admin_account(db: Session, user_id: int) -> User:
+    user = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.id == user_id, User.role.has(Role.name.in_(ADMIN_ACCESS_ROLE_NAMES)))
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+    return user
+
+
+def _require_editable_admin(target_user: User, current_administrator: User) -> None:
+    if target_user.id == current_administrator.id:
+        raise HTTPException(status_code=400, detail="Cannot modify your own administrator account here")
+
+    target_role_name = target_user.role.name if target_user.role else None
+    if target_role_name == ADMINISTRATOR_ROLE_NAME:
+        raise HTTPException(status_code=400, detail="Administrator account cannot be modified here")
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    return bool(db.execute(text("select to_regclass(:table_name)"), {"table_name": table_name}).scalar())
+
+
+def _column_exists(db: Session, table_name: str, column_name: str) -> bool:
+    return bool(
+        db.execute(
+            text(
+                """
+                select 1
+                from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = :table_name
+                  and column_name = :column_name
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).first()
+    )
+
+
+def _execute_if_table(db: Session, table_name: str, statement: str, params: dict) -> None:
+    if _table_exists(db, table_name):
+        db.execute(text(statement), params)
+
+
+def _delete_exams_where(db: Session, where_sql: str, params: dict) -> None:
+    if not _table_exists(db, "exams"):
+        return
+
+    exam_ids_sql = f"select id from exams where {where_sql}"
+    if _table_exists(db, "exam_attempt_answers") and _table_exists(db, "exam_attempts"):
+        db.execute(
+            text(
+                f"""
+                delete from exam_attempt_answers
+                where attempt_id in (
+                    select id from exam_attempts
+                    where exam_id in ({exam_ids_sql})
+                )
+                """
+            ),
+            params,
+        )
+    if _table_exists(db, "exam_attempts"):
+        db.execute(text(f"delete from exam_attempts where exam_id in ({exam_ids_sql})"), params)
+    if _table_exists(db, "exam_question_options") and _table_exists(db, "exam_questions"):
+        db.execute(
+            text(
+                f"""
+                delete from exam_question_options
+                where question_id in (
+                    select id from exam_questions
+                    where exam_id in ({exam_ids_sql})
+                )
+                """
+            ),
+            params,
+        )
+    if _table_exists(db, "exam_questions"):
+        db.execute(text(f"delete from exam_questions where exam_id in ({exam_ids_sql})"), params)
+    db.execute(text(f"delete from exams where {where_sql}"), params)
+
+
+def _delete_chat_user_references(db: Session, user_id: int) -> None:
+    if not _table_exists(db, "chat_conversations"):
+        return
+
+    params = {"user_id": user_id}
+    if _table_exists(db, "chat_participants") and _table_exists(db, "chat_messages"):
+        db.execute(
+            text(
+                """
+                update chat_participants
+                set last_read_message_id = null
+                where last_read_message_id in (
+                    select id from chat_messages where sender_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+        db.execute(
+            text(
+                """
+                update chat_participants
+                set last_read_message_id = null
+                where conversation_id in (
+                    select id from chat_conversations where created_by_user_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+        db.execute(
+            text(
+                """
+                delete from chat_participants
+                where conversation_id in (
+                    select id from chat_conversations where created_by_user_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+        db.execute(text("delete from chat_participants where user_id = :user_id"), params)
+
+    if _table_exists(db, "chat_messages"):
+        db.execute(
+            text(
+                """
+                delete from chat_messages
+                where conversation_id in (
+                    select id from chat_conversations where created_by_user_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+        db.execute(text("delete from chat_messages where sender_id = :user_id"), params)
+
+    db.execute(text("delete from chat_conversations where created_by_user_id = :user_id"), params)
+
+
+def _delete_user_auth_rows(db: Session, user_id: int) -> None:
+    params = {"user_id": user_id}
+    for table_name in (
+        "user_sessions",
+        "oauth_accounts",
+        "email_verification_tokens",
+        "password_reset_tokens",
+        "user_profiles",
+    ):
+        if _table_exists(db, table_name) and _column_exists(db, table_name, "user_id"):
+            db.execute(text(f"delete from {table_name} where user_id = :user_id"), params)
+
+
+def _delete_teacher_owned_rows(db: Session, teacher_id: int) -> None:
+    params = {"user_id": teacher_id}
+    if _table_exists(db, "admin_banners") and _column_exists(db, "admin_banners", "created_by_user_id"):
+        db.execute(text("update admin_banners set created_by_user_id = null where created_by_user_id = :user_id"), params)
+    if _table_exists(db, "contact_infos") and _column_exists(db, "contact_infos", "updated_by"):
+        db.execute(text("update contact_infos set updated_by = null where updated_by = :user_id"), params)
+
+    if _table_exists(db, "learning_documents"):
+        if _column_exists(db, "learning_documents", "created_by_user_id"):
+            db.execute(text("delete from learning_documents where created_by_user_id = :user_id"), params)
+        if _table_exists(db, "classrooms") and _column_exists(db, "learning_documents", "classroom_id"):
+            db.execute(
+                text(
+                    """
+                    delete from learning_documents
+                    where classroom_id in (
+                        select id from classrooms where created_by_user_id = :user_id
+                    )
+                    """
+                ),
+                params,
+            )
+
+    if _table_exists(db, "documents"):
+        if _column_exists(db, "documents", "created_by"):
+            db.execute(text("delete from documents where created_by = :user_id"), params)
+        if _table_exists(db, "classes") and _column_exists(db, "documents", "class_id"):
+            db.execute(
+                text(
+                    """
+                    delete from documents
+                    where class_id in (
+                        select id from classes where teacher_id = :user_id
+                    )
+                    """
+                ),
+                params,
+            )
+
+    if _column_exists(db, "exams", "created_by"):
+        _delete_exams_where(db, "created_by = :user_id", params)
+    if _column_exists(db, "exams", "classroom_id") and _table_exists(db, "classrooms"):
+        _delete_exams_where(
+            db,
+            "classroom_id in (select id from classrooms where created_by_user_id = :user_id)",
+            params,
+        )
+    if _column_exists(db, "exams", "class_id") and _table_exists(db, "classes"):
+        _delete_exams_where(
+            db,
+            "class_id in (select id from classes where teacher_id = :user_id)",
+            params,
+        )
+
+    if _table_exists(db, "classroom_memberships") and _table_exists(db, "classrooms"):
+        db.execute(
+            text(
+                """
+                delete from classroom_memberships
+                where classroom_id in (
+                    select id from classrooms where created_by_user_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+    if _table_exists(db, "class_members") and _table_exists(db, "classes"):
+        db.execute(
+            text(
+                """
+                delete from class_members
+                where class_id in (
+                    select id from classes where teacher_id = :user_id
+                )
+                """
+            ),
+            params,
+        )
+    if _table_exists(db, "classrooms"):
+        db.execute(text("delete from classrooms where created_by_user_id = :user_id"), params)
+    if _table_exists(db, "classes"):
+        db.execute(text("delete from classes where teacher_id = :user_id"), params)
+
+
+def _delete_student_owned_rows(db: Session, student_id: int) -> None:
+    params = {"user_id": student_id}
+    if _table_exists(db, "exam_attempts"):
+        attempt_filters = []
+        if _column_exists(db, "exam_attempts", "user_id"):
+            attempt_filters.append("user_id = :user_id")
+        if _column_exists(db, "exam_attempts", "student_id"):
+            attempt_filters.append("student_id = :user_id")
+        if attempt_filters:
+            where_sql = " or ".join(attempt_filters)
+            if _table_exists(db, "exam_attempt_answers"):
+                db.execute(
+                    text(
+                        f"""
+                        delete from exam_attempt_answers
+                        where attempt_id in (
+                            select id from exam_attempts where {where_sql}
+                        )
+                        """
+                    ),
+                    params,
+                )
+            db.execute(text(f"delete from exam_attempts where {where_sql}"), params)
+
+    if _table_exists(db, "classroom_memberships") and _column_exists(db, "classroom_memberships", "user_id"):
+        db.execute(text("delete from classroom_memberships where user_id = :user_id"), params)
+    if _table_exists(db, "class_members") and _column_exists(db, "class_members", "student_id"):
+        db.execute(text("delete from class_members where student_id = :user_id"), params)
+
+
+def _hard_delete_user(db: Session, user_id: int, role_name: str | None = None) -> None:
+    _delete_chat_user_references(db, user_id)
+    if role_name == TEACHER_ROLE_NAME:
+        _delete_teacher_owned_rows(db, user_id)
+    elif role_name == STUDENT_ROLE_NAME:
+        _delete_student_owned_rows(db, user_id)
+    else:
+        if _table_exists(db, "admin_banners") and _column_exists(db, "admin_banners", "created_by_user_id"):
+            db.execute(
+                text("update admin_banners set created_by_user_id = null where created_by_user_id = :user_id"),
+                {"user_id": user_id},
+            )
+        if _table_exists(db, "contact_infos") and _column_exists(db, "contact_infos", "updated_by"):
+            db.execute(
+                text("update contact_infos set updated_by = null where updated_by = :user_id"),
+                {"user_id": user_id},
+            )
+
+    _delete_user_auth_rows(db, user_id)
+    db.execute(text("delete from users where id = :user_id"), {"user_id": user_id})
+
+
+def list_admin_accounts(db: Session) -> dict:
+    users = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.role.has(Role.name.in_(ADMIN_ACCESS_ROLE_NAMES)))
+        .order_by(User.role_id.asc(), User.created_at.desc(), User.id.desc())
+        .all()
+    )
+    admin_ids = [user.id for user in users]
+    active_user_ids = _recent_activity_user_ids(db, admin_ids)
+    return {"items": [_serialize_admin_account(user, active_user_ids) for user in users]}
+
+
+def create_admin_account(
+    db: Session,
+    full_name: str,
+    email: str,
+    password: str,
+) -> dict:
+    normalized_full_name = full_name.strip()
+    normalized_email = email.strip().lower()
+
+    if not normalized_full_name:
+        raise HTTPException(status_code=400, detail="full_name is required")
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="email is required")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    existing_user = db.query(User).filter(User.email == normalized_email).first()
+    if existing_user:
+        raise HTTPException(status_code=409, detail="Email already exists")
+
+    admin_role = get_or_create_role(db, ADMIN_ROLE_NAME)
+    user = User(
+        role_id=admin_role.id,
+        full_name=normalized_full_name,
+        username=build_username_from_email(db, normalized_email),
+        email=normalized_email,
+        password_hash=hash_password(password),
+        auth_type="local",
+        email_verified=True,
+        status="active",
+        is_first_login=False,
+        max_exam_create=50,
+        max_document_create=50,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    user = _get_admin_account(db, user.id)
+    return {
+        "message": "Admin account created successfully",
+        "admin": _serialize_admin_account(user),
+    }
+
+
+def update_admin_account(
+    db: Session,
+    current_administrator: User,
+    user_id: int,
+    full_name: str | None,
+    password: str | None,
+    status: str | None,
+) -> dict:
+    user = _get_admin_account(db, user_id)
+    _require_editable_admin(user, current_administrator)
+
+    if full_name is not None:
+        normalized_full_name = full_name.strip()
+        if not normalized_full_name:
+            raise HTTPException(status_code=400, detail="full_name cannot be empty")
+        user.full_name = normalized_full_name
+
+    if password is not None:
+        if len(password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        user.password_hash = hash_password(password)
+        if user.auth_type == "oauth":
+            user.auth_type = "mixed"
+
+    if status is not None:
+        if status not in ADMIN_MUTABLE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        user.status = status
+
+    user.updated_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    user = _get_admin_account(db, user.id)
+    return {
+        "message": "Admin account updated successfully",
+        "admin": _serialize_admin_account(user),
+    }
+
+
+def delete_admin_account(
+    db: Session,
+    current_administrator: User,
+    user_id: int,
+) -> dict:
+    user = _get_admin_account(db, user_id)
+    _require_editable_admin(user, current_administrator)
+    role_name = user.role.name if user.role else None
+    _hard_delete_user(db, user.id, role_name)
+    db.commit()
+    return {"message": "Admin account deleted successfully"}
+
+
+def delete_admin_teacher(
+    db: Session,
+    current_administrator: User,
+    teacher_id: int,
+) -> dict:
+    _ = current_administrator
+    teacher = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(
+            User.id == teacher_id,
+            User.role.has(Role.name == TEACHER_ROLE_NAME),
+        )
+        .first()
+    )
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    _hard_delete_user(db, teacher.id, TEACHER_ROLE_NAME)
+    db.commit()
+    return {"message": "Teacher deleted successfully"}
+
+
+def delete_admin_student(
+    db: Session,
+    current_administrator: User,
+    student_id: int,
+) -> dict:
+    _ = current_administrator
+    student = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(
+            User.id == student_id,
+            User.role.has(Role.name == STUDENT_ROLE_NAME),
+        )
+        .first()
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    _hard_delete_user(db, student.id, STUDENT_ROLE_NAME)
+    db.commit()
+    return {"message": "Student deleted successfully"}
+
+
+def _get_managed_user(db: Session, user_id: int, role_name: str, label: str) -> User:
+    user = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.role))
+        .filter(
+            User.id == user_id,
+            User.role.has(Role.name == role_name),
+            User.status != "deleted",
+        )
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    return user
+
+
+def _serialize_teacher_user(
+    teacher: User,
+    class_count: int,
+    exam_count: int,
+    document_count: int,
+    is_online: bool,
+) -> dict:
+    return {
+        "id": teacher.id,
+        "code": f"TCH-{teacher.id:04d}",
+        "full_name": teacher.full_name,
+        "username": teacher.username,
+        "email": teacher.email,
+        "phone": teacher.phone,
+        "avatar_url": teacher.avatar_url,
+        "status": teacher.status,
+        "is_online": is_online,
+        "school_name": teacher.profile.school_name if teacher.profile else None,
+        "date_of_birth": teacher.profile.date_of_birth if teacher.profile else None,
+        "gender": teacher.profile.gender if teacher.profile else None,
+        "class_count": class_count,
+        "exam_count": exam_count,
+        "document_count": document_count,
+        "last_login_at": teacher.last_login_at,
+        "created_at": teacher.created_at,
+    }
+
+
+def _serialize_student_user(
+    student: User,
+    class_count: int,
+    attempt_count: int,
+    average_score: float | None,
+    is_online: bool,
+) -> dict:
+    return {
+        "id": student.id,
+        "code": f"STU-{student.id:05d}",
+        "full_name": student.full_name,
+        "username": student.username,
+        "email": student.email,
+        "phone": student.phone,
+        "avatar_url": student.avatar_url,
+        "status": student.status,
+        "is_online": is_online,
+        "school_name": student.profile.school_name if student.profile else None,
+        "date_of_birth": student.profile.date_of_birth if student.profile else None,
+        "gender": student.profile.gender if student.profile else None,
+        "class_count": class_count,
+        "attempt_count": attempt_count,
+        "average_score": average_score,
+        "last_login_at": student.last_login_at,
+        "created_at": student.created_at,
+    }
+
+
+def _average_attempt_score(db: Session, student_id: int) -> float | None:
+    value = (
+        db.query(func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)))
+        .filter(
+            ExamAttempt.user_id == student_id,
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+            ExamAttempt.total_points > 0,
+        )
+        .scalar()
+    )
+    return round(float(value), 1) if value is not None else None
+
+
+def _exam_average_scores(db: Session, exam_ids: list[int]) -> dict[int, float | None]:
+    if not exam_ids:
+        return {}
+    return {
+        exam_id: round(float(value), 1) if value is not None else None
+        for exam_id, value in (
+            db.query(
+                ExamAttempt.exam_id,
+                func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)),
+            )
+            .filter(
+                ExamAttempt.exam_id.in_(exam_ids),
+                ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+                ExamAttempt.total_points > 0,
+            )
+            .group_by(ExamAttempt.exam_id)
+            .all()
+        )
+    }
+
+
+def _apply_admin_user_profile_update(
+    db: Session,
+    user: User,
+    full_name: str | None,
+    email: str | None,
+    phone: str | None,
+    avatar_url: str | None,
+    date_of_birth: date | None,
+    gender: str | None,
+    school_name: str | None,
+    status: str | None,
+) -> None:
+    if full_name is not None:
+        normalized_full_name = full_name.strip()
+        if not normalized_full_name:
+            raise HTTPException(status_code=400, detail="full_name is required")
+        user.full_name = normalized_full_name
+
+    if email is not None:
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            raise HTTPException(status_code=400, detail="email is required")
+        existing_user = (
+            db.query(User.id)
+            .filter(User.email == normalized_email, User.id != user.id)
+            .first()
+        )
+        if existing_user:
+            raise HTTPException(status_code=409, detail="Email already exists")
+        user.email = normalized_email
+
+    if phone is not None:
+        user.phone = phone.strip() or None
+    if avatar_url is not None:
+        user.avatar_url = avatar_url.strip() or None
+    if status is not None:
+        if status not in ADMIN_MUTABLE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        user.status = status
+
+    should_update_profile = any(
+        value is not None for value in (date_of_birth, gender, school_name)
+    )
+    if should_update_profile:
+        if user.profile is None:
+            user.profile = UserProfile(
+                user_id=user.id,
+                date_of_birth=date_of_birth or date(1970, 1, 1),
+                gender=(gender or "other").strip() or "other",
+                school_name=school_name.strip() if school_name else None,
+                onboarding_completed_at=utc_now(),
+            )
+            db.add(user.profile)
+        else:
+            if date_of_birth is not None:
+                user.profile.date_of_birth = date_of_birth
+            if gender is not None:
+                user.profile.gender = gender.strip() or "other"
+            if school_name is not None:
+                user.profile.school_name = school_name.strip() or None
+            user.profile.updated_at = utc_now()
+
+    user.updated_at = utc_now()
+
+
+def _reset_managed_user_password(user: User, password: str) -> None:
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    user.password_hash = hash_password(password)
+    if user.auth_type == "oauth":
+        user.auth_type = "mixed"
+    user.updated_at = utc_now()
+
+
+def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
+    teacher = _get_managed_user(db, teacher_id, TEACHER_ROLE_NAME, "Teacher")
+
+    classrooms = (
+        db.query(Classroom)
+        .filter(Classroom.created_by_user_id == teacher.id)
+        .order_by(Classroom.created_at.desc(), Classroom.id.desc())
+        .all()
+    )
+    classroom_ids = [classroom.id for classroom in classrooms]
+    classroom_map = {classroom.id: classroom for classroom in classrooms}
+
+    student_counts: dict[int, int] = {}
+    class_exam_counts: dict[int, int] = {}
+    class_document_counts: dict[int, int] = {}
+    if classroom_ids:
+        student_counts = _count_by(
+            db.query(ClassroomMembership.classroom_id, func.count(ClassroomMembership.id))
+            .join(User, User.id == ClassroomMembership.user_id)
+            .filter(
+                ClassroomMembership.classroom_id.in_(classroom_ids),
+                User.role.has(Role.name == STUDENT_ROLE_NAME),
+                User.status != "deleted",
+            )
+            .group_by(ClassroomMembership.classroom_id)
+            .all()
+        )
+        class_exam_counts = _count_by(
+            db.query(Exam.classroom_id, func.count(Exam.id))
+            .filter(Exam.classroom_id.in_(classroom_ids))
+            .group_by(Exam.classroom_id)
+            .all()
+        )
+        class_document_counts = _count_by(
+            db.query(LearningDocument.classroom_id, func.count(LearningDocument.id))
+            .filter(LearningDocument.classroom_id.in_(classroom_ids))
+            .group_by(LearningDocument.classroom_id)
+            .all()
+        )
+
+    exams = (
+        db.query(
+            Exam.id,
+            Exam.created_by_user_id,
+            Exam.title,
+            Exam.description,
+            Exam.scope,
+            Exam.classroom_id,
+            Exam.duration_minutes,
+            Exam.total_points,
+            Exam.is_published,
+            Exam.is_active,
+            Exam.created_at,
+            Exam.updated_at,
+        )
+        .filter(Exam.created_by_user_id == teacher.id)
+        .order_by(Exam.created_at.desc(), Exam.id.desc())
+        .all()
+    )
+    exam_ids = [exam.id for exam in exams]
+    exam_question_counts = (
+        _count_by(
+            db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
+            .filter(ExamQuestion.exam_id.in_(exam_ids))
+            .group_by(ExamQuestion.exam_id)
+            .all()
+        )
+        if exam_ids
+        else {}
+    )
+    exam_attempt_counts = (
+        _count_by(
+            db.query(ExamAttempt.exam_id, func.count(ExamAttempt.id))
+            .filter(ExamAttempt.exam_id.in_(exam_ids))
+            .group_by(ExamAttempt.exam_id)
+            .all()
+        )
+        if exam_ids
+        else {}
+    )
+    exam_average_scores = _exam_average_scores(db, exam_ids)
+
+    documents = (
+        db.query(LearningDocument)
+        .filter(LearningDocument.created_by_user_id == teacher.id)
+        .order_by(LearningDocument.created_at.desc(), LearningDocument.id.desc())
+        .all()
+    )
+
+    total_students = sum(student_counts.values())
+    is_online = teacher.id in _recent_activity_user_ids(db, [teacher.id])
+
+    return {
+        "teacher": _serialize_teacher_user(
+            teacher,
+            len(classrooms),
+            len(exams),
+            len(documents),
+            is_online,
+        ),
+        "metrics": [
+            _metric("total_classes", "Tổng số lớp học", len(classrooms), subtext="lớp do giáo viên tạo"),
+            _metric("total_students", "Tổng số học sinh", total_students, subtext="trong tất cả lớp"),
+            _metric("total_exams", "Đề thi đã tạo", len(exams), subtext="từ tài khoản giáo viên"),
+            _metric("total_documents", "Tài liệu", len(documents), subtext="tài liệu đã tạo"),
+        ],
+        "classes": [
+            {
+                "id": classroom.id,
+                "name": classroom.name,
+                "description": classroom.description,
+                "join_code": classroom.join_code,
+                "student_count": student_counts.get(classroom.id, 0),
+                "exam_count": class_exam_counts.get(classroom.id, 0),
+                "document_count": class_document_counts.get(classroom.id, 0),
+                "status": "active",
+                "created_at": classroom.created_at,
+                "updated_at": classroom.updated_at,
+            }
+            for classroom in classrooms
+        ],
+        "exams": [
+            {
+                "id": exam.id,
+                "title": exam.title,
+                "description": exam.description,
+                "scope": exam.scope,
+                "classroom_id": exam.classroom_id,
+                "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
+                "teacher_id": teacher.id,
+                "teacher_name": teacher.full_name,
+                "duration_minutes": exam.duration_minutes,
+                "total_points": exam.total_points,
+                "question_count": exam_question_counts.get(exam.id, 0),
+                "attempt_count": exam_attempt_counts.get(exam.id, 0),
+                "average_score": exam_average_scores.get(exam.id),
+                "is_published": exam.is_published,
+                "is_active": exam.is_active,
+                "created_at": exam.created_at,
+                "updated_at": exam.updated_at,
+            }
+            for exam in exams
+        ],
+        "documents": [
+            {
+                "id": document.id,
+                "title": document.title,
+                "summary": document.summary,
+                "content_preview": (document.summary or document.content or "")[:160],
+                "scope": document.scope,
+                "classroom_id": document.classroom_id,
+                "classroom_name": classroom_map[document.classroom_id].name if document.classroom_id in classroom_map else None,
+                "teacher_id": teacher.id,
+                "teacher_name": teacher.full_name,
+                "is_published": document.is_published,
+                "content_length": len(document.content or ""),
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+            }
+            for document in documents
+        ],
+    }
+
+
+def get_admin_student_detail(db: Session, student_id: int) -> dict:
+    student = _get_managed_user(db, student_id, STUDENT_ROLE_NAME, "Student")
+
+    memberships = (
+        db.query(ClassroomMembership)
+        .join(Classroom, Classroom.id == ClassroomMembership.classroom_id)
+        .filter(ClassroomMembership.user_id == student.id)
+        .order_by(ClassroomMembership.joined_at.desc(), ClassroomMembership.id.desc())
+        .all()
+    )
+    classrooms = [membership.classroom for membership in memberships]
+    classroom_ids = [classroom.id for classroom in classrooms]
+    classroom_map = {classroom.id: classroom for classroom in classrooms}
+    joined_at_map = {
+        membership.classroom_id: membership.joined_at for membership in memberships
+    }
+
+    teacher_ids = [
+        classroom.created_by_user_id
+        for classroom in classrooms
+        if classroom.created_by_user_id is not None
+    ]
+    teachers = (
+        {teacher.id: teacher for teacher in db.query(User).filter(User.id.in_(teacher_ids)).all()}
+        if teacher_ids
+        else {}
+    )
+
+    student_counts: dict[int, int] = {}
+    class_exam_counts: dict[int, int] = {}
+    class_document_counts: dict[int, int] = {}
+    if classroom_ids:
+        student_counts = _count_by(
+            db.query(ClassroomMembership.classroom_id, func.count(ClassroomMembership.id))
+            .join(User, User.id == ClassroomMembership.user_id)
+            .filter(
+                ClassroomMembership.classroom_id.in_(classroom_ids),
+                User.role.has(Role.name == STUDENT_ROLE_NAME),
+                User.status != "deleted",
+            )
+            .group_by(ClassroomMembership.classroom_id)
+            .all()
+        )
+        class_exam_counts = _count_by(
+            db.query(Exam.classroom_id, func.count(Exam.id))
+            .filter(Exam.classroom_id.in_(classroom_ids))
+            .group_by(Exam.classroom_id)
+            .all()
+        )
+        class_document_counts = _count_by(
+            db.query(LearningDocument.classroom_id, func.count(LearningDocument.id))
+            .filter(LearningDocument.classroom_id.in_(classroom_ids))
+            .group_by(LearningDocument.classroom_id)
+            .all()
+        )
+
+    exams = (
+        db.query(
+            Exam.id,
+            Exam.created_by_user_id,
+            Exam.title,
+            Exam.description,
+            Exam.scope,
+            Exam.classroom_id,
+            Exam.duration_minutes,
+            Exam.total_points,
+            Exam.is_published,
+            Exam.is_active,
+            Exam.created_at,
+            Exam.updated_at,
+        )
+        .filter(Exam.classroom_id.in_(classroom_ids))
+        .order_by(Exam.created_at.desc(), Exam.id.desc())
+        .all()
+        if classroom_ids
+        else []
+    )
+    exam_ids = [exam.id for exam in exams]
+    exam_question_counts = (
+        _count_by(
+            db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
+            .filter(ExamQuestion.exam_id.in_(exam_ids))
+            .group_by(ExamQuestion.exam_id)
+            .all()
+        )
+        if exam_ids
+        else {}
+    )
+    exam_attempt_counts = (
+        _count_by(
+            db.query(ExamAttempt.exam_id, func.count(ExamAttempt.id))
+            .filter(ExamAttempt.exam_id.in_(exam_ids))
+            .group_by(ExamAttempt.exam_id)
+            .all()
+        )
+        if exam_ids
+        else {}
+    )
+    exam_average_scores = _exam_average_scores(db, exam_ids)
+
+    attempts = (
+        db.query(
+            ExamAttempt.id.label("attempt_id"),
+            ExamAttempt.exam_id,
+            ExamAttempt.score,
+            ExamAttempt.total_points,
+            ExamAttempt.status,
+            ExamAttempt.started_at,
+            ExamAttempt.submitted_at,
+            ExamAttempt.created_at,
+            Exam.title.label("exam_title"),
+            Exam.classroom_id.label("exam_classroom_id"),
+            Classroom.name.label("classroom_name"),
+        )
+        .join(Exam, Exam.id == ExamAttempt.exam_id)
+        .outerjoin(Classroom, Classroom.id == Exam.classroom_id)
+        .filter(ExamAttempt.user_id == student.id)
+        .order_by(ExamAttempt.created_at.desc(), ExamAttempt.id.desc())
+        .all()
+    )
+
+    document_filters = [LearningDocument.scope == "system"]
+    if classroom_ids:
+        document_filters.append(LearningDocument.classroom_id.in_(classroom_ids))
+    documents = (
+        db.query(LearningDocument)
+        .filter(or_(*document_filters))
+        .order_by(LearningDocument.created_at.desc(), LearningDocument.id.desc())
+        .all()
+    )
+
+    attempt_count = len(attempts)
+    average_score = _average_attempt_score(db, student.id)
+    is_online = student.id in _recent_activity_user_ids(db, [student.id])
+
+    return {
+        "student": _serialize_student_user(
+            student,
+            len(classrooms),
+            attempt_count,
+            average_score,
+            is_online,
+        ),
+        "metrics": [
+            _metric("total_classes", "Tổng lớp học", len(classrooms), subtext="lớp đang tham gia"),
+            _metric("submitted_attempts", "Bài làm", attempt_count, subtext="lượt làm bài"),
+            _metric("average_score", "Điểm trung bình", average_score or 0, suffix="%", subtext="trên bài đã nộp"),
+            _metric("available_documents", "Tài liệu", len(documents), subtext="có thể xem"),
+        ],
+        "classes": [
+            {
+                "id": classroom.id,
+                "name": classroom.name,
+                "description": classroom.description,
+                "join_code": classroom.join_code,
+                "teacher_id": classroom.created_by_user_id,
+                "teacher_name": teachers[classroom.created_by_user_id].full_name if classroom.created_by_user_id in teachers else None,
+                "student_count": student_counts.get(classroom.id, 0),
+                "exam_count": class_exam_counts.get(classroom.id, 0),
+                "document_count": class_document_counts.get(classroom.id, 0),
+                "joined_at": joined_at_map.get(classroom.id),
+                "status": "active",
+                "created_at": classroom.created_at,
+                "updated_at": classroom.updated_at,
+            }
+            for classroom in classrooms
+        ],
+        "attempts": [
+            {
+                "id": row.attempt_id,
+                "exam_id": row.exam_id,
+                "exam_title": row.exam_title,
+                "classroom_id": row.exam_classroom_id,
+                "classroom_name": row.classroom_name,
+                "score": row.score,
+                "total_points": row.total_points,
+                "score_percent": _score_percent(row.score, row.total_points),
+                "status": row.status,
+                "started_at": row.started_at,
+                "submitted_at": row.submitted_at,
+                "created_at": row.created_at,
+            }
+            for row in attempts
+        ],
+        "exams": [
+            {
+                "id": exam.id,
+                "title": exam.title,
+                "description": exam.description,
+                "scope": exam.scope,
+                "classroom_id": exam.classroom_id,
+                "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
+                "teacher_id": exam.created_by_user_id,
+                "teacher_name": teachers[exam.created_by_user_id].full_name if exam.created_by_user_id in teachers else None,
+                "duration_minutes": exam.duration_minutes,
+                "total_points": exam.total_points,
+                "question_count": exam_question_counts.get(exam.id, 0),
+                "attempt_count": exam_attempt_counts.get(exam.id, 0),
+                "average_score": exam_average_scores.get(exam.id),
+                "is_published": exam.is_published,
+                "is_active": exam.is_active,
+                "created_at": exam.created_at,
+                "updated_at": exam.updated_at,
+            }
+            for exam in exams
+        ],
+        "documents": [
+            {
+                "id": document.id,
+                "title": document.title,
+                "summary": document.summary,
+                "content_preview": (document.summary or document.content or "")[:160],
+                "scope": document.scope,
+                "classroom_id": document.classroom_id,
+                "classroom_name": classroom_map[document.classroom_id].name if document.classroom_id in classroom_map else None,
+                "teacher_id": document.created_by_user_id,
+                "teacher_name": teachers[document.created_by_user_id].full_name if document.created_by_user_id in teachers else None,
+                "is_published": document.is_published,
+                "content_length": len(document.content or ""),
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+            }
+            for document in documents
+        ],
+    }
+
+
+def update_admin_teacher_profile(
+    db: Session,
+    current_administrator: User,
+    teacher_id: int,
+    full_name: str | None,
+    email: str | None,
+    phone: str | None,
+    avatar_url: str | None,
+    date_of_birth: date | None,
+    gender: str | None,
+    school_name: str | None,
+    status: str | None,
+) -> dict:
+    _ = current_administrator
+    teacher = _get_managed_user(db, teacher_id, TEACHER_ROLE_NAME, "Teacher")
+    _apply_admin_user_profile_update(
+        db,
+        teacher,
+        full_name,
+        email,
+        phone,
+        avatar_url,
+        date_of_birth,
+        gender,
+        school_name,
+        status,
+    )
+    db.commit()
+    return get_admin_teacher_detail(db, teacher_id)
+
+
+def update_admin_student_profile(
+    db: Session,
+    current_administrator: User,
+    student_id: int,
+    full_name: str | None,
+    email: str | None,
+    phone: str | None,
+    avatar_url: str | None,
+    date_of_birth: date | None,
+    gender: str | None,
+    school_name: str | None,
+    status: str | None,
+) -> dict:
+    _ = current_administrator
+    student = _get_managed_user(db, student_id, STUDENT_ROLE_NAME, "Student")
+    _apply_admin_user_profile_update(
+        db,
+        student,
+        full_name,
+        email,
+        phone,
+        avatar_url,
+        date_of_birth,
+        gender,
+        school_name,
+        status,
+    )
+    db.commit()
+    return get_admin_student_detail(db, student_id)
+
+
+def reset_admin_teacher_password(
+    db: Session,
+    current_administrator: User,
+    teacher_id: int,
+    password: str,
+) -> dict:
+    _ = current_administrator
+    teacher = _get_managed_user(db, teacher_id, TEACHER_ROLE_NAME, "Teacher")
+    _reset_managed_user_password(teacher, password)
+    db.commit()
+    return {"message": "Teacher password reset successfully"}
+
+
+def reset_admin_student_password(
+    db: Session,
+    current_administrator: User,
+    student_id: int,
+    password: str,
+) -> dict:
+    _ = current_administrator
+    student = _get_managed_user(db, student_id, STUDENT_ROLE_NAME, "Student")
+    _reset_managed_user_password(student, password)
+    db.commit()
+    return {"message": "Student password reset successfully"}
