@@ -133,7 +133,7 @@ class TeacherExamQuestionSchema(BaseModel):
     order_index: int
     prompt: str
     image_url: str | None = None
-    points: int
+    points: float
     options: list[TeacherExamOptionSchema]
     accepted_answers: list[str]
 
@@ -147,7 +147,7 @@ class TeacherExamSummarySchema(BaseModel):
     classroom_id: int | None = None
     classroom_name: str | None = None
     duration_minutes: int
-    total_points: int
+    total_points: float
     question_count: int
     attempt_count: int
     is_published: bool
@@ -176,7 +176,7 @@ class TeacherExamQuestionInput(BaseModel):
     prompt: str = ""
     image_url: str | None = None
     order_index: int | None = None
-    points: int = Field(default=1, ge=1)
+    points: float = Field(default=1.0, gt=0)
     options: list[TeacherExamOptionInput] = Field(default_factory=list)
     accepted_answers: list[str] = Field(default_factory=list)
 
@@ -219,13 +219,19 @@ class TeacherExamResponse(BaseModel):
 
 
 class TeacherUploadedImageSchema(BaseModel):
+    id: int
     filename: str
     content_type: str
     size_bytes: int
     public_id: str
     url: str
+    created_at: str | None = None
 
 
 class TeacherImageUploadResponse(BaseModel):
     message: str
     image: TeacherUploadedImageSchema
+
+
+class TeacherImageListResponse(BaseModel):
+    items: list[TeacherUploadedImageSchema]

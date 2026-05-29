@@ -60,7 +60,7 @@ class StudentExamQuestionSchema(BaseModel):
     order_index: int
     prompt: str
     image_url: str | None = None
-    points: int
+    points: float
     options: list[StudentExamOptionSchema]
 
 
@@ -73,7 +73,7 @@ class StudentExamSummarySchema(BaseModel):
     classroom_id: int | None = None
     classroom_name: str | None = None
     duration_minutes: int
-    total_points: int
+    total_points: float
     question_count: int
     is_active: bool
 
@@ -102,8 +102,8 @@ class StudentExamResultListItemSchema(BaseModel):
     scope: StudentScope
     classroom_id: int | None = None
     classroom_name: str | None = None
-    score: int
-    total_points: int
+    score: float
+    total_points: float
     score_percent: float
     correct_answers_count: int
     total_questions: int
@@ -121,8 +121,8 @@ class AttemptSummarySchema(BaseModel):
     id: int
     exam_id: int
     status: AttemptStatus
-    score: int | None = None
-    total_points: int
+    score: float | None = None
+    total_points: float
     correct_answers_count: int | None = None
     total_questions: int
     answered_count: int
@@ -164,8 +164,8 @@ class AttemptResultAnswerSchema(BaseModel):
     correct_option_image_url: str | None = None
     accepted_answers: list[str]
     is_correct: bool
-    points_earned: int
-    max_points: int
+    points_earned: float
+    max_points: float
 
 
 class AttemptResultSchema(BaseModel):
@@ -174,8 +174,8 @@ class AttemptResultSchema(BaseModel):
     exam_title: str
     exam_image_url: str | None = None
     status: AttemptStatus
-    score: int
-    total_points: int
+    score: float
+    total_points: float
     correct_answers_count: int
     total_questions: int
     started_at: datetime

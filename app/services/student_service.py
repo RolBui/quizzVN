@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 import unicodedata
 
@@ -33,6 +34,125 @@ def bootstrap_student_learning_storage() -> None:
     ExamQuestionOption.__table__.create(bind=engine, checkfirst=True)
     ExamAttempt.__table__.create(bind=engine, checkfirst=True)
     ExamAttemptAnswer.__table__.create(bind=engine, checkfirst=True)
+    _ensure_student_learning_columns()
+
+
+def _ensure_student_learning_columns() -> None:
+    statements = [
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS total_points NUMERIC(10, 4) DEFAULT 0",
+        "ALTER TABLE exams ALTER COLUMN total_points TYPE NUMERIC(10, 4) USING total_points::numeric",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
+        "UPDATE exams SET scope = COALESCE(scope, 'system')",
+        "UPDATE exams SET duration_minutes = COALESCE(duration_minutes, 30)",
+        "UPDATE exams SET total_points = COALESCE(total_points, 0)",
+        "UPDATE exams SET is_published = COALESCE(is_published, FALSE)",
+        "UPDATE exams SET is_active = COALESCE(is_active, TRUE)",
+        "UPDATE exams SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)",
+        "UPDATE exams SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)",
+        "ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS question_type VARCHAR(30) DEFAULT 'single_choice'",
+        "ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS prompt TEXT",
+        "ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS image_url TEXT",
+        "ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0",
+        "ALTER TABLE exam_questions ADD COLUMN IF NOT EXISTS points NUMERIC(10, 4) DEFAULT 1",
+        "ALTER TABLE exam_questions ALTER COLUMN points TYPE NUMERIC(10, 4) USING points::numeric",
+        "UPDATE exam_questions SET question_type = COALESCE(question_type, 'single_choice')",
+        "UPDATE exam_questions SET order_index = COALESCE(order_index, 0)",
+        "UPDATE exam_questions SET points = COALESCE(points, 1)",
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_questions' AND column_name = 'content'
+            ) THEN
+                EXECUTE '
+                    UPDATE exam_questions
+                    SET prompt = COALESCE(prompt, content)
+                    WHERE prompt IS NULL
+                ';
+            END IF;
+        END $$
+        """,
+        "UPDATE exam_questions SET prompt = COALESCE(prompt, '')",
+        """
+        UPDATE exams AS e
+        SET image_url = q.image_url
+        FROM (
+            SELECT DISTINCT ON (exam_id)
+                exam_id,
+                image_url
+            FROM exam_questions
+            WHERE image_url IS NOT NULL
+              AND BTRIM(image_url) <> ''
+            ORDER BY exam_id, order_index NULLS LAST, id
+        ) AS q
+        WHERE e.id = q.exam_id
+          AND (e.image_url IS NULL OR BTRIM(e.image_url) = '')
+        """,
+        "ALTER TABLE exam_question_options ADD COLUMN IF NOT EXISTS image_url TEXT",
+        "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS user_id INTEGER",
+        "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS score NUMERIC(10, 4)",
+        "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS total_points NUMERIC(10, 4) DEFAULT 0",
+        "ALTER TABLE exam_attempts ALTER COLUMN score TYPE NUMERIC(10, 4) USING score::numeric",
+        "ALTER TABLE exam_attempts ALTER COLUMN total_points TYPE NUMERIC(10, 4) USING total_points::numeric",
+        "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS correct_answers_count INTEGER",
+        "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        "UPDATE exam_attempts SET total_points = COALESCE(total_points, 0)",
+        "UPDATE exam_attempts SET updated_at = COALESCE(updated_at, submitted_at, started_at, created_at, CURRENT_TIMESTAMP)",
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_attempts' AND column_name = 'student_id'
+            ) THEN
+                EXECUTE '
+                    UPDATE exam_attempts
+                    SET user_id = COALESCE(user_id, student_id)
+                    WHERE user_id IS NULL
+                ';
+            END IF;
+        END $$
+        """,
+        "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS selected_option_id INTEGER",
+        "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS answer_text TEXT",
+        "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_attempt_answers' AND column_name = 'created_at'
+            ) THEN
+                EXECUTE '
+                    UPDATE exam_attempt_answers
+                    SET answered_at = COALESCE(answered_at, created_at, CURRENT_TIMESTAMP)
+                    WHERE answered_at IS NULL
+                ';
+            ELSE
+                EXECUTE '
+                    UPDATE exam_attempt_answers
+                    SET answered_at = COALESCE(answered_at, CURRENT_TIMESTAMP)
+                    WHERE answered_at IS NULL
+                ';
+            END IF;
+        END $$
+        """,
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 def require_student_user(db: Session, user_id: int) -> User:
@@ -157,8 +277,8 @@ def _serialize_document(document: LearningDocument) -> dict:
     }
 
 
-def _get_exam_total_points(exam: Exam) -> int:
-    computed_total = sum(question.points for question in exam.questions)
+def _get_exam_total_points(exam: Exam) -> float:
+    computed_total = sum((question.points or 0) for question in exam.questions)
     if computed_total > 0:
         return computed_total
     return exam.total_points
@@ -213,7 +333,7 @@ def _get_exam_preview_image_url(exam: Exam) -> str | None:
     return None
 
 
-def _calculate_score_percent(score: int | None, total_points: int | None) -> float:
+def _calculate_score_percent(score: float | None, total_points: float | None) -> float:
     normalized_total_points = float(total_points or 0)
     if normalized_total_points <= 0:
         return 0.0
@@ -222,7 +342,7 @@ def _calculate_score_percent(score: int | None, total_points: int | None) -> flo
 
 
 def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
-    score = attempt.score or 0
+    score = attempt.score or 0.0
     total_points = attempt.total_points or _get_exam_total_points(attempt.exam)
     score_percent = _calculate_score_percent(score, total_points)
     correct_answers_count = attempt.correct_answers_count or 0
@@ -581,7 +701,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
                 if question_type == QUESTION_TYPE_TEXT
                 else [],
                 "is_correct": is_correct,
-                "points_earned": question.points if is_correct else 0,
+                "points_earned": question.points if is_correct else 0.0,
                 "max_points": question.points,
             }
         )
@@ -592,7 +712,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
         "exam_title": attempt.exam.title,
         "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "status": attempt.status,
-        "score": attempt.score or 0,
+        "score": attempt.score or 0.0,
         "total_points": attempt.total_points or _get_exam_total_points(attempt.exam),
         "correct_answers_count": attempt.correct_answers_count or 0,
         "total_questions": len(attempt.exam.questions),
@@ -612,7 +732,7 @@ def submit_student_attempt(db: Session, student: User, attempt_id: int) -> dict:
         }
 
     answer_map = {answer.question_id: answer for answer in attempt.answers}
-    score = 0
+    score = 0.0
     correct_answers_count = 0
 
     for question in attempt.exam.questions:

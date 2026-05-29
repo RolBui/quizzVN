@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -12,8 +12,8 @@ class ExamAttempt(Base):
     exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(String, nullable=False)
-    score = Column(Integer, nullable=True)
-    total_points = Column(Integer, nullable=False, default=0)
+    score = Column(Numeric(10, 4, asdecimal=False), nullable=True)
+    total_points = Column(Numeric(10, 4, asdecimal=False), nullable=False, default=0)
     correct_answers_count = Column(Integer, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     submitted_at = Column(DateTime(timezone=True), nullable=True)
