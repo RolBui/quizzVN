@@ -1,158 +1,504 @@
-import { Download, Plus, Search, Users, UserPlus, UserCheck, UserMinus, TrendingUp, TrendingDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Download,
+  Loader2,
+  MessageSquare,
+  Pencil,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { MetricSparklineCard } from "../components/MetricSparklineCard";
+import { PaginationBar } from "../components/PaginationBar";
+import { StudentDetail } from "../components/StudentDetail";
+import {
+  adminApi,
+  chatApi,
+  type AdminMetric,
+  type AdminStudent,
+  type AdminStudentOverview,
+} from "../lib/api";
+import { formatDate, formatNumber, initials } from "../lib/format";
+
+const PAGE_SIZE = 7;
+
+const fallbackOverview: AdminStudentOverview = {
+  metrics: [],
+  items: [],
+};
+
+const metricPalettes: Record<string, { stroke: string; fill: string }> = {
+  total_students: {
+    stroke: "#e5a76f",
+    fill: "rgba(229, 167, 111, 0.16)",
+  },
+  new_students: {
+    stroke: "#8fd5b5",
+    fill: "rgba(143, 213, 181, 0.18)",
+  },
+  active_students: {
+    stroke: "#f3a0c4",
+    fill: "rgba(243, 160, 196, 0.18)",
+  },
+  disabled_students: {
+    stroke: "#a8a8f0",
+    fill: "rgba(168, 168, 240, 0.18)",
+  },
+};
+
+const fallbackPalette = {
+  stroke: "#94a3b8",
+  fill: "rgba(148, 163, 184, 0.16)",
+};
+
+function MetricCard({ metric }: { metric: AdminMetric }) {
+  return (
+    <MetricSparklineCard
+      label={metric.label}
+      value={formatNumber(metric.value, metric.suffix)}
+      trend={metric.trend}
+      isUp={metric.is_up}
+      subtext={metric.subtext}
+      sparkline={metric.sparkline}
+      palette={metricPalettes[metric.key] ?? fallbackPalette}
+    />
+  );
+}
+
+function StudentAvatar({ student }: { student: AdminStudent }) {
+  if (student.avatar_url) {
+    return (
+      <img
+        src={student.avatar_url}
+        alt={student.full_name}
+        className="w-10 h-10 rounded-full object-cover border border-outline-variant/30"
+      />
+    );
+  }
+  return (
+    <div className="w-10 h-10 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center font-bold text-sm border border-outline-variant/30">
+      {initials(student.full_name)}
+    </div>
+  );
+}
 
 export function Students() {
-  const students = [
-    { id: "STU-84920", name: "Sarah Jenkins", email: "s.jenkins@student.educore.edu", grade: "A-", date: "01 thg 9 2023", status: "Đã ghi danh", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop" },
-    { id: "STU-84921", name: "Michael Chen", email: "m.chen@student.educore.edu", grade: "B+", date: "01 thg 9 2023", status: "Đã ghi danh", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop" },
-    { id: "STU-84922", name: "Aisha Rahman", email: "a.rahman@student.educore.edu", grade: "A", date: "15 thg 1 2024", status: "Đã ghi danh", initials: "AR", bg: "bg-secondary-container text-on-secondary-container" },
-    { id: "STU-84923", name: "David Kim", email: "d.kim@student.educore.edu", grade: "C", date: "01 thg 9 2023", status: "Nghỉ phép", avatar: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100&h=100&fit=crop" },
-  ];
+  const navigate = useNavigate();
+  const [overview, setOverview] =
+    useState<AdminStudentOverview>(fallbackOverview);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [openingChatStudentId, setOpeningChatStudentId] = useState<
+    number | null
+  >(null);
+  const [deletingStudent, setDeletingStudent] = useState<AdminStudent | null>(
+    null,
+  );
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<AdminStudent | null>(
+    null,
+  );
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const loadStudents = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await adminApi.getStudentsOverview();
+      setOverview(response);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Không thể tải danh sách học sinh.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStudents();
+  }, [loadStudents]);
+
+  const openStudentChat = async (student: AdminStudent) => {
+    if (openingChatStudentId) {
+      return;
+    }
+
+    setError(null);
+    setOpeningChatStudentId(student.id);
+    try {
+      const response = await chatApi.createConversation(student.id);
+      navigate("/chat", {
+        state: { conversationId: response.conversation.id },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thể mở tin nhắn.");
+    } finally {
+      setOpeningChatStudentId(null);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) {
+      return;
+    }
+    setDeletingStudent(null);
+    setDeleteError(null);
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!deletingStudent) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError(null);
+    setError(null);
+    try {
+      await adminApi.deleteStudent(deletingStudent.id);
+      await loadStudents();
+      setDeletingStudent(null);
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Không xóa được học sinh.",
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const filteredStudents = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return overview.items.filter((student) => {
+      const matchesStatus =
+        status === "all" ||
+        (status === "online" ? student.is_online : !student.is_online);
+      const matchesQuery =
+        !normalizedQuery ||
+        student.full_name.toLowerCase().includes(normalizedQuery) ||
+        student.email.toLowerCase().includes(normalizedQuery) ||
+        student.code.toLowerCase().includes(normalizedQuery);
+      return matchesStatus && matchesQuery;
+    });
+  }, [overview.items, query, status]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredStudents.length / PAGE_SIZE),
+  );
+  const paginatedStudents = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredStudents.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [currentPage, filteredStudents]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, status]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  if (selectedStudent) {
+    return (
+      <StudentDetail
+        student={selectedStudent}
+        onBack={() => setSelectedStudent(null)}
+        onSaved={(student) => {
+          setSelectedStudent(student);
+          setOverview((current) => ({
+            ...current,
+            items: current.items.map((item) =>
+              item.id === student.id ? student : item,
+            ),
+          }));
+        }}
+        onDeleted={() => {
+          setSelectedStudent(null);
+          void loadStudents();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
-      <div className="flex justify-between items-end">
+      <div className="flex justify-between items-end gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-on-surface">Danh sách Học sinh</h1>
-          
+          <h1 className="text-xl font-semibold text-on-surface">
+            Danh sách Học sinh
+          </h1>
         </div>
-        <div className="flex gap-3">
-          <button className="px-4 py-2 border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center gap-2">
-            <Download className="w-4 h-4" /> Xuất
-          </button>
-          <button className="px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm">
-            <Plus className="w-4 h-4" /> Thêm Học sinh
-          </button>
-        </div>
+        <button className="px-4 py-2 border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center gap-2">
+          <Download className="w-4 h-4" /> Xuất
+        </button>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-on-surface flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-500" />
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-[var(--shadow-level-1)] flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-on-primary-fixed">
-              <Users className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-sm text-on-surface-variant">Tổng Học sinh</p>
-              <p className="text-2xl font-semibold text-on-surface">2,451</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-[#10B981] bg-[#10B981]/10 px-2 py-1 rounded-md shrink-0">
-            <TrendingUp className="w-3 h-3" strokeWidth={2.5} />
-            <span className="text-xs font-semibold tracking-wide">+12.5%</span>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-[var(--shadow-level-1)] flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed">
-              <UserPlus className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-sm text-on-surface-variant">Học sinh mới</p>
-              <p className="text-2xl font-semibold text-on-surface">350</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-[#10B981] bg-[#10B981]/10 px-2 py-1 rounded-md shrink-0">
-            <TrendingUp className="w-3 h-3" strokeWidth={2.5} />
-            <span className="text-xs font-semibold tracking-wide">+5.1%</span>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-[var(--shadow-level-1)] flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-[#10B981]/10 flex items-center justify-center text-[#10B981]">
-              <UserCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-sm text-on-surface-variant">Đang hoạt động</p>
-              <p className="text-2xl font-semibold text-on-surface">2,100</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-[#10B981] bg-[#10B981]/10 px-2 py-1 rounded-md shrink-0">
-            <TrendingUp className="w-3 h-3" strokeWidth={2.5} />
-            <span className="text-xs font-semibold tracking-wide">+8.2%</span>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-[var(--shadow-level-1)] flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-[#EF4444]/10 flex items-center justify-center text-[#EF4444]">
-              <UserMinus className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-sm text-on-surface-variant">Bị khóa/đình chỉ</p>
-              <p className="text-2xl font-semibold text-on-surface">12</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-[#EF4444] bg-[#EF4444]/10 px-2 py-1 rounded-md shrink-0">
-            <TrendingDown className="w-3 h-3" strokeWidth={2.5} />
-            <span className="text-xs font-semibold tracking-wide">-2.0%</span>
-          </div>
-        </div>
+        {overview.metrics.map((metric) => (
+          <MetricCard key={metric.key} metric={metric} />
+        ))}
       </div>
 
-      <div className="bg-surface-container-lowest rounded-xl shadow-[var(--shadow-level-1)] flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-outline-variant bg-surface-container-lowest flex justify-between items-center gap-4">
+      <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-outline-variant bg-surface-container-lowest flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="relative w-full max-w-md">
             <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Tìm kiếm học sinh theo tên hoặc ID..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Tìm học sinh theo tên, mã hoặc email..."
               className="w-full pl-9 pr-4 py-2 bg-surface-container-low border border-outline-variant rounded-md text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-on-surface-variant hidden md:block">Bộ lọc theo:</span>
-            <select className="bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 px-3 pl-4 pr-8 rounded-md focus:outline-none focus:border-primary">
-              <option>Tất cả Hạng</option>
-              <option>Hạng A</option>
-              <option>Hạng B</option>
-            </select>
-          </div>
+          <select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            className="bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 px-3 rounded-md focus:outline-none focus:border-primary w-full md:w-auto"
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="online">Hoạt động</option>
+            <option value="offline">Không hoạt động</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/50 border-b border-surface-variant">
-                <th className="py-3 px-4 w-12 text-center"><input type="checkbox" className="rounded text-primary focus:ring-primary" /></th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Học sinh</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Mã số</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Hạng</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Ngày ghi danh</th>
-                <th className="py-3 px-4 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider text-right pr-6">Trạng thái</th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant  tracking-wider">
+                  Học sinh
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant  tracking-wider">
+                  Mã số
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
+                  Trường
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
+                  Lớp
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
+                  Bài làm
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
+                  Ngày tạo
+                </th>
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
+                  Trạng thái
+                </th>
+                <th className="py-3 px-4 w-[132px] text-xs font-bold text-on-surface-variant tracking-wider text-center">
+                  Thao tác
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/50 flex-1">
-              {students.map((student, i) => (
-                <tr key={i} className="hover:bg-surface-container-low/30 transition-colors">
-                  <td className="py-3 px-4 text-center"><input type="checkbox" className="rounded text-primary focus:ring-primary" /></td>
-                  <td className="py-3 px-4 flex items-center gap-3">
-                    {student.avatar ? (
-                      <img src={student.avatar} alt={student.name} className="w-10 h-10 rounded-full object-cover border border-outline-variant/30" />
-                    ) : (
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border border-outline-variant/30 ${student.bg}`}>
-                        {student.initials}
+              {paginatedStudents.map((student) => (
+                <tr
+                  key={student.id}
+                  className="hover:bg-surface-container-low/30 transition-colors cursor-pointer"
+                  onClick={() => setSelectedStudent(student)}
+                >
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <StudentAvatar student={student} />
+                      <div>
+                        <p className="font-medium text-sm text-on-surface">
+                          {student.full_name}
+                        </p>
+                        <p className="text-xs text-on-surface-variant">
+                          {student.email}
+                        </p>
                       </div>
-                    )}
-                    <div>
-                      <p className="font-medium text-sm text-on-surface">{student.name}</p>
-                      <p className="text-xs text-on-surface-variant">{student.email}</p>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-sm text-on-surface-variant">{student.id}</td>
-                  <td className="py-3 px-4 text-sm font-medium text-on-surface">{student.grade}</td>
-                  <td className="py-3 px-4 text-sm text-on-surface-variant">{student.date}</td>
-                  <td className="py-3 px-4 text-right pr-6">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase
-                      ${student.status === 'Đã ghi danh' ? 'bg-[#10B981]/10 text-[#10B981]' : 'bg-surface-variant text-on-surface-variant'}
-                    `}>
-                      {student.status}
+                  <td className="py-3 px-4 text-sm text-on-surface-variant">
+                    {student.code}
+                  </td>
+                  <td className="py-3 px-4 text-sm text-on-surface-variant">
+                    {student.school_name || "Chưa cập nhật"}
+                  </td>
+                  <td className="py-3 px-4 text-sm font-medium text-on-surface">
+                    {student.class_count}
+                  </td>
+                  <td className="py-3 px-4 text-sm font-medium text-on-surface">
+                    {student.attempt_count}
+                  </td>
+                  <td className="py-3 px-4 text-sm text-on-surface-variant">
+                    {formatDate(student.created_at)}
+                  </td>
+                  <td className="py-3 px-4">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${student.is_online ? "bg-[#10B981]/10 text-[#10B981]" : "bg-surface-variant text-on-surface-variant"}`}
+                    >
+                      {student.is_online ? "Hoạt động" : "Không hoạt động"}
                     </span>
+                  </td>
+                  <td className="py-3 px-4 w-[132px] text-center">
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                        title="Nhắn tin"
+                        disabled={openingChatStudentId === student.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void openStudentChat(student);
+                        }}
+                      >
+                        {openingChatStudentId === student.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <MessageSquare className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors"
+                        title="Sửa học sinh"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedStudent(student);
+                        }}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
+                        title="Xóa học sinh"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeletingStudent(student);
+                          setDeleteError(null);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
+              {!isLoading && filteredStudents.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="py-10 text-center text-sm text-outline"
+                  >
+                    Chưa có học sinh phù hợp.
+                  </td>
+                </tr>
+              )}
+              {isLoading && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="py-10 text-center text-sm text-outline"
+                  >
+                    Đang tải dữ liệu học sinh...
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+        <PaginationBar
+          page={currentPage}
+          pageSize={PAGE_SIZE}
+          totalItems={filteredStudents.length}
+          onPageChange={setCurrentPage}
+        />
       </div>
+
+      {deletingStudent && (
+        <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
+            <div className="px-5 py-4 border-b border-outline-variant flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-error-container text-on-error-container flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-on-surface">
+                    Xóa học sinh
+                  </h2>
+                  <p className="text-sm text-outline mt-1">
+                    Học sinh sẽ bị xóa khỏi danh sách quản lý.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={isDeleting}
+                className="p-2 rounded-lg hover:bg-surface-container-low text-outline disabled:opacity-60"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleDeleteStudent();
+              }}
+              className="p-5 space-y-4"
+            >
+              <div className="rounded-lg border border-error-container bg-error-container/40 px-4 py-3">
+                <p className="text-sm text-on-surface">
+                  Bạn có chắc muốn xóa học sinh này?
+                </p>
+                <p className="text-sm font-semibold text-on-surface mt-2">
+                  {deletingStudent.full_name}
+                </p>
+                <p className="text-xs text-outline mt-1">
+                  {deletingStudent.email}
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="rounded-lg border border-error-container bg-error-container/60 px-3 py-2 flex items-start gap-2 text-sm text-on-error-container">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteModal}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg border border-outline-variant text-sm font-medium text-on-surface hover:bg-surface-container-low disabled:opacity-60"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg bg-error text-on-error text-sm font-semibold hover:bg-error/90 disabled:opacity-70 flex items-center gap-2"
+                >
+                  {isDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Xóa học sinh
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

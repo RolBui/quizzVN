@@ -86,10 +86,9 @@ export function Analytics() {
     <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-on-surface">
-            Analytics Overview
+          <h1 className="text-xl md:text-xl font-bold text-on-surface">
+            Analysis
           </h1>
-          
         </div>
         <div className="flex gap-2">
           <select className="bg-surface-container-lowest border border-surface-variant text-sm py-2 px-4 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface">
@@ -104,14 +103,14 @@ export function Analytics() {
         {kpiData.map((kpi, i) => (
           <div
             key={i}
-            className="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-[var(--shadow-level-1)] flex flex-col"
+            className="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-(--shadow-level-1) flex flex-col"
           >
             <div className="flex justify-between items-start p-4 border-b border-dashed border-outline-variant">
-              <p className="text-kpi-title text-base leading-[1.2] whitespace-pre-line font-medium">
+              <p className="text-kpi-title text-base leading-tight whitespace-pre-line font-medium">
                 {kpi.title}
               </p>
               <span
-                className={`text-sm font-semibold tracking-wide ${kpi.isPositive ? "text-[#10B981]" : "text-[#EF4444]"}`}
+                className={`text-sm font-semibold tracking-wide ${kpi.isPositive ? "text-emerald-500" : "text-red-500"}`}
               >
                 {kpi.change}
               </span>
@@ -124,7 +123,7 @@ export function Analytics() {
               <div className="flex items-center justify-between mt-auto">
                 <div className="w-10 h-10 rounded-lg border border-surface-variant p-1 shadow-sm shrink-0">
                   <div
-                    className={`w-full h-full rounded flex items-center justify-center text-white ${kpi.isPositive ? "bg-[#10B981]" : "bg-[#EF4444]"}`}
+                    className={`w-full h-full rounded flex items-center justify-center text-white ${kpi.isPositive ? "bg-emerald-500" : "bg-red-500"}`}
                   >
                     {kpi.isPositive ? (
                       <TrendingUp className="w-4 h-4" strokeWidth={2.5} />
@@ -146,11 +145,11 @@ export function Analytics() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        <div className="lg:col-span-2 bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-[var(--shadow-level-1)]">
+        <div className="lg:col-span-2 bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1)">
           <h3 className="text-base font-bold text-on-surface mb-6">
             Lưu lượng truy cập
           </h3>
-          <div className="h-[300px] w-full">
+          <div className="h-75 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={trafficData}
@@ -213,9 +212,9 @@ export function Analytics() {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-[var(--shadow-level-1)] flex flex-col">
+        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1) flex flex-col">
           <h3 className="text-base font-bold text-on-surface mb-6">Thiết bị</h3>
-          <div className="flex-1 h-[200px] w-full mb-4">
+          <div className="flex-1 h-50 w-full mb-4">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -248,15 +247,15 @@ export function Analytics() {
           </div>
           <div className="flex justify-between items-center px-4 mt-auto">
             <div className="flex flex-col items-center">
-              <Monitor className="w-5 h-5 text-[#4F46E5] mb-1" />
+              <Monitor className="w-5 h-5 text-indigo-600 mb-1" />
               <span className="text-xs font-medium text-outline">55%</span>
             </div>
             <div className="flex flex-col items-center">
-              <Smartphone className="w-5 h-5 text-[#10B981] mb-1" />
+              <Smartphone className="w-5 h-5 text-emerald-500 mb-1" />
               <span className="text-xs font-medium text-outline">35%</span>
             </div>
             <div className="flex flex-col items-center">
-              <Tablet className="w-5 h-5 text-[#F59E0B] mb-1" />
+              <Tablet className="w-5 h-5 text-amber-500 mb-1" />
               <span className="text-xs font-medium text-outline">10%</span>
             </div>
           </div>
@@ -264,11 +263,11 @@ export function Analytics() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mt-2">
-        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-[var(--shadow-level-1)]">
+        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1)">
           <h3 className="text-base font-bold text-on-surface mb-6">
             Nguồn truy cập
           </h3>
-          <div className="h-[250px] w-full">
+          <div className="h-62.5 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={sourceData}
@@ -317,7 +316,7 @@ export function Analytics() {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-0 rounded-xl border border-surface-variant shadow-[var(--shadow-level-1)] overflow-hidden">
+        <div className="bg-surface-container-lowest p-0 rounded-xl border border-surface-variant shadow-(--shadow-level-1) overflow-hidden">
           <div className="p-5 border-b border-surface-variant">
             <h3 className="text-base font-bold text-on-surface">
               Trang phổ biến
@@ -336,7 +335,7 @@ export function Analytics() {
             </thead>
             <tbody className="divide-y divide-surface-variant">
               <tr className="hover:bg-surface-container-low/50 transition-colors">
-                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-[200px]">
+                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                   /dashboard
                 </td>
                 <td className="py-3 px-5 text-sm text-on-surface text-right">
@@ -344,7 +343,7 @@ export function Analytics() {
                 </td>
               </tr>
               <tr className="hover:bg-surface-container-low/50 transition-colors">
-                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-[200px]">
+                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                   /courses/advanced-calculus
                 </td>
                 <td className="py-3 px-5 text-sm text-on-surface text-right">
@@ -352,7 +351,7 @@ export function Analytics() {
                 </td>
               </tr>
               <tr className="hover:bg-surface-container-low/50 transition-colors">
-                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-[200px]">
+                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                   /students/directory
                 </td>
                 <td className="py-3 px-5 text-sm text-on-surface text-right">
@@ -360,7 +359,7 @@ export function Analytics() {
                 </td>
               </tr>
               <tr className="hover:bg-surface-container-low/50 transition-colors">
-                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-[200px]">
+                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                   /exams/schedule
                 </td>
                 <td className="py-3 px-5 text-sm text-on-surface text-right">
@@ -368,7 +367,7 @@ export function Analytics() {
                 </td>
               </tr>
               <tr className="hover:bg-surface-container-low/50 transition-colors">
-                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-[200px]">
+                <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                   /profile/settings
                 </td>
                 <td className="py-3 px-5 text-sm text-on-surface text-right">

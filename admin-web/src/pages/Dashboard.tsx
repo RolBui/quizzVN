@@ -1,16 +1,10 @@
-import { useEffect } from "react";
-import { motion, useSpring, useTransform } from "motion/react";
+import { useEffect, useMemo, useState } from "react";
+import { motion, useSpring, useTransform, type Variants } from "motion/react";
 import {
-  Users,
-  UserCheck,
-  UserPlus,
-  Activity,
-  ArrowUpRight,
+  AlertCircle,
   ArrowDownRight,
+  ArrowUpRight,
   MoreHorizontal,
-  FileText,
-  Award,
-  Clock,
 } from "lucide-react";
 import {
   Area,
@@ -23,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { adminApi, type CrmMetric, type CrmOverview, type CrmPeriod } from "../lib/api";
 
 function Counter({
   value,
@@ -33,7 +28,7 @@ function Counter({
   isFloat?: boolean;
   suffix?: string;
 }) {
-  const spring = useSpring(0, { bounce: 0, duration: 2000 });
+  const spring = useSpring(0, { bounce: 0, duration: 1200 });
 
   useEffect(() => {
     spring.set(value);
@@ -43,24 +38,24 @@ function Counter({
     if (isFloat) {
       return current.toFixed(1) + suffix;
     }
-    return Math.round(current).toLocaleString("en-US") + suffix;
+    return Math.round(current).toLocaleString("vi-VN") + suffix;
   });
 
   return <motion.span>{display}</motion.span>;
 }
 
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1,
+      staggerChildren: 0.08,
     },
   },
 };
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
+const itemVariants: Variants = {
+  hidden: { opacity: 0, y: 16 },
   show: {
     opacity: 1,
     y: 0,
@@ -68,190 +63,367 @@ const itemVariants = {
   },
 };
 
-const trafficData = [
-  { name: "T1", current: 1240, last: 850 },
-  { name: "T2", current: 1530, last: 1300 },
-  { name: "T3", current: 1800, last: 1450 },
-  { name: "T4", current: 2850, last: 1820 },
-  { name: "T5", current: 2600, last: 2010 },
-  { name: "T6", current: 3500, last: 2400 },
-  { name: "T7", current: 3200, last: 2200 },
-  { name: "T8", current: 4100, last: 2850 },
-  { name: "T9", current: 3800, last: 2630 },
-  { name: "T10", current: 4600, last: 3200 },
-  { name: "T11", current: 5200, last: 3500 },
-  { name: "T12", current: 4850, last: 3800 },
+const crmPeriodOptions: { label: string; value: CrmPeriod }[] = [
+  { label: "7 ngày qua", value: "7d" },
+  { label: "30 ngày qua", value: "30d" },
+  { label: "Năm nay", value: "year" },
 ];
 
-const scoreData = [
-  { name: "< 5", users: 12 },
-  { name: "5-6", users: 35 },
-  { name: "6-7", users: 48 },
-  { name: "7-8", users: 85 },
-  { name: "8-9", users: 62 },
-  { name: "9-10", users: 24 },
-];
+const fallbackOverview: CrmOverview = {
+  metrics: [
+    {
+      key: "total_exams",
+      label: "Tổng đề thi",
+      value: 0,
+      suffix: "",
+      trend: "0%",
+      is_up: true,
+      subtext: "so với tháng trước",
+    },
+    {
+      key: "new_users",
+      label: "User mới",
+      value: 0,
+      suffix: "",
+      trend: "0%",
+      is_up: true,
+      subtext: "so với tháng trước",
+    },
+    {
+      key: "active_users",
+      label: "Đang hoạt động",
+      value: 0,
+      suffix: "",
+      trend: "0 phiên",
+      is_up: true,
+      subtext: "",
+    },
+    {
+      key: "total_users",
+      label: "Tổng user",
+      value: 0,
+      suffix: "",
+      trend: "0%",
+      is_up: true,
+      subtext: "so với tháng trước",
+    },
+  ],
+  traffic: Array.from({ length: 12 }, (_, index) => ({
+    name: `T${index + 1}`,
+    current: 0,
+    last: 0,
+  })),
+  score_distribution: ["< 5", "5-6", "6-7", "7-8", "8-9", "9-10"].map(
+    (name) => ({ name, users: 0 }),
+  ),
+  recent_results: [],
+  last_updated_at: new Date(0).toISOString(),
+};
 
-const recentExams = [
-  {
-    id: "#EX1254",
-    name: "Nguyễn Văn A",
-    exam: "Toán giữa kỳ 2",
-    score: "9.5",
-    status: "Hoàn thành",
-    date: "02 thg 5 2026",
-    color: "text-[#10B981] bg-[#10B981]/10",
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function getResultStatusClass(status: string) {
+  if (status === "Hoàn thành") {
+    return "text-emerald-500 bg-emerald-500/10";
+  }
+  if (status === "Cần cải thiện") {
+    return "text-red-500 bg-red-500/10";
+  }
+  return "text-amber-500 bg-amber-500/10";
+}
+
+const metricSparklineConfig: Record<
+  string,
+  { stroke: string; fill: string }
+> = {
+  total_exams: {
+    stroke: "#e5a76f",
+    fill: "rgba(229, 167, 111, 0.16)",
   },
-  {
-    id: "#EX1253",
-    name: "Trần Thị B",
-    exam: "Vật lý chương 3",
-    score: "7.0",
-    status: "Hoàn thành",
-    date: "01 thg 5 2026",
-    color: "text-[#10B981] bg-[#10B981]/10",
+  new_users: {
+    stroke: "#8fd5b5",
+    fill: "rgba(143, 213, 181, 0.18)",
   },
-  {
-    id: "#EX1252",
-    name: "Lê Minh C",
-    exam: "Hóa học cơ bản",
-    score: "4.5",
-    status: "Cần cải thiện",
-    date: "30 thg 4 2026",
-    color: "text-[#EF4444] bg-[#EF4444]/10",
+  active_users: {
+    stroke: "#f3a0c4",
+    fill: "rgba(243, 160, 196, 0.18)",
   },
-  {
-    id: "#EX1251",
-    name: "Phạm Thu D",
-    exam: "Sinh học di truyền",
-    score: "8.5",
-    status: "Hoàn thành",
-    date: "29 thg 4 2026",
-    color: "text-[#10B981] bg-[#10B981]/10",
+  total_users: {
+    stroke: "#a8a8f0",
+    fill: "rgba(168, 168, 240, 0.18)",
   },
-  {
-    id: "#EX1250",
-    name: "Hoàng Văn E",
-    exam: "Tiếng Anh Test 1",
-    score: "-",
-    status: "Đang làm",
-    date: "28 thg 4 2026",
-    color: "text-[#F59E0B] bg-[#F59E0B]/10",
-  },
-];
+};
+
+const fallbackSparkline = {
+  stroke: "#94a3b8",
+  fill: "rgba(148, 163, 184, 0.16)",
+};
+
+function buildSmoothPath(points: { x: number; y: number }[]) {
+  if (points.length === 0) {
+    return "";
+  }
+
+  return points.reduce((path, point, index) => {
+    if (index === 0) {
+      return `M ${point.x} ${point.y}`;
+    }
+
+    const previous = points[index - 1];
+    const controlX = (previous.x + point.x) / 2;
+    return `${path} C ${controlX} ${previous.y}, ${controlX} ${point.y}, ${point.x} ${point.y}`;
+  }, "");
+}
+
+function MetricSparkline({
+  values,
+  stroke,
+  fill,
+}: {
+  values: number[];
+  stroke: string;
+  fill: string;
+}) {
+  const width = 132;
+  const height = 54;
+  const padding = 5;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  const points = values.map((value, index) => {
+    const x = padding + (index / (values.length - 1)) * (width - padding * 2);
+    const y =
+      range === 0
+        ? height / 2
+        : height - padding - ((value - min) / range) * (height - padding * 2);
+    return { x, y };
+  });
+  const linePath = buildSmoothPath(points);
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${
+    height - padding
+  } L ${points[0].x} ${height - padding} Z`;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-14 w-32 shrink-0"
+      aria-hidden="true"
+    >
+      <path d={areaPath} fill={fill} />
+      <path
+        d={linePath}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MetricCard({ metric }: { metric: CrmMetric }) {
+  const TrendIcon = metric.is_up ? ArrowUpRight : ArrowDownRight;
+  const sparklineStyle =
+    metricSparklineConfig[metric.key] ?? fallbackSparkline;
+  const sparklineValues =
+    metric.sparkline && metric.sparkline.length >= 2
+      ? metric.sparkline
+      : [metric.value, metric.value];
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="bg-surface-container-lowest rounded-lg p-4 border border-surface-variant shadow-(--shadow-level-1) flex flex-col justify-between min-h-33"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-kpi-title font-semibold text-sm truncate">
+            {metric.label}
+          </p>
+          <h3 className="text-2xl font-bold text-on-surface mt-3">
+            <Counter value={metric.value} suffix={metric.suffix} />
+          </h3>
+        </div>
+        <MetricSparkline values={sparklineValues} {...sparklineStyle} />
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <div
+          className={`flex items-center gap-1 text-xs font-semibold tracking-wide ${
+            metric.is_up ? "text-emerald-500" : "text-red-500"
+          }`}
+        >
+          <TrendIcon className="w-3.5 h-3.5" />
+          {metric.trend}
+        </div>
+        {metric.subtext && (
+          <span className="text-xs text-on-surface-variant font-medium truncate">
+            {metric.subtext}
+          </span>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 export function Dashboard() {
+  const [overview, setOverview] = useState<CrmOverview | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<CrmPeriod>("7d");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoading(true);
+    setError(null);
+
+    adminApi
+      .getCrmOverview(selectedPeriod)
+      .then((data) => {
+        if (!isMounted) {
+          return;
+        }
+        setOverview(data);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!isMounted) {
+          return;
+        }
+        setError(
+          err instanceof Error ? err.message : "Không lấy được dữ liệu CRM",
+        );
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPeriod]);
+
+  const data = overview ?? fallbackOverview;
+  const selectedPeriodLabel =
+    crmPeriodOptions.find((option) => option.value === selectedPeriod)?.label ??
+    "7 ngày qua";
+  const trafficSubtitle =
+    selectedPeriod === "year"
+      ? "Số lượt bắt đầu bài thi theo tháng"
+      : selectedPeriod === "30d"
+        ? "Số lượt bắt đầu bài thi theo ngày (30 ngày)"
+        : "Số lượt bắt đầu bài thi theo ngày (7 ngày)";
+  const trafficCurrentLabel =
+    selectedPeriod === "year" ? "Năm nay" : "Kỳ hiện tại";
+  const trafficLastLabel =
+    selectedPeriod === "year" ? "Năm ngoái" : "Kỳ trước";
+  const scoreDistributionTitle =
+    selectedPeriod === "year"
+      ? "Phổ điểm năm nay"
+      : selectedPeriod === "30d"
+        ? "Phổ điểm 30 ngày"
+        : "Phổ điểm tuần";
+  const scoreEmptyText =
+    selectedPeriod === "year"
+      ? "Chưa có dữ liệu năm nay"
+      : selectedPeriod === "30d"
+        ? "Chưa có dữ liệu 30 ngày qua"
+        : "Chưa có dữ liệu tuần này";
+  const topScoreBucket = useMemo(() => {
+    return [...data.score_distribution].sort((a, b) => b.users - a.users)[0];
+  }, [data.score_distribution]);
+  const totalScoreUsers = useMemo(() => {
+    return data.score_distribution.reduce(
+      (total, bucket) => total + bucket.users,
+      0,
+    );
+  }, [data.score_distribution]);
+  const topScorePercent =
+    topScoreBucket && totalScoreUsers > 0
+      ? Math.round((topScoreBucket.users / totalScoreUsers) * 100)
+      : 0;
+
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-on-surface">
-            CRM Overview
-          </h1>
+          <h1 className="text-xl font-semibold text-on-surface">Dashboard</h1>
         </div>
+        <select
+          value={selectedPeriod}
+          onChange={(event) =>
+            setSelectedPeriod(event.target.value as CrmPeriod)
+          }
+          className="bg-surface-container-lowest border border-surface-variant text-sm py-2 px-4 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+        >
+          {crmPeriodOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Metrics */}
+      {error && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-on-surface">
+          <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Chưa lấy được dữ liệu CRM</p>
+            <p className="text-on-surface-variant">{error}</p>
+          </div>
+        </div>
+      )}
+
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="show"
         className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
       >
-        {[
-          {
-            label: "Tổng đề thi",
-            icon: UserCheck,
-            value: 12450,
-            isFloat: false,
-            suffix: "",
-            trend: "+12.5%",
-            isUp: true,
-            subtext: "so với tháng trước",
-          },
-          {
-            label: "User mới",
-            value: 350,
-            isFloat: false,
-            suffix: "",
-            trend: "+5.1%",
-            isUp: true,
-            subtext: "so với tháng trước",
-          },
-          {
-            label: "Đang hoạt động",
-
-            value: 1233,
-            isFloat: false,
-            suffix: "",
-            trend: "+0.2",
-            isUp: true,
-            subtext: "so với tháng trước",
-          },
-          {
-            label: "Kỳ thi đang mở",
-            icon: Clock,
-            value: 15,
-            isFloat: false,
-            suffix: "",
-            trend: "-2",
-            isUp: false,
-            subtext: "so với tuần trước",
-          },
-        ].map((stat, i) => (
-          <motion.div
-            key={i}
-            variants={itemVariants}
-            className="bg-surface-container-lowest rounded-xl p-5 border border-surface-variant shadow-[var(--shadow-level-1)] flex flex-col justify-between"
-          >
-            <div>
-              <p className="text-kpi-title font-medium text-base">
-                {stat.label}
-              </p>
-              <h3 className="text-2xl font-bold text-on-surface mt-1">
-                <Counter
-                  value={stat.value}
-                  isFloat={stat.isFloat}
-                  suffix={stat.suffix}
-                />
-              </h3>
-            </div>
-            <div className="flex items-center gap-2 mt-4">
+        {isLoading
+          ? fallbackOverview.metrics.map((metric) => (
               <div
-                className={`flex items-center text-sm font-semibold tracking-wide ${stat.isUp ? "text-[#10B981]" : "text-[#EF4444]"}`}
+                key={metric.key}
+                className="bg-surface-container-lowest rounded-lg p-4 border border-surface-variant shadow-(--shadow-level-1) min-h-33 animate-pulse"
               >
-                {stat.trend}
+                <div className="h-4 w-24 rounded bg-surface-container-high" />
+                <div className="h-8 w-20 rounded bg-surface-container-high mt-3" />
+                <div className="h-10 w-32 rounded bg-surface-container-high mt-3 ml-auto" />
+                <div className="h-4 w-36 rounded bg-surface-container-high mt-3" />
               </div>
-              <span className="text-xs text-on-surface-variant font-medium">
-                {stat.subtext}
-              </span>
-            </div>
-          </motion.div>
-        ))}
+            ))
+          : data.metrics.map((metric) => (
+              <MetricCard key={metric.key} metric={metric} />
+            ))}
       </motion.div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Main Area Chart */}
-        <div className="xl:col-span-2 bg-surface-container-lowest rounded-xl p-6 border border-surface-variant shadow-[var(--shadow-level-1)]">
-          <div className="flex justify-between items-center mb-6">
+        <div className="xl:col-span-2 bg-surface-container-lowest rounded-xl p-6 border border-surface-variant shadow-(--shadow-level-1)">
+          <div className="flex justify-between items-center mb-6 gap-4">
             <div>
               <h2 className="text-lg font-bold text-on-surface">
                 Lưu lượng làm bài
               </h2>
               <p className="text-sm text-on-surface-variant mt-1">
-                Lượt truy cập hệ thống thi
+                {trafficSubtitle}
               </p>
             </div>
-            <select className="bg-surface-container text-sm py-1.5 px-3 rounded-lg text-on-surface outline-none">
-              <option>Năm nay</option>
-              <option>Năm ngoái</option>
-            </select>
+            <span className="bg-surface-container text-sm py-1.5 px-3 rounded-lg text-on-surface font-medium">
+              {selectedPeriodLabel}
+            </span>
           </div>
-          <div className="h-[300px] w-full">
+          <div className="h-75 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={trafficData}
+                data={data.traffic}
                 margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
               >
                 <defs>
@@ -296,7 +468,6 @@ export function Dashboard() {
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: "var(--color-outline)", fontSize: 12 }}
-                  tickFormatter={(val) => `${val}`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -309,7 +480,7 @@ export function Dashboard() {
                 <Area
                   type="monotone"
                   dataKey="last"
-                  name="Năm ngoái"
+                  name={trafficLastLabel}
                   stroke="var(--color-outline)"
                   fillOpacity={1}
                   fill="url(#colorLast)"
@@ -318,7 +489,7 @@ export function Dashboard() {
                 <Area
                   type="monotone"
                   dataKey="current"
-                  name="Năm nay"
+                  name={trafficCurrentLabel}
                   stroke="var(--color-primary)"
                   fillOpacity={1}
                   fill="url(#colorCurrent)"
@@ -329,18 +500,17 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Small Bar Chart / Activity */}
-        <div className="xl:col-span-1 bg-surface-container-lowest rounded-xl p-6 shadow-[var(--shadow-level-1)] flex flex-col">
+        <div className="xl:col-span-1 bg-surface-container-lowest rounded-xl p-6 shadow-(--shadow-level-1) flex flex-col">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-on-surface">Phổ điểm tuần</h3>
+            <h3 className="text-lg font-bold text-on-surface">{scoreDistributionTitle}</h3>
             <button className="text-outline hover:text-on-surface">
               <MoreHorizontal className="w-5 h-5" />
             </button>
           </div>
-          <div className="h-[200px] w-full mb-6 mt-4">
+          <div className="h-50 w-full mb-6 mt-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={scoreData}
+                data={data.score_distribution}
                 margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
                 barSize={32}
               >
@@ -380,87 +550,96 @@ export function Dashboard() {
             </ResponsiveContainer>
           </div>
           <div className="mt-auto">
-            <div className="flex items-center justify-between py-3 border-t border-surface-variant">
+            <div className="flex items-center justify-between py-3 border-t border-surface-variant gap-4">
               <div>
                 <p className="text-sm font-semibold text-on-surface">
                   Phổ điểm nhiều nhất
                 </p>
                 <p className="text-xs text-outline">
-                  7 đến 8 điểm (85 học sinh)
+                  {topScoreBucket && totalScoreUsers > 0
+                    ? `${topScoreBucket.name} điểm (${topScoreBucket.users} học sinh)`
+                    : scoreEmptyText}
                 </p>
               </div>
               <div className="px-2.5 py-1 bg-primary-fixed text-on-primary-fixed text-xs font-semibold rounded-md">
-                32%
+                {topScorePercent}%
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Recent Exams Table */}
-      <div className="bg-surface-container-lowest rounded-xl shadow-[var(--shadow-level-1)] overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) overflow-hidden">
         <div className="p-6 border-b border-surface-variant flex justify-between items-center">
           <h3 className="text-lg font-bold text-on-surface">
             Kết quả thi mới nhất
           </h3>
-          <button className="text-primary text-sm font-semibold hover:underline">
-            Xem tất cả
-          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/30 border-b border-surface-variant">
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
-                  Mã Bài Thi
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
+                  Mã bài thi
                 </th>
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
                   Học sinh
                 </th>
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
                   Kỳ thi
                 </th>
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
                   Ngày nộp
                 </th>
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
                   Điểm số
                 </th>
-                <th className="py-4 px-6 text-[12px] font-semibold text-outline uppercase tracking-wider">
+                <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
                   Đánh giá
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-variant">
-              {recentExams.map((exam, i) => (
-                <tr
-                  key={i}
-                  className="hover:bg-surface-container-low/30 transition-colors"
-                >
-                  <td className="py-4 px-6 text-sm font-medium text-primary">
-                    {exam.id}
-                  </td>
-                  <td className="py-4 px-6 text-sm font-semibold text-on-surface">
-                    {exam.name}
-                  </td>
-                  <td className="py-4 px-6 text-sm text-outline">
-                    {exam.exam}
-                  </td>
-                  <td className="py-4 px-6 text-sm text-outline">
-                    {exam.date}
-                  </td>
-                  <td className="py-4 px-6 text-sm font-medium text-on-surface">
-                    {exam.score}
-                  </td>
-                  <td className="py-4 px-6">
-                    <span
-                      className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${exam.color}`}
-                    >
-                      {exam.status}
-                    </span>
+              {data.recent_results.length > 0 ? (
+                data.recent_results.map((result) => (
+                  <tr
+                    key={result.attempt_id}
+                    className="hover:bg-surface-container-low/30 transition-colors"
+                  >
+                    <td className="py-4 px-6 text-sm font-medium text-primary">
+                      {result.code}
+                    </td>
+                    <td className="py-4 px-6 text-sm font-semibold text-on-surface">
+                      {result.student_name}
+                    </td>
+                    <td className="py-4 px-6 text-sm text-outline">
+                      {result.exam_title}
+                    </td>
+                    <td className="py-4 px-6 text-sm text-outline">
+                      {formatDate(result.submitted_at)}
+                    </td>
+                    <td className="py-4 px-6 text-sm font-medium text-on-surface">
+                      {result.score_label}
+                    </td>
+                    <td className="py-4 px-6">
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${getResultStatusClass(result.status)}`}
+                      >
+                        {result.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="py-8 px-6 text-center text-sm text-on-surface-variant"
+                  >
+                    Chưa có kết quả thi
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

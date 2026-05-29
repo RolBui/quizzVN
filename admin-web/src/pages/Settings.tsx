@@ -33,7 +33,7 @@ export function Settings() {
       <div className="flex flex-col md:flex-row gap-6 mt-2">
         {/* Sidebar settings */}
         <div className="w-full md:w-64 shrink-0">
-          <div className="bg-surface-container-lowest rounded-xl shadow-[var(--shadow-level-1)] border border-surface-variant overflow-hidden">
+          <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant overflow-hidden">
             <div className="flex flex-col p-2">
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.id;
@@ -57,7 +57,7 @@ export function Settings() {
         </div>
 
         {/* Content area */}
-        <div className="flex-1 bg-surface-container-lowest rounded-xl shadow-[var(--shadow-level-1)] border border-surface-variant p-6">
+        <div className="flex-1 bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant p-6">
           {activeTab === "general" && (
             <div className="flex flex-col gap-6">
               <div>
