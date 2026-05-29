@@ -17,6 +17,7 @@ from app.schemas.teacher import (
     TeacherExamDetailSchema,
     TeacherExamListResponse,
     TeacherExamResponse,
+    TeacherImageListResponse,
     TeacherImageUploadResponse,
     TeacherStudentListResponse,
     TeacherStudentResponse,
@@ -26,7 +27,7 @@ from app.schemas.teacher import (
     UpdateTeacherDocumentRequest,
     UpdateTeacherExamRequest,
 )
-from app.services.media_service import save_exam_image
+from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 from app.services.teacher_service import (
     add_student_to_teacher_class,
     create_teacher_class,
@@ -105,17 +106,35 @@ def delete_teacher_class_route(
     return delete_teacher_class(db, current_teacher, class_id)
 
 
-@router.post("/exams/images", response_model=TeacherImageUploadResponse)
-def post_teacher_exam_image(
+@router.get("/image", response_model=TeacherImageListResponse)
+def get_teacher_images(
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherImageListResponse:
+    items = list_uploaded_images(db, current_teacher.id, category="exam")
+    return {"items": items}
+
+
+@router.post("/image", response_model=TeacherImageUploadResponse)
+def post_teacher_image(
     image: UploadFile = File(...),
+    db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherImageUploadResponse:
-    # Auth guard happens through dependency; the uploaded file is stored in Cloudinary and returned as a public URL.
-    _ = current_teacher
     return {
         "message": "Image uploaded successfully",
-        "image": save_exam_image(image),
+        "image": save_exam_image(db, current_teacher.id, image),
     }
+
+
+@router.delete("/image/{image_id}", response_model=MessageResponse)
+def delete_teacher_image_route(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> MessageResponse:
+    delete_uploaded_image(db, current_teacher.id, image_id)
+    return {"message": "Image deleted successfully"}
 
 
 @router.get("/students", response_model=TeacherStudentListResponse)
