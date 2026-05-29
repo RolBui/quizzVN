@@ -634,8 +634,8 @@ def delete_teacher_class_document(
     return delete_teacher_document(db, teacher, document_id)
 
 
-def _get_exam_total_points(exam: Exam) -> int:
-    computed_total = sum(question.points for question in exam.questions)
+def _get_exam_total_points(exam: Exam) -> float:
+    computed_total = sum((question.points or 0) for question in exam.questions)
     return computed_total if computed_total > 0 else exam.total_points
 
 
@@ -790,7 +790,7 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
                 detail=f"Question {index} must include prompt or image_url",
             )
 
-        points = question["points"]
+        points = float(question["points"])
         normalized_options = []
         if question_type == QUESTION_TYPE_SINGLE_CHOICE:
             options = question["options"]
@@ -867,8 +867,8 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
     return normalized_questions
 
 
-def _replace_exam_questions(exam: Exam, questions: list[dict]) -> int:
-    total_points = 0
+def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
+    total_points = 0.0
     exam.questions.clear()
     for question in questions:
         exam_question = ExamQuestion(
@@ -935,7 +935,7 @@ def create_teacher_exam(
         scope=scope,
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
-        total_points=0,
+        total_points=0.0,
         is_published=is_published,
         is_active=is_active,
         created_at=utc_now(),

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -13,7 +13,7 @@ class ExamQuestion(Base):
     prompt = Column(Text, nullable=False)
     image_url = Column(Text, nullable=True)
     order_index = Column(Integer, nullable=False)
-    points = Column(Integer, nullable=False, default=1)
+    points = Column(Numeric(10, 4, asdecimal=False), nullable=False, default=1)
 
     exam = relationship("Exam", back_populates="questions")
     options = relationship("ExamQuestionOption", back_populates="question", cascade="all, delete-orphan")

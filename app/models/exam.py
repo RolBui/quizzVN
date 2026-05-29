@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -16,7 +16,7 @@ class Exam(Base):
     scope = Column(String, nullable=False)
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True)
     duration_minutes = Column(Integer, nullable=False, default=30)
-    total_points = Column(Integer, nullable=False, default=0)
+    total_points = Column(Numeric(10, 4, asdecimal=False), nullable=False, default=0)
     is_published = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
