@@ -6,8 +6,6 @@ from app.dependencies.auth import get_current_admin, get_current_administrator
 from app.schemas.admin import (
     AdminAccountListResponse,
     AdminAccountResponse,
-    AdminAppearanceOverviewResponse,
-    AdminBannerResponse,
     AdminClassOverviewResponse,
     AdminCrmOverviewResponse,
     AdminDocumentOverviewResponse,
@@ -16,20 +14,17 @@ from app.schemas.admin import (
     AdminStudentOverviewResponse,
     AdminTeacherDetailResponse,
     AdminTeacherOverviewResponse,
-    CreateAdminBannerRequest,
     CreateAdminAccountRequest,
     ResetAdminUserPasswordRequest,
-    UpdateAdminAccountRequest,
     UpdateAdminUserProfileRequest,
 )
 from app.schemas.common import MessageResponse
 from app.services.admin_service import (
-    create_admin_banner,
     create_admin_account,
     delete_admin_account,
+    delete_admin_exam,
     delete_admin_student,
     delete_admin_teacher,
-    get_admin_appearance_overview,
     get_admin_classes_overview,
     get_admin_crm_overview,
     get_admin_documents_overview,
@@ -41,7 +36,6 @@ from app.services.admin_service import (
     list_admin_accounts,
     reset_admin_student_password,
     reset_admin_teacher_password,
-    update_admin_account,
     update_admin_student_profile,
     update_admin_teacher_profile,
 )
@@ -179,6 +173,15 @@ def get_exams_overview(
     return get_admin_exams_overview(db)
 
 
+@router.delete("/exams/{exam_id}", response_model=MessageResponse)
+def delete_exam_route(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_administrator=Depends(get_current_administrator),
+) -> MessageResponse:
+    return delete_admin_exam(db, current_administrator, exam_id)
+
+
 @router.get("/documents", response_model=AdminDocumentOverviewResponse)
 def get_documents_overview(
     db: Session = Depends(get_db),
@@ -186,34 +189,6 @@ def get_documents_overview(
 ) -> AdminDocumentOverviewResponse:
     _ = current_admin
     return get_admin_documents_overview(db)
-
-
-@router.get("/appearance", response_model=AdminAppearanceOverviewResponse)
-def get_appearance_overview(
-    db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin),
-) -> AdminAppearanceOverviewResponse:
-    _ = current_admin
-    return get_admin_appearance_overview(db)
-
-
-@router.post("/appearance/banners", response_model=AdminBannerResponse)
-def post_appearance_banner(
-    payload: CreateAdminBannerRequest,
-    db: Session = Depends(get_db),
-    current_administrator=Depends(get_current_administrator),
-) -> AdminBannerResponse:
-    return create_admin_banner(
-        db,
-        current_administrator,
-        payload.title,
-        payload.image_url,
-        payload.link_url,
-        payload.audience,
-        payload.start_at,
-        payload.end_at,
-        payload.is_active,
-    )
 
 
 @router.get("/users", response_model=AdminAccountListResponse)
@@ -233,23 +208,6 @@ def post_admin_account(
 ) -> AdminAccountResponse:
     _ = current_administrator
     return create_admin_account(db, payload.full_name, payload.email, payload.password)
-
-
-@router.put("/users/{user_id}", response_model=AdminAccountResponse)
-def put_admin_account(
-    user_id: int,
-    payload: UpdateAdminAccountRequest,
-    db: Session = Depends(get_db),
-    current_administrator=Depends(get_current_administrator),
-) -> AdminAccountResponse:
-    return update_admin_account(
-        db,
-        current_administrator,
-        user_id,
-        payload.full_name,
-        payload.password,
-        payload.status,
-    )
 
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)

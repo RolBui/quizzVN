@@ -1,9 +1,10 @@
 import secrets
 import string
 import unicodedata
+from pathlib import Path
 
-from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import utc_now
@@ -15,6 +16,7 @@ from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
+from app.services.media_service import delete_document_file, upload_document_file
 
 TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
@@ -412,6 +414,10 @@ def _serialize_document(document: LearningDocument) -> dict:
         "title": document.title,
         "summary": document.summary,
         "content": document.content,
+        "file_url": document.file_url,
+        "file_name": document.file_name,
+        "file_content_type": document.file_content_type,
+        "file_size_bytes": document.file_size_bytes,
         "scope": document.scope,
         "classroom_id": document.classroom_id,
         "classroom_name": classroom.name if classroom else None,
@@ -419,6 +425,18 @@ def _serialize_document(document: LearningDocument) -> dict:
         "created_at": document.created_at,
         "updated_at": document.updated_at,
     }
+
+
+def _uploaded_document_title(title: str | None, filename: str | None) -> str:
+    normalized_title = (title or "").strip()
+    if normalized_title:
+        return normalized_title
+
+    filename_stem = Path(filename or "").stem.strip()
+    if filename_stem:
+        return filename_stem
+
+    return "Untitled document"
 
 
 def list_teacher_documents(
@@ -442,6 +460,39 @@ def list_teacher_documents(
         query = query.filter(LearningDocument.classroom_id == classroom.id)
 
     documents = query.order_by(LearningDocument.created_at.desc()).all()
+    return {"items": [_serialize_document(document) for document in documents]}
+
+
+def list_teacher_all_documents(db: Session, teacher: User) -> dict:
+    classroom_ids = [
+        classroom_id
+        for (classroom_id,) in db.query(Classroom.id)
+        .filter(Classroom.created_by_user_id == teacher.id)
+        .all()
+    ]
+
+    filters = [
+        and_(
+            LearningDocument.scope == SCOPE_SYSTEM,
+            LearningDocument.classroom_id.is_(None),
+            LearningDocument.created_by_user_id == teacher.id,
+        )
+    ]
+    if classroom_ids:
+        filters.append(
+            and_(
+                LearningDocument.scope == SCOPE_CLASS,
+                LearningDocument.classroom_id.in_(classroom_ids),
+            )
+        )
+
+    documents = (
+        db.query(LearningDocument)
+        .options(joinedload(LearningDocument.classroom))
+        .filter(or_(*filters))
+        .order_by(LearningDocument.created_at.desc(), LearningDocument.id.desc())
+        .all()
+    )
     return {"items": [_serialize_document(document) for document in documents]}
 
 
@@ -480,29 +531,29 @@ def _get_teacher_class_document(
     return document
 
 
-def create_teacher_document(
+def create_teacher_uploaded_document(
     db: Session,
     teacher: User,
-    title: str,
+    title: str | None,
     summary: str | None,
-    content: str,
+    upload: UploadFile,
     scope: str,
     classroom_id: int | None,
     is_published: bool,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
-    normalized_title = title.strip()
-    normalized_content = content.strip()
-
-    if not normalized_title:
-        raise HTTPException(status_code=400, detail="title is required")
-    if not normalized_content:
-        raise HTTPException(status_code=400, detail="content is required")
+    file_data = upload_document_file(upload)
+    normalized_title = _uploaded_document_title(title, file_data["filename"])
 
     document = LearningDocument(
         title=normalized_title,
         summary=summary.strip() if summary else None,
-        content=normalized_content,
+        content="",
+        file_url=file_data["url"],
+        file_name=file_data["filename"],
+        file_content_type=file_data["content_type"],
+        file_size_bytes=file_data["size_bytes"],
+        file_public_id=file_data["public_id"],
         scope=scope,
         classroom_id=classroom.id if classroom else None,
         created_by_user_id=teacher.id,
@@ -510,117 +561,29 @@ def create_teacher_document(
         created_at=utc_now(),
         updated_at=utc_now(),
     )
-    db.add(document)
-    db.commit()
+
+    try:
+        db.add(document)
+        db.commit()
+    except Exception:
+        db.rollback()
+        delete_document_file(file_data.get("public_id"))
+        raise
+
     db.refresh(document)
     document = _get_teacher_document(db, teacher, document.id)
     return {
-        "message": "Document created successfully",
+        "message": "Document uploaded successfully",
         "document": _serialize_document(document),
     }
-
-
-def create_teacher_class_document(
-    db: Session,
-    teacher: User,
-    class_id: int,
-    title: str,
-    summary: str | None,
-    content: str,
-    is_published: bool,
-) -> dict:
-    return create_teacher_document(
-        db,
-        teacher,
-        title,
-        summary,
-        content,
-        SCOPE_CLASS,
-        class_id,
-        is_published,
-    )
-
-
-def update_teacher_document(
-    db: Session,
-    teacher: User,
-    document_id: int,
-    title: str | None,
-    summary: str | None,
-    content: str | None,
-    scope: str | None,
-    classroom_id: int | None,
-    is_published: bool | None,
-) -> dict:
-    document = _get_teacher_document(db, teacher, document_id)
-    target_scope = scope or document.scope
-    if target_scope == SCOPE_SYSTEM:
-        target_classroom_id = None
-    elif classroom_id is not None:
-        target_classroom_id = classroom_id
-    else:
-        target_classroom_id = document.classroom_id
-    classroom = _validate_scope_for_teacher(db, teacher, target_scope, target_classroom_id)
-
-    if title is not None:
-        normalized_title = title.strip()
-        if not normalized_title:
-            raise HTTPException(status_code=400, detail="title cannot be empty")
-        document.title = normalized_title
-
-    if summary is not None:
-        document.summary = summary.strip() if summary else None
-
-    if content is not None:
-        normalized_content = content.strip()
-        if not normalized_content:
-            raise HTTPException(status_code=400, detail="content cannot be empty")
-        document.content = normalized_content
-
-    document.scope = target_scope
-    document.classroom_id = classroom.id if classroom else None
-
-    if is_published is not None:
-        document.is_published = is_published
-
-    document.updated_at = utc_now()
-    db.commit()
-    db.refresh(document)
-    document = _get_teacher_document(db, teacher, document.id)
-    return {
-        "message": "Document updated successfully",
-        "document": _serialize_document(document),
-    }
-
-
-def update_teacher_class_document(
-    db: Session,
-    teacher: User,
-    class_id: int,
-    document_id: int,
-    title: str | None,
-    summary: str | None,
-    content: str | None,
-    is_published: bool | None,
-) -> dict:
-    _get_teacher_class_document(db, teacher, class_id, document_id)
-    return update_teacher_document(
-        db,
-        teacher,
-        document_id,
-        title,
-        summary,
-        content,
-        SCOPE_CLASS,
-        class_id,
-        is_published,
-    )
 
 
 def delete_teacher_document(db: Session, teacher: User, document_id: int) -> dict:
     document = _get_teacher_document(db, teacher, document_id)
+    file_public_id = document.file_public_id
     db.delete(document)
     db.commit()
+    delete_document_file(file_public_id)
     return {"message": "Document deleted successfully"}
 
 

@@ -30,6 +30,10 @@ ALLOWED_CHAT_FILE_CONTENT_TYPES = {
     "text/csv": ".csv",
     "application/zip": ".zip",
 }
+ALLOWED_DOCUMENT_CONTENT_TYPES = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +175,66 @@ def upload_chat_file(upload: UploadFile) -> dict:
         "public_id": upload_result["public_id"],
         "url": upload_result.get("secure_url") or upload_result.get("url") or "",
     }
+
+
+def upload_document_file(upload: UploadFile) -> dict:
+    """Upload a learning document file to Cloudinary and return file metadata."""
+    _ensure_cloudinary_configured()
+
+    content_type = (upload.content_type or "").strip().lower()
+    extension = ALLOWED_DOCUMENT_CONTENT_TYPES.get(content_type)
+    if not extension:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported document type. Allowed: pdf, docx",
+        )
+
+    file_bytes = upload.file.read(settings.MAX_DOCUMENT_UPLOAD_BYTES + 1)
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded document is empty")
+
+    if len(file_bytes) > settings.MAX_DOCUMENT_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Document is too large. Max size is {settings.MAX_DOCUMENT_UPLOAD_BYTES} bytes",
+        )
+
+    filename = upload.filename or f"{uuid4().hex}{extension}"
+    public_id = f"{uuid4().hex}{extension}"
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file_bytes,
+            resource_type="raw",
+            folder=settings.CLOUDINARY_DOCUMENT_UPLOAD_FOLDER.strip("/") or None,
+            public_id=public_id,
+            overwrite=False,
+        )
+    except cloudinary.exceptions.Error as exc:
+        logger.exception("Cloudinary document upload failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Cloudinary upload failed. Verify the Cloudinary credentials and account settings.",
+        ) from exc
+
+    return {
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": len(file_bytes),
+        "public_id": upload_result["public_id"],
+        "url": upload_result.get("secure_url") or upload_result.get("url") or "",
+    }
+
+
+def delete_document_file(public_id: str | None) -> None:
+    """Best-effort delete for a raw document file stored in Cloudinary."""
+    if not public_id:
+        return
+
+    try:
+        _ensure_cloudinary_configured()
+        cloudinary.uploader.destroy(public_id, resource_type="raw")
+    except Exception:
+        logger.warning("Failed to delete document %s from Cloudinary", public_id)
 
 
 def save_exam_image(db: Session, user_id: int, upload: UploadFile) -> dict:

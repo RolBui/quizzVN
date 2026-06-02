@@ -5,8 +5,6 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import hash_password, utc_now
-from app.database import engine
-from app.models.admin_banner import AdminBanner
 from app.models.classroom import Classroom
 from app.models.classroom_membership import ClassroomMembership
 from app.models.exam import Exam
@@ -33,12 +31,7 @@ ATTEMPT_STATUS_SUBMITTED = "submitted"
 ADMIN_MUTABLE_STATUSES = {"active", "disabled"}
 TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
-BANNER_AUDIENCES = {"all", "teachers", "students"}
 USER_ACTIVITY_WINDOW = timedelta(hours=1)
-
-
-def bootstrap_admin_storage() -> None:
-    AdminBanner.__table__.create(bind=engine, checkfirst=True)
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:
@@ -998,6 +991,21 @@ def get_admin_exams_overview(db: Session) -> dict:
     }
 
 
+def delete_admin_exam(
+    db: Session,
+    current_administrator: User,
+    exam_id: int,
+) -> dict:
+    _ = current_administrator
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    _delete_exams_where(db, "id = :exam_id", {"exam_id": exam_id})
+    db.commit()
+    return {"message": "Exam deleted successfully"}
+
+
 def get_admin_documents_overview(db: Session) -> dict:
     rows = (
         db.query(
@@ -1005,6 +1013,10 @@ def get_admin_documents_overview(db: Session) -> dict:
             LearningDocument.title,
             LearningDocument.summary,
             LearningDocument.content,
+            LearningDocument.file_url,
+            LearningDocument.file_name,
+            LearningDocument.file_content_type,
+            LearningDocument.file_size_bytes,
             LearningDocument.scope,
             LearningDocument.classroom_id,
             LearningDocument.created_by_user_id,
@@ -1036,7 +1048,11 @@ def get_admin_documents_overview(db: Session) -> dict:
                 "id": row.id,
                 "title": row.title,
                 "summary": row.summary,
-                "content_preview": (row.summary or row.content or "")[:160],
+                "content_preview": (row.summary or row.content or row.file_name or "")[:160],
+                "file_url": row.file_url,
+                "file_name": row.file_name,
+                "file_content_type": row.file_content_type,
+                "file_size_bytes": row.file_size_bytes,
                 "scope": row.scope,
                 "classroom_id": row.classroom_id,
                 "classroom_name": row.classroom_name,
@@ -1049,95 +1065,6 @@ def get_admin_documents_overview(db: Session) -> dict:
             }
             for row in rows
         ],
-    }
-
-
-def _banner_status(banner: AdminBanner, now: datetime) -> str:
-    start_at = _normalize_datetime(banner.start_at)
-    end_at = _normalize_datetime(banner.end_at)
-    if not banner.is_active:
-        return "disabled"
-    if start_at and start_at > now:
-        return "scheduled"
-    if end_at and end_at < now:
-        return "expired"
-    return "active"
-
-
-def _serialize_banner(banner: AdminBanner, now: datetime | None = None) -> dict:
-    current_time = now or utc_now()
-    return {
-        "id": banner.id,
-        "title": banner.title,
-        "image_url": banner.image_url,
-        "link_url": banner.link_url,
-        "audience": banner.audience,
-        "status": _banner_status(banner, current_time),
-        "is_active": banner.is_active,
-        "start_at": banner.start_at,
-        "end_at": banner.end_at,
-        "created_at": banner.created_at,
-        "updated_at": banner.updated_at,
-    }
-
-
-def get_admin_appearance_overview(db: Session) -> dict:
-    now = utc_now()
-    banners = db.query(AdminBanner).order_by(AdminBanner.start_at.desc(), AdminBanner.id.desc()).all()
-    serialized = [_serialize_banner(banner, now) for banner in banners]
-    return {
-        "metrics": [
-            _metric("total_banners", "Tổng banner", len(serialized), subtext="lưu trong DB"),
-            _metric("active_banners", "Đang hoạt động", sum(1 for item in serialized if item["status"] == "active"), subtext="đang hiển thị"),
-            _metric("scheduled_banners", "Đã lên lịch", sum(1 for item in serialized if item["status"] == "scheduled"), subtext="chờ đến ngày bắt đầu"),
-        ],
-        "banners": serialized,
-    }
-
-
-def create_admin_banner(
-    db: Session,
-    current_admin: User,
-    title: str,
-    image_url: str | None,
-    link_url: str | None,
-    audience: str,
-    start_at: datetime,
-    end_at: datetime,
-    is_active: bool,
-) -> dict:
-    normalized_title = title.strip()
-    normalized_audience = audience.strip().lower() if audience else "all"
-    if not normalized_title:
-        raise HTTPException(status_code=400, detail="title is required")
-    if normalized_audience not in BANNER_AUDIENCES:
-        raise HTTPException(status_code=400, detail="Invalid audience")
-
-    start_value = _normalize_datetime(start_at)
-    end_value = _normalize_datetime(end_at)
-    if start_value is None or end_value is None:
-        raise HTTPException(status_code=400, detail="start_at and end_at are required")
-    if end_value <= start_value:
-        raise HTTPException(status_code=400, detail="end_at must be after start_at")
-
-    banner = AdminBanner(
-        title=normalized_title,
-        image_url=image_url.strip() if image_url else None,
-        link_url=link_url.strip() if link_url else None,
-        audience=normalized_audience,
-        start_at=start_value,
-        end_at=end_value,
-        is_active=is_active,
-        created_by_user_id=current_admin.id,
-        created_at=utc_now(),
-        updated_at=utc_now(),
-    )
-    db.add(banner)
-    db.commit()
-    db.refresh(banner)
-    return {
-        "message": "Banner created successfully",
-        "banner": _serialize_banner(banner),
     }
 
 
@@ -1320,8 +1247,6 @@ def _delete_user_auth_rows(db: Session, user_id: int) -> None:
 
 def _delete_teacher_owned_rows(db: Session, teacher_id: int) -> None:
     params = {"user_id": teacher_id}
-    if _table_exists(db, "admin_banners") and _column_exists(db, "admin_banners", "created_by_user_id"):
-        db.execute(text("update admin_banners set created_by_user_id = null where created_by_user_id = :user_id"), params)
     if _table_exists(db, "contact_infos") and _column_exists(db, "contact_infos", "updated_by"):
         db.execute(text("update contact_infos set updated_by = null where updated_by = :user_id"), params)
 
@@ -1439,11 +1364,6 @@ def _hard_delete_user(db: Session, user_id: int, role_name: str | None = None) -
     elif role_name == STUDENT_ROLE_NAME:
         _delete_student_owned_rows(db, user_id)
     else:
-        if _table_exists(db, "admin_banners") and _column_exists(db, "admin_banners", "created_by_user_id"):
-            db.execute(
-                text("update admin_banners set created_by_user_id = null where created_by_user_id = :user_id"),
-                {"user_id": user_id},
-            )
         if _table_exists(db, "contact_infos") and _column_exists(db, "contact_infos", "updated_by"):
             db.execute(
                 text("update contact_infos set updated_by = null where updated_by = :user_id"),
@@ -1509,45 +1429,6 @@ def create_admin_account(
     user = _get_admin_account(db, user.id)
     return {
         "message": "Admin account created successfully",
-        "admin": _serialize_admin_account(user),
-    }
-
-
-def update_admin_account(
-    db: Session,
-    current_administrator: User,
-    user_id: int,
-    full_name: str | None,
-    password: str | None,
-    status: str | None,
-) -> dict:
-    user = _get_admin_account(db, user_id)
-    _require_editable_admin(user, current_administrator)
-
-    if full_name is not None:
-        normalized_full_name = full_name.strip()
-        if not normalized_full_name:
-            raise HTTPException(status_code=400, detail="full_name cannot be empty")
-        user.full_name = normalized_full_name
-
-    if password is not None:
-        if len(password) < 6:
-            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-        user.password_hash = hash_password(password)
-        if user.auth_type == "oauth":
-            user.auth_type = "mixed"
-
-    if status is not None:
-        if status not in ADMIN_MUTABLE_STATUSES:
-            raise HTTPException(status_code=400, detail="Invalid status")
-        user.status = status
-
-    user.updated_at = utc_now()
-    db.commit()
-    db.refresh(user)
-    user = _get_admin_account(db, user.id)
-    return {
-        "message": "Admin account updated successfully",
         "admin": _serialize_admin_account(user),
     }
 
@@ -1939,7 +1820,11 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
                 "id": document.id,
                 "title": document.title,
                 "summary": document.summary,
-                "content_preview": (document.summary or document.content or "")[:160],
+                "content_preview": (document.summary or document.content or document.file_name or "")[:160],
+                "file_url": document.file_url,
+                "file_name": document.file_name,
+                "file_content_type": document.file_content_type,
+                "file_size_bytes": document.file_size_bytes,
                 "scope": document.scope,
                 "classroom_id": document.classroom_id,
                 "classroom_name": classroom_map[document.classroom_id].name if document.classroom_id in classroom_map else None,
@@ -2166,7 +2051,11 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
                 "id": document.id,
                 "title": document.title,
                 "summary": document.summary,
-                "content_preview": (document.summary or document.content or "")[:160],
+                "content_preview": (document.summary or document.content or document.file_name or "")[:160],
+                "file_url": document.file_url,
+                "file_name": document.file_name,
+                "file_content_type": document.file_content_type,
+                "file_size_bytes": document.file_size_bytes,
                 "scope": document.scope,
                 "classroom_id": document.classroom_id,
                 "classroom_name": classroom_map[document.classroom_id].name if document.classroom_id in classroom_map else None,

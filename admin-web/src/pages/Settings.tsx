@@ -1,4 +1,4 @@
-import { Bell, Lock, User, Globe, Palette, Shield } from "lucide-react";
+import { Bell, Lock, User, Globe, Shield } from "lucide-react";
 import { useState } from "react";
 
 export function Settings() {
@@ -9,7 +9,6 @@ export function Settings() {
     { id: "account", name: "Tài khoản", icon: User },
     { id: "notifications", name: "Thông báo", icon: Bell },
     { id: "security", name: "Bảo mật", icon: Lock },
-    { id: "appearance", name: "Giao diện", icon: Palette },
     { id: "roles", name: "Phân quyền", icon: Shield },
   ];
 
@@ -158,7 +157,7 @@ export function Settings() {
           {activeTab !== "general" && activeTab !== "notifications" && (
             <div className="flex h-64 flex-col items-center justify-center text-center">
               <div className="w-16 h-16 bg-surface-container mb-4 rounded-full flex items-center justify-center">
-                <Palette className="w-8 h-8 text-outline" />
+                <Shield className="w-8 h-8 text-outline" />
               </div>
               <h3 className="text-lg font-bold text-on-surface">Đang phát triển</h3>
               <p className="text-sm text-outline mt-2 max-w-sm">Mục cài đặt này đang được cập nhật. Vui lòng quay lại sau.</p>

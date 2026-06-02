@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import { useChatNotifications } from "../../lib/chat-notifications";
+import quizzvnLogo from "../../assets/quizzvn-logo.jpeg";
 import {
   School,
   Users,
@@ -9,7 +10,6 @@ import {
   BookOpen,
   FileQuestion,
   FileText,
-  Palette,
   Settings,
   MessageSquare,
   ChevronDown,
@@ -39,9 +39,8 @@ export function Sidebar({ isPinned }: SidebarProps) {
     { name: "Lớp học", path: "/classes", icon: BookOpen },
     { name: "Bài thi", path: "/exams", icon: FileQuestion },
     { name: "Tài liệu", path: "/documents", icon: FileText },
-    { name: "Giao diện", path: "/appearance", icon: Palette },
-    { name: "Cài đặt", path: "/settings", icon: Settings },
     { name: "Nhắn tin", path: "/chat", icon: MessageSquare },
+    { name: "Cài đặt", path: "/settings", icon: Settings },
   ];
 
   const dashboardRoutes = [
@@ -71,8 +70,12 @@ export function Sidebar({ isPinned }: SidebarProps) {
           isBrandExpanded ? "w-[260px] px-6" : "w-[88px] justify-center px-0",
         )}
       >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-black text-on-primary">
-          Q
+        <div className="flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden">
+          <img
+            src={quizzvnLogo}
+            alt="QuizzVN"
+            className="h-9 w-9 object-contain"
+          />
         </div>
         <div
           className={cn(
@@ -83,9 +86,6 @@ export function Sidebar({ isPinned }: SidebarProps) {
           <h1 className="text-lg font-black text-on-surface leading-tight">
             QuizzVN Admin
           </h1>
-          <p className="text-[11px] text-outline font-medium tracking-wide">
-            Hệ thống Quản lý Học tập
-          </p>
         </div>
       </div>
 

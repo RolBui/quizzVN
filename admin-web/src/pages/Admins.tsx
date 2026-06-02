@@ -3,14 +3,10 @@ import {
   AlertCircle,
   Loader2,
   Mail,
-  MailWarning,
   MessageSquare,
-  Pencil,
   Plus,
   Search,
-  Shield,
   Trash2,
-  UserCheck,
   X,
 } from "lucide-react";
 import {
@@ -18,7 +14,6 @@ import {
   ApiError,
   chatApi,
   type AdminAccount,
-  type AdminAccountStatus,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useNavigate } from "react-router-dom";
@@ -30,14 +25,12 @@ interface AdminFormState {
   full_name: string;
   email: string;
   password: string;
-  status: AdminAccountStatus;
 }
 
 const emptyForm: AdminFormState = {
   full_name: "",
   email: "",
   password: "",
-  status: "active",
 };
 
 function getInitials(account: AdminAccount) {
@@ -94,12 +87,13 @@ export function Admins() {
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [mode, setMode] = useState<"create" | "edit" | null>(null);
-  const [editingAdmin, setEditingAdmin] = useState<AdminAccount | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [deletingAdmin, setDeletingAdmin] = useState<AdminAccount | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [openingChatAdminId, setOpeningChatAdminId] = useState<number | null>(null);
+  const [openingChatAdminId, setOpeningChatAdminId] = useState<number | null>(
+    null,
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [form, setForm] = useState<AdminFormState>(emptyForm);
 
@@ -169,21 +163,8 @@ export function Admins() {
   ).length;
 
   const openCreateModal = () => {
-    setMode("create");
-    setEditingAdmin(null);
+    setIsCreateModalOpen(true);
     setForm(emptyForm);
-    setFormError(null);
-  };
-
-  const openEditModal = (admin: AdminAccount) => {
-    setMode("edit");
-    setEditingAdmin(admin);
-    setForm({
-      full_name: admin.full_name,
-      email: admin.email,
-      password: "",
-      status: admin.status === "active" ? "active" : "disabled",
-    });
     setFormError(null);
   };
 
@@ -191,8 +172,7 @@ export function Admins() {
     if (isSubmitting) {
       return;
     }
-    setMode(null);
-    setEditingAdmin(null);
+    setIsCreateModalOpen(false);
     setForm(emptyForm);
     setFormError(null);
   };
@@ -217,19 +197,11 @@ export function Admins() {
     setIsSubmitting(true);
 
     try {
-      if (mode === "create") {
-        await adminApi.createAccount({
-          full_name: form.full_name,
-          email: form.email,
-          password: form.password,
-        });
-      } else if (mode === "edit" && editingAdmin) {
-        await adminApi.updateAccount(editingAdmin.id, {
-          full_name: form.full_name,
-          status: form.status,
-          ...(form.password ? { password: form.password } : {}),
-        });
-      }
+      await adminApi.createAccount({
+        full_name: form.full_name,
+        email: form.email,
+        password: form.password,
+      });
 
       closeModal();
       await loadAdmins();
@@ -330,9 +302,6 @@ export function Admins() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-            <Shield className="w-4 h-4" />
-          </div>
           <div>
             <p className="text-sm text-on-surface-variant font-medium">
               Tổng quản trị viên
@@ -347,9 +316,6 @@ export function Admins() {
         </div>
 
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
-            <UserCheck className="w-4 h-4" />
-          </div>
           <div>
             <p className="text-sm text-on-surface-variant font-medium">
               Đang hoạt động
@@ -364,9 +330,6 @@ export function Admins() {
         </div>
 
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="w-8 h-8 rounded-full bg-error/10 flex items-center justify-center text-error">
-            <MailWarning className="w-4 h-4" />
-          </div>
           <div>
             <p className="text-sm text-on-surface-variant font-medium">
               Vô hiệu hóa
@@ -484,13 +447,6 @@ export function Admins() {
                             )}
                           </button>
                           <button
-                            onClick={() => openEditModal(admin)}
-                            className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors"
-                            title="Sửa admin"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
                             onClick={() => openDeleteModal(admin)}
                             className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
                             title="Xóa admin"
@@ -603,12 +559,12 @@ export function Admins() {
         </div>
       )}
 
-      {mode && (
+      {isCreateModalOpen && (
         <div className="fixed inset-0 z-80 bg-black/35 flex items-center justify-center px-4">
           <div className="w-full max-w-115 bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
             <div className="px-5 py-4 border-b border-outline-variant flex items-center justify-between">
               <h2 className="text-lg font-bold text-on-surface">
-                {mode === "create" ? "Thêm quản trị viên" : "Sửa quản trị viên"}
+                Thêm quản trị viên
               </h2>
               <button
                 onClick={closeModal}
@@ -656,15 +612,14 @@ export function Admins() {
                       email: event.target.value,
                     }))
                   }
-                  disabled={mode === "edit"}
                   required
-                  className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-70"
+                  className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                 />
               </label>
 
               <label className="block">
                 <span className="text-sm font-semibold text-on-surface">
-                  {mode === "create" ? "Mật khẩu" : "Mật khẩu mới"}
+                  Mật khẩu
                 </span>
                 <input
                   type="password"
@@ -675,36 +630,11 @@ export function Admins() {
                       password: event.target.value,
                     }))
                   }
-                  required={mode === "create"}
-                  placeholder={
-                    mode === "edit"
-                      ? "Để trống nếu không đổi"
-                      : "Tối thiểu 6 ký tự"
-                  }
+                  required
+                  placeholder="Tối thiểu 6 ký tự"
                   className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-outline"
                 />
               </label>
-
-              {mode === "edit" && (
-                <label className="block">
-                  <span className="text-sm font-semibold text-on-surface">
-                    Trạng thái
-                  </span>
-                  <select
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        status: event.target.value as AdminAccountStatus,
-                      }))
-                    }
-                    className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="active">Hoạt động</option>
-                    <option value="disabled">Vô hiệu hóa</option>
-                  </select>
-                </label>
-              )}
 
               <div className="flex justify-end gap-3 pt-2">
                 <button

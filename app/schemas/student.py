@@ -37,6 +37,10 @@ class StudentDocumentSchema(BaseModel):
     title: str
     summary: str | None = None
     content: str
+    file_url: str | None = None
+    file_name: str | None = None
+    file_content_type: str | None = None
+    file_size_bytes: int | None = None
     scope: StudentScope
     classroom_id: int | None = None
     classroom_name: str | None = None
