@@ -70,6 +70,10 @@ class TeacherDocumentSchema(BaseModel):
     title: str
     summary: str | None = None
     content: str
+    file_url: str | None = None
+    file_name: str | None = None
+    file_content_type: str | None = None
+    file_size_bytes: int | None = None
     scope: TeacherScope
     classroom_id: int | None = None
     classroom_name: str | None = None
@@ -80,38 +84,6 @@ class TeacherDocumentSchema(BaseModel):
 
 class TeacherDocumentListResponse(BaseModel):
     items: list[TeacherDocumentSchema]
-
-
-class CreateTeacherDocumentRequest(BaseModel):
-    title: str
-    summary: str | None = None
-    content: str
-    scope: TeacherScope
-    classroom_id: int | None = None
-    is_published: bool = False
-
-
-class CreateTeacherClassDocumentRequest(BaseModel):
-    title: str
-    summary: str | None = None
-    content: str
-    is_published: bool = False
-
-
-class UpdateTeacherDocumentRequest(BaseModel):
-    title: str | None = None
-    summary: str | None = None
-    content: str | None = None
-    scope: TeacherScope | None = None
-    classroom_id: int | None = None
-    is_published: bool | None = None
-
-
-class UpdateTeacherClassDocumentRequest(BaseModel):
-    title: str | None = None
-    summary: str | None = None
-    content: str | None = None
-    is_published: bool | None = None
 
 
 class TeacherDocumentResponse(BaseModel):

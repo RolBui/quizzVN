@@ -10,7 +10,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
 from app.database import test_db_connection
 from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
-from app.services.admin_service import bootstrap_admin_storage
 from app.services.auth_service import bootstrap_auth_storage
 from app.services.chat_service import bootstrap_chat_storage
 from app.services.media_service import bootstrap_media_storage
@@ -48,7 +47,6 @@ app.add_middleware(
 def startup_bootstrap() -> None:
     bootstrap_auth_storage()
     bootstrap_student_learning_storage()
-    bootstrap_admin_storage()
     bootstrap_media_storage()
     bootstrap_chat_storage()
 

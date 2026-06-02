@@ -238,6 +238,10 @@ export interface AdminDocument {
   title: string;
   summary: string | null;
   content_preview: string;
+  file_url: string | null;
+  file_name: string | null;
+  file_content_type: string | null;
+  file_size_bytes: number | null;
   scope: string;
   classroom_id: number | null;
   classroom_name: string | null;
@@ -324,40 +328,6 @@ export interface AdminUserProfileUpdatePayload {
   gender?: string | null;
   school_name?: string | null;
   status?: AdminAccountStatus;
-}
-
-export interface AdminBanner {
-  id: number;
-  title: string;
-  image_url: string | null;
-  link_url: string | null;
-  audience: string;
-  status: string;
-  is_active: boolean;
-  start_at: string;
-  end_at: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AdminAppearanceOverview {
-  metrics: AdminMetric[];
-  banners: AdminBanner[];
-}
-
-export interface CreateAdminBannerPayload {
-  title: string;
-  image_url?: string | null;
-  link_url?: string | null;
-  audience: "all" | "teachers" | "students";
-  start_at: string;
-  end_at: string;
-  is_active: boolean;
-}
-
-export interface AdminBannerResponse {
-  message: string;
-  banner: AdminBanner;
 }
 
 export interface ChatUser {
@@ -532,32 +502,15 @@ export const adminApi = {
     apiDelete<{ message: string }>(`/admin/students/${studentId}`),
   getClassesOverview: () => apiGet<AdminClassOverview>("/admin/classes"),
   getExamsOverview: () => apiGet<AdminExamOverview>("/admin/exams"),
+  deleteExam: (examId: number) =>
+    apiDelete<{ message: string }>(`/admin/exams/${examId}`),
   getDocumentsOverview: () => apiGet<AdminDocumentOverview>("/admin/documents"),
-  getAppearanceOverview: () =>
-    apiGet<AdminAppearanceOverview>("/admin/appearance"),
-  createBanner: (payload: CreateAdminBannerPayload) =>
-    apiPost<AdminBannerResponse>("/admin/appearance/banners", payload),
   listAccounts: () => apiGet<AdminAccountListResponse>("/admin/users"),
   createAccount: (payload: {
     full_name: string;
     email: string;
     password: string;
   }) => apiPost<AdminAccountResponse>("/admin/users", payload),
-  updateAccount: (
-    userId: number,
-    payload: {
-      full_name?: string;
-      password?: string;
-      status?: AdminAccountStatus;
-    },
-  ) =>
-    apiRequest<AdminAccountResponse>(`/admin/users/${userId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
   deleteAccount: (userId: number) =>
     apiRequest<{ message: string }>(`/admin/users/${userId}`, {
       method: "DELETE",

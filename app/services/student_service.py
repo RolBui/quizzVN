@@ -39,6 +39,14 @@ def bootstrap_student_learning_storage() -> None:
 
 def _ensure_student_learning_columns() -> None:
     statements = [
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS content TEXT DEFAULT ''",
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS file_url TEXT",
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)",
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS file_content_type VARCHAR(255)",
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS file_size_bytes INTEGER",
+        "ALTER TABLE learning_documents ADD COLUMN IF NOT EXISTS file_public_id VARCHAR(255)",
+        "UPDATE learning_documents SET content = COALESCE(content, '')",
+        "ALTER TABLE learning_documents ALTER COLUMN content SET DEFAULT ''",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
@@ -270,6 +278,10 @@ def _serialize_document(document: LearningDocument) -> dict:
         "title": document.title,
         "summary": document.summary,
         "content": document.content,
+        "file_url": document.file_url,
+        "file_name": document.file_name,
+        "file_content_type": document.file_content_type,
+        "file_size_bytes": document.file_size_bytes,
         "scope": document.scope,
         "classroom_id": document.classroom_id,
         "classroom_name": classroom.name if classroom else None,

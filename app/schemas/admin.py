@@ -75,12 +75,6 @@ class CreateAdminAccountRequest(BaseModel):
     password: str
 
 
-class UpdateAdminAccountRequest(BaseModel):
-    full_name: str | None = None
-    password: str | None = None
-    status: AdminAccountStatus | None = None
-
-
 class AdminAccountResponse(BaseModel):
     message: str
     admin: AdminAccountSchema
@@ -198,6 +192,10 @@ class AdminDocumentSchema(BaseModel):
     title: str
     summary: str | None = None
     content_preview: str
+    file_url: str | None = None
+    file_name: str | None = None
+    file_content_type: str | None = None
+    file_size_bytes: int | None = None
     scope: str
     classroom_id: int | None = None
     classroom_name: str | None = None
@@ -290,35 +288,3 @@ class ResetAdminUserPasswordRequest(BaseModel):
     password: str
 
 
-class AdminBannerSchema(BaseModel):
-    id: int
-    title: str
-    image_url: str | None = None
-    link_url: str | None = None
-    audience: str
-    status: str
-    is_active: bool
-    start_at: datetime
-    end_at: datetime
-    created_at: datetime
-    updated_at: datetime
-
-
-class AdminAppearanceOverviewResponse(BaseModel):
-    metrics: list[AdminMetricSchema]
-    banners: list[AdminBannerSchema]
-
-
-class CreateAdminBannerRequest(BaseModel):
-    title: str
-    image_url: str | None = None
-    link_url: str | None = None
-    audience: str = "all"
-    start_at: datetime
-    end_at: datetime
-    is_active: bool = True
-
-
-class AdminBannerResponse(BaseModel):
-    message: str
-    banner: AdminBannerSchema

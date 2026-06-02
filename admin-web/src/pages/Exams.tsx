@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, BarChart3, CheckCircle2, ClipboardList, Edit, Eye, Filter, Search } from "lucide-react";
+import { AlertCircle, Filter, Loader2, Search, Trash2, X } from "lucide-react";
 import { adminApi, type AdminExam, type AdminExamOverview } from "../lib/api";
 import { formatDateTime, formatDecimal, formatNumber, scopeLabel } from "../lib/format";
 
@@ -8,22 +8,15 @@ const fallbackOverview: AdminExamOverview = {
   items: [],
 };
 
-function examStatus(exam: AdminExam) {
-  if (!exam.is_published) {
-    return { label: "Bản nháp", className: "text-outline bg-surface-variant", icon: Edit };
-  }
-  if (exam.is_active) {
-    return { label: "Đang mở", className: "text-primary bg-primary/10", icon: CheckCircle2 };
-  }
-  return { label: "Đã đóng", className: "text-[#10B981] bg-[#10B981]/10", icon: CheckCircle2 };
-}
-
 export function Exams() {
   const [overview, setOverview] = useState<AdminExamOverview>(fallbackOverview);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingExam, setDeletingExam] = useState<AdminExam | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,6 +44,33 @@ export function Exams() {
     };
   }, []);
 
+  const closeDeleteModal = () => {
+    if (isDeleting) {
+      return;
+    }
+    setDeletingExam(null);
+    setDeleteError(null);
+  };
+
+  const handleDeleteExam = async () => {
+    if (!deletingExam) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await adminApi.deleteExam(deletingExam.id);
+      const response = await adminApi.getExamsOverview();
+      setOverview(response);
+      setDeletingExam(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Không xóa được bài thi.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const filteredExams = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return overview.items.filter((exam) => {
@@ -64,7 +84,7 @@ export function Exams() {
     });
   }, [overview.items, query, scope]);
 
-  const averageMetric = overview.metrics.find((metric) => metric.key === "average_score");
+  const totalExamCount = overview.items.length;
   const submittedMetric = overview.metrics.find((metric) => metric.key === "submitted_attempts");
   const activeMetric = overview.metrics.find((metric) => metric.key === "active_exams");
 
@@ -106,21 +126,15 @@ export function Exams() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
           <div className="flex w-full justify-between items-start">
-            <p className="text-sm font-medium text-outline">{averageMetric?.label || "Điểm trung bình"}</p>
-            <div className="w-8 h-8 rounded bg-primary-container text-on-primary-container flex items-center justify-center">
-              <BarChart3 className="w-4 h-4" />
-            </div>
+            <p className="text-sm font-medium text-outline">Tổng đề thi</p>
           </div>
-          <p className="text-3xl font-bold text-on-surface">{formatDecimal(averageMetric?.value, "%")}</p>
-          <p className="text-xs text-outline">{averageMetric?.subtext || "trên bài đã nộp"}</p>
+          <p className="text-3xl font-bold text-on-surface">{formatNumber(totalExamCount)}</p>
+          <p className="text-xs text-outline">bài thi trong hệ thống</p>
         </div>
 
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
           <div className="flex w-full justify-between items-start">
             <p className="text-sm font-medium text-outline">{submittedMetric?.label || "Lượt hoàn thành"}</p>
-            <div className="w-8 h-8 rounded bg-green-100 text-green-700 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
           </div>
           <p className="text-3xl font-bold text-on-surface">{formatNumber(submittedMetric?.value)}</p>
           <p className="text-xs text-outline">{submittedMetric?.subtext || "bài làm đã nộp"}</p>
@@ -129,9 +143,6 @@ export function Exams() {
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
           <div className="flex w-full justify-between items-start">
             <p className="text-sm font-medium text-outline">{activeMetric?.label || "Bài thi đang mở"}</p>
-            <div className="w-8 h-8 rounded bg-secondary-container text-on-secondary-container flex items-center justify-center">
-              <ClipboardList className="w-4 h-4" />
-            </div>
           </div>
           <p className="text-3xl font-bold text-on-surface">{formatNumber(activeMetric?.value)}</p>
           <p className="text-xs text-outline">{activeMetric?.subtext || "đã xuất bản và hoạt động"}</p>
@@ -145,25 +156,21 @@ export function Exams() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-225">
+          <table className="w-full table-fixed text-left border-collapse min-w-[980px]">
             <thead>
               <tr className="border-b border-surface-variant bg-surface-container-lowest text-outline">
-                <th className="py-4 px-6 text-xs font-semibold">Tên Bài thi</th>
-                <th className="py-4 px-6 text-xs font-semibold">Scope</th>
-                <th className="py-4 px-6 text-xs font-semibold">Giáo viên</th>
-                <th className="py-4 px-6 text-xs font-semibold">Câu hỏi</th>
-                <th className="py-4 px-6 text-xs font-semibold">Lượt làm</th>
-                <th className="py-4 px-6 text-xs font-semibold">Điểm TB</th>
-                <th className="py-4 px-6 text-xs font-semibold">Ngày tạo</th>
-                <th className="py-4 px-6 text-xs font-semibold">Trạng thái</th>
-                <th className="py-4 px-6 text-xs font-semibold text-right">Thao tác</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[26%]">Tên Bài thi</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[10%]">Scope</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[16%]">Giáo viên</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[8%] text-center">Câu hỏi</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[8%] text-center">Lượt làm</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[10%]">Điểm TB</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[16%]">Ngày tạo</th>
+                <th className="py-4 px-6 text-xs font-semibold w-[6%] text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-variant">
-              {filteredExams.map((exam) => {
-                const status = examStatus(exam);
-                const StatusIcon = status.icon;
-                return (
+              {filteredExams.map((exam) => (
                   <tr key={exam.id} className="hover:bg-surface-container-low/50 transition-colors bg-surface-container-lowest">
                     <td className="py-4 px-6">
                       <p className="text-sm font-medium text-primary">{exam.title}</p>
@@ -171,30 +178,32 @@ export function Exams() {
                     </td>
                     <td className="py-4 px-6 text-sm text-outline font-medium">{scopeLabel(exam.scope)}</td>
                     <td className="py-4 px-6 text-sm text-on-surface">{exam.teacher_name || "Chưa xác định"}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface">{exam.question_count}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface">{exam.attempt_count}</td>
+                    <td className="py-4 px-6 text-sm text-on-surface text-center">{exam.question_count}</td>
+                    <td className="py-4 px-6 text-sm text-on-surface text-center">{exam.attempt_count}</td>
                     <td className="py-4 px-6 text-sm text-on-surface">{exam.average_score === null ? "Chưa có" : formatDecimal(exam.average_score, "%")}</td>
                     <td className="py-4 px-6 text-sm text-on-surface">{formatDateTime(exam.created_at)}</td>
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${status.className}`}>
-                        <StatusIcon className="w-3 h-3" />
-                        {status.label}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-right">
-                      <button className="text-outline hover:text-primary transition-colors"><Eye className="w-4 h-4" /></button>
+                    <td className="py-4 px-6 text-center">
+                      <button
+                        className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
+                        title="Xóa bài thi"
+                        onClick={() => {
+                          setDeletingExam(exam);
+                          setDeleteError(null);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
-                );
-              })}
+                ))}
               {!isLoading && filteredExams.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-sm text-outline">Chưa có bài thi phù hợp.</td>
+                  <td colSpan={8} className="py-10 text-center text-sm text-outline">Chưa có bài thi phù hợp.</td>
                 </tr>
               )}
               {isLoading && (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-sm text-outline">Đang tải dữ liệu bài thi...</td>
+                  <td colSpan={8} className="py-10 text-center text-sm text-outline">Đang tải dữ liệu bài thi...</td>
                 </tr>
               )}
             </tbody>
@@ -205,6 +214,82 @@ export function Exams() {
           <p>Đang hiển thị {filteredExams.length} trong số {overview.items.length} bài thi</p>
         </div>
       </div>
+
+      {deletingExam && (
+        <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
+            <div className="px-5 py-4 border-b border-outline-variant flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-error-container text-on-error-container flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-on-surface">
+                    Xóa bài thi
+                  </h2>
+                  <p className="text-sm text-outline mt-1">
+                    Bài thi và dữ liệu làm bài liên quan sẽ bị xóa.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={isDeleting}
+                className="p-2 rounded-lg hover:bg-surface-container-low text-outline disabled:opacity-60"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleDeleteExam();
+              }}
+              className="p-5 space-y-4"
+            >
+              <div className="rounded-lg border border-error-container bg-error-container/40 px-4 py-3">
+                <p className="text-sm text-on-surface">
+                  Bạn có chắc muốn xóa bài thi này?
+                </p>
+                <p className="text-sm font-semibold text-on-surface mt-2">
+                  {deletingExam.title}
+                </p>
+                <p className="text-xs text-outline mt-1">
+                  {deletingExam.classroom_name || "Không gắn lớp"}
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="rounded-lg border border-error-container bg-error-container/60 px-3 py-2 flex items-start gap-2 text-sm text-on-error-container">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteModal}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg border border-outline-variant text-sm font-medium text-on-surface hover:bg-surface-container-low disabled:opacity-60"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg bg-error text-on-error text-sm font-semibold hover:bg-error/90 disabled:opacity-70 flex items-center gap-2"
+                >
+                  {isDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Xóa bài thi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

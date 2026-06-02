@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -7,8 +7,6 @@ from app.schemas.common import MessageResponse
 from app.schemas.teacher import (
     AddTeacherStudentRequest,
     CreateTeacherClassRequest,
-    CreateTeacherClassDocumentRequest,
-    CreateTeacherDocumentRequest,
     CreateTeacherExamRequest,
     TeacherClassListResponse,
     TeacherClassResponse,
@@ -22,24 +20,22 @@ from app.schemas.teacher import (
     TeacherStudentListResponse,
     TeacherStudentResponse,
     UpdateTeacherClassRequest,
-    UpdateTeacherClassDocumentRequest,
     UpdateTeacherClassExamRequest,
-    UpdateTeacherDocumentRequest,
     UpdateTeacherExamRequest,
 )
 from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 from app.services.teacher_service import (
     add_student_to_teacher_class,
     create_teacher_class,
-    create_teacher_class_document,
-    create_teacher_document,
     create_teacher_exam,
+    create_teacher_uploaded_document,
     delete_teacher_class,
     delete_teacher_class_document,
     delete_teacher_document,
     delete_teacher_exam,
     get_teacher_class_exam_detail,
     get_teacher_exam_detail,
+    list_teacher_all_documents,
     list_teacher_class_students,
     list_teacher_classes,
     list_teacher_documents,
@@ -48,9 +44,7 @@ from app.services.teacher_service import (
     remove_student_from_teacher_class,
     set_teacher_exam_visibility,
     update_teacher_class,
-    update_teacher_class_document,
     update_teacher_class_exam,
-    update_teacher_document,
     update_teacher_exam,
 )
 
@@ -194,38 +188,22 @@ def get_teacher_class_documents(
 @router.post("/classes/{class_id}/documents", response_model=TeacherDocumentResponse)
 def post_teacher_class_document(
     class_id: int,
-    payload: CreateTeacherClassDocumentRequest,
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    summary: str | None = Form(None),
+    is_published: bool = Form(False),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherDocumentResponse:
-    return create_teacher_class_document(
+    return create_teacher_uploaded_document(
         db,
         current_teacher,
+        title,
+        summary,
+        file,
+        "class",
         class_id,
-        payload.title,
-        payload.summary,
-        payload.content,
-        payload.is_published,
-    )
-
-
-@router.put("/classes/{class_id}/documents/{document_id}", response_model=TeacherDocumentResponse)
-def put_teacher_class_document(
-    class_id: int,
-    document_id: int,
-    payload: UpdateTeacherClassDocumentRequest,
-    db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
-) -> TeacherDocumentResponse:
-    return update_teacher_class_document(
-        db,
-        current_teacher,
-        class_id,
-        document_id,
-        payload.title,
-        payload.summary,
-        payload.content,
-        payload.is_published,
+        is_published,
     )
 
 
@@ -239,41 +217,42 @@ def delete_teacher_class_document_route(
     return delete_teacher_class_document(db, current_teacher, class_id, document_id)
 
 
+@router.get("/documents", response_model=TeacherDocumentListResponse)
+def get_teacher_documents(
+    scope: str = Query("all"),
+    classroom_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherDocumentListResponse:
+    normalized_scope = scope.strip().lower()
+    if normalized_scope == "all":
+        if classroom_id is not None:
+            raise HTTPException(status_code=400, detail="classroom_id is only allowed when scope=class")
+        return list_teacher_all_documents(db, current_teacher)
+
+    return list_teacher_documents(db, current_teacher, normalized_scope, classroom_id)
+
+
 @router.post("/documents", response_model=TeacherDocumentResponse)
 def post_teacher_document(
-    payload: CreateTeacherDocumentRequest,
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    summary: str | None = Form(None),
+    scope: str = Form("system"),
+    classroom_id: int | None = Form(None),
+    is_published: bool = Form(False),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherDocumentResponse:
-    return create_teacher_document(
+    return create_teacher_uploaded_document(
         db,
         current_teacher,
-        payload.title,
-        payload.summary,
-        payload.content,
-        payload.scope,
-        payload.classroom_id,
-        payload.is_published,
-    )
-
-
-@router.put("/documents/{document_id}", response_model=TeacherDocumentResponse)
-def put_teacher_document(
-    document_id: int,
-    payload: UpdateTeacherDocumentRequest,
-    db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
-) -> TeacherDocumentResponse:
-    return update_teacher_document(
-        db,
-        current_teacher,
-        document_id,
-        payload.title,
-        payload.summary,
-        payload.content,
-        payload.scope,
-        payload.classroom_id,
-        payload.is_published,
+        title,
+        summary,
+        file,
+        scope,
+        classroom_id,
+        is_published,
     )
 
 

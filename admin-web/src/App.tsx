@@ -14,7 +14,6 @@ import { Admins } from './pages/Admins';
 import { Classes } from './pages/Classes';
 import { Exams } from './pages/Exams';
 import { Documents } from './pages/Documents';
-import { Appearance } from './pages/Appearance';
 import { Chat } from './pages/Chat';
 import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
@@ -35,7 +34,6 @@ export default function App() {
               <Route path="classes" element={<Classes />} />
               <Route path="exams" element={<Exams />} />
               <Route path="documents" element={<Documents />} />
-              <Route path="appearance" element={<Appearance />} />
               <Route path="chat" element={<Chat />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />

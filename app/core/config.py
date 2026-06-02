@@ -117,12 +117,16 @@ class Settings:
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))
     MAX_IMAGE_UPLOAD_BYTES: int = int(os.getenv("MAX_IMAGE_UPLOAD_BYTES", str(5 * 1024 * 1024)))
     MAX_CHAT_FILE_UPLOAD_BYTES: int = int(os.getenv("MAX_CHAT_FILE_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+    MAX_DOCUMENT_UPLOAD_BYTES: int = int(os.getenv("MAX_DOCUMENT_UPLOAD_BYTES", str(20 * 1024 * 1024)))
     CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "").strip()
     CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "").strip()
     CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "").strip()
     CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "").strip()
     CLOUDINARY_UPLOAD_FOLDER: str = os.getenv("CLOUDINARY_UPLOAD_FOLDER", "quiz/exam-images").strip() or "quiz/exam-images"
     CLOUDINARY_CHAT_UPLOAD_FOLDER: str = os.getenv("CLOUDINARY_CHAT_UPLOAD_FOLDER", "quiz/chat-files").strip() or "quiz/chat-files"
+    CLOUDINARY_DOCUMENT_UPLOAD_FOLDER: str = (
+        os.getenv("CLOUDINARY_DOCUMENT_UPLOAD_FOLDER", "quiz/documents").strip() or "quiz/documents"
+    )
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
     CHAT_EVENTS_CHANNEL: str = os.getenv("CHAT_EVENTS_CHANNEL", "chat:events").strip() or "chat:events"
 
