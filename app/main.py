@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.admin_router import router as admin_router
+from app.routers.analytics_router import router as analytics_router
 from app.routers.auth_router import router as auth_router
 from app.routers.chat_router import router as chat_router
 from app.routers.student_router import router as student_router
@@ -11,6 +12,7 @@ from app.core.config import settings
 from app.database import test_db_connection
 from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
 from app.services.auth_service import bootstrap_auth_storage
+from app.services.analytics_service import bootstrap_web_analytics_storage
 from app.services.chat_service import bootstrap_chat_storage
 from app.services.media_service import bootstrap_media_storage
 from app.services.student_service import bootstrap_student_learning_storage
@@ -46,6 +48,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_bootstrap() -> None:
     bootstrap_auth_storage()
+    bootstrap_web_analytics_storage()
     bootstrap_student_learning_storage()
     bootstrap_media_storage()
     bootstrap_chat_storage()
@@ -101,6 +104,7 @@ async def startup_realtime():
 #     }
 
 app.include_router(auth_router)
+app.include_router(analytics_router)
 app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(teacher_router)

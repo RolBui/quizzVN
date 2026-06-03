@@ -18,6 +18,7 @@ from app.schemas.admin import (
     ResetAdminUserPasswordRequest,
     UpdateAdminUserProfileRequest,
 )
+from app.schemas.analytics import AdminWebRealtimeResponse, AdminWebTrafficOverviewResponse
 from app.schemas.common import MessageResponse
 from app.services.admin_service import (
     create_admin_account,
@@ -39,6 +40,7 @@ from app.services.admin_service import (
     update_admin_student_profile,
     update_admin_teacher_profile,
 )
+from app.services.analytics_service import get_web_realtime_overview, get_web_traffic_overview
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -51,6 +53,25 @@ def get_crm_overview(
 ) -> AdminCrmOverviewResponse:
     _ = current_admin
     return get_admin_crm_overview(db, period)
+
+
+@router.get("/analytics/traffic", response_model=AdminWebTrafficOverviewResponse)
+def get_analytics_traffic(
+    period: str = Query("7d"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminWebTrafficOverviewResponse:
+    _ = current_admin
+    return get_web_traffic_overview(db, period)
+
+
+@router.get("/analytics/realtime", response_model=AdminWebRealtimeResponse)
+def get_analytics_realtime(
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminWebRealtimeResponse:
+    _ = current_admin
+    return get_web_realtime_overview(db)
 
 
 @router.get("/teachers", response_model=AdminTeacherOverviewResponse)

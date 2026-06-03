@@ -126,6 +126,60 @@ export interface CrmOverview {
 
 export type CrmPeriod = "7d" | "30d" | "year";
 
+export type AnalyticsPeriod = "7d" | "30d" | "year";
+
+export interface AnalyticsMetric {
+  key: string;
+  label: string;
+  value: number;
+  suffix: string;
+  trend: string;
+  is_up: boolean;
+  subtext: string;
+}
+
+export interface AnalyticsTrafficPoint {
+  name: string;
+  current: number;
+  last: number;
+}
+
+export interface AnalyticsBreakdownItem {
+  name: string;
+  value: number;
+}
+
+export interface AnalyticsPopularPage {
+  path: string;
+  title: string | null;
+  views: number;
+  unique_visitors: number;
+}
+
+export interface AnalyticsRealtimePage {
+  path: string;
+  title: string | null;
+  active_users: number;
+}
+
+export interface AnalyticsRealtime {
+  active_users: number;
+  active_sessions: number;
+  active_pages: AnalyticsRealtimePage[];
+  active_window_seconds: number;
+  last_updated_at: string;
+}
+
+export interface AnalyticsOverview {
+  metrics: AnalyticsMetric[];
+  traffic: AnalyticsTrafficPoint[];
+  devices: AnalyticsBreakdownItem[];
+  sources: AnalyticsBreakdownItem[];
+  popular_pages: AnalyticsPopularPage[];
+  realtime: AnalyticsRealtime;
+  last_updated_at: string;
+}
+
 export interface AdminMetric {
   key: string;
   label: string;
@@ -460,6 +514,10 @@ export const authApi = {
 export const adminApi = {
   getCrmOverview: (period: CrmPeriod = "7d") =>
     apiGet<CrmOverview>(`/admin/crm/overview?period=${period}`),
+  getAnalyticsTraffic: (period: AnalyticsPeriod = "7d") =>
+    apiGet<AnalyticsOverview>(`/admin/analytics/traffic?period=${period}`),
+  getAnalyticsRealtime: () =>
+    apiGet<AnalyticsRealtime>("/admin/analytics/realtime"),
   getTeachersOverview: () => apiGet<AdminTeacherOverview>("/admin/teachers"),
   getTeacherDetail: (teacherId: number) =>
     apiGet<AdminTeacherDetail>(`/admin/teachers/${teacherId}`),
