@@ -318,6 +318,37 @@ def list_uploaded_images(db: Session, user_id: int, category: str = "exam") -> l
     ]
 
 
+def _delete_uploaded_image_record(db: Session, record: UploadedImage) -> None:
+    try:
+        _ensure_cloudinary_configured()
+        cloudinary.uploader.destroy(record.public_id, resource_type="image")
+    except Exception:
+        logger.warning("Failed to delete image %s from Cloudinary, removing DB record anyway", record.public_id)
+
+    db.delete(record)
+    db.commit()
+
+
+def delete_uploaded_avatars_except_url(db: Session, user_id: int, avatar_url: str) -> int:
+    """Delete all uploaded avatar records for a user except the active avatar URL."""
+    records = (
+        db.query(UploadedImage)
+        .filter(
+            UploadedImage.uploaded_by_user_id == user_id,
+            UploadedImage.category == "avatar",
+            UploadedImage.url != avatar_url,
+        )
+        .all()
+    )
+
+    deleted_count = 0
+    for record in records:
+        _delete_uploaded_image_record(db, record)
+        deleted_count += 1
+
+    return deleted_count
+
+
 def delete_uploaded_image(db: Session, user_id: int, image_id: int) -> None:
     """Delete an uploaded image from Cloudinary and the DB."""
     record = (
@@ -331,12 +362,4 @@ def delete_uploaded_image(db: Session, user_id: int, image_id: int) -> None:
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
-    # Try to remove from Cloudinary (best-effort)
-    try:
-        _ensure_cloudinary_configured()
-        cloudinary.uploader.destroy(record.public_id, resource_type="image")
-    except Exception:
-        logger.warning("Failed to delete image %s from Cloudinary, removing DB record anyway", record.public_id)
-
-    db.delete(record)
-    db.commit()
+    _delete_uploaded_image_record(db, record)
