@@ -50,7 +50,11 @@ from app.services.email_verification_service import (
     send_email_verification_email,
     verify_email_token,
 )
-from app.services.media_service import save_avatar_image, list_uploaded_images
+from app.services.media_service import (
+    delete_uploaded_avatars_except_url,
+    save_avatar_image,
+    list_uploaded_images,
+)
 from fastapi import UploadFile, File
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -480,11 +484,38 @@ def get_avatars(
     return {"items": items}
 
 
+def _save_and_update_avatar(
+    image: UploadFile,
+    db: Session,
+    current_user,
+) -> ProfileImageUploadResponse:
+    image_data = save_avatar_image(db, current_user.id, image)
+    return update_user_avatar(db, current_user, image_data["url"])
+
+
+def _replace_avatar(
+    image: UploadFile,
+    db: Session,
+    current_user,
+) -> ProfileImageUploadResponse:
+    result = _save_and_update_avatar(image, db, current_user)
+    delete_uploaded_avatars_except_url(db, current_user.id, result["avatar_url"])
+    return result
+
+
 @router.post("/profile/avatar", response_model=ProfileImageUploadResponse)
 def upload_avatar(
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> ProfileImageUploadResponse:
-    image_data = save_avatar_image(db, current_user.id, image)
-    return update_user_avatar(db, current_user, image_data["url"])
+    return _save_and_update_avatar(image, db, current_user)
+
+
+@router.put("/profile/avatar", response_model=ProfileImageUploadResponse)
+def update_avatar(
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ProfileImageUploadResponse:
+    return _replace_avatar(image, db, current_user)
