@@ -70,7 +70,7 @@ function MetricSparkline({
         d={linePath}
         fill="none"
         stroke={stroke}
-        strokeWidth={2.4}
+        strokeWidth={2.8}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -89,13 +89,15 @@ export function MetricSparklineCard({
 }: MetricSparklineCardProps) {
   const TrendIcon = isUp ? ArrowUpRight : ArrowDownRight;
   const values =
-    sparkline && sparkline.length >= 2 ? sparkline : [Number(value) || 0, Number(value) || 0];
+    sparkline && sparkline.length >= 2
+      ? sparkline
+      : [Number(value) || 0, Number(value) || 0];
 
   return (
     <div className="bg-surface-container-lowest rounded-lg p-4 border border-surface-variant shadow-(--shadow-level-1) flex flex-col justify-between min-h-33">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-kpi-title font-semibold text-sm truncate">
+          <p className="text-on-surface font-semibold text-sm truncate">
             {label}
           </p>
           <p className="text-2xl font-bold text-on-surface mt-3">{value}</p>

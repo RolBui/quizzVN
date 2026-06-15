@@ -1,5 +1,6 @@
 import re
 import logging
+import json
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -29,6 +30,7 @@ ADMINISTRATOR_ROLE_NAME = "administrator"
 ADMIN_ROLE_NAME = "admin"
 ADMIN_ACCESS_ROLE_NAMES = (ADMINISTRATOR_ROLE_NAME, ADMIN_ROLE_NAME)
 SELECTABLE_ROLE_NAMES = ("teacher", "student")
+ADMIN_PERMISSION_KEYS = ("teachers", "students", "admins", "classes", "exams", "documents")
 logger = logging.getLogger(__name__)
 USER_STATUSES = ("active", "inactive", "blocked", "disabled", "deleted")
 
@@ -60,6 +62,7 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
 
 def bootstrap_auth_storage() -> None:
     UserProfile.__table__.create(bind=engine, checkfirst=True)
+    _ensure_admin_permissions_column()
     _ensure_user_status_constraint()
 
     db = SessionLocal()
@@ -86,6 +89,42 @@ def _ensure_user_status_constraint() -> None:
     """
     with engine.begin() as connection:
         connection.execute(text(statement))
+
+
+def _ensure_admin_permissions_column() -> None:
+    statement = """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS admin_permissions TEXT NOT NULL DEFAULT '[]';
+        UPDATE users
+        SET admin_permissions = '[]'
+        WHERE admin_permissions IS NULL OR btrim(admin_permissions) = '';
+    """
+    with engine.begin() as connection:
+        connection.execute(text(statement))
+
+
+def normalize_admin_permissions(value: object) -> list[str]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = []
+    else:
+        parsed = value
+
+    if not isinstance(parsed, list):
+        return []
+
+    allowed_permissions = set(ADMIN_PERMISSION_KEYS)
+    normalized: list[str] = []
+    for item in parsed:
+        if isinstance(item, str) and item in allowed_permissions and item not in normalized:
+            normalized.append(item)
+    return normalized
+
+
+def encode_admin_permissions(value: object) -> str:
+    return json.dumps(normalize_admin_permissions(value))
 
 
 def get_or_create_role(db: Session, role_name: str) -> Role:
@@ -309,6 +348,7 @@ def serialize_user(user: User, profile: UserProfile | None = None) -> dict:
         "is_first_login": user.is_first_login,
         "max_exam_create": user.max_exam_create,
         "max_document_create": user.max_document_create,
+        "admin_permissions": normalize_admin_permissions(user.admin_permissions),
         "last_login_at": user.last_login_at,
         "created_at": user.created_at,
         "updated_at": user.updated_at,

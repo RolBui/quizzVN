@@ -3,9 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import MainLayout from './components/layout/MainLayout';
-import { AuthProvider, RequireAdmin } from './lib/auth';
+import {
+  type AdminPermissionKey,
+  useAdminPermissions,
+} from './lib/admin-permissions';
+import { AuthProvider, RequireAdmin, useAuth } from './lib/auth';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { Teachers } from './pages/Teachers';
@@ -18,6 +25,23 @@ import { Chat } from './pages/Chat';
 import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
 
+function RequireAdminPermission({
+  children,
+  permission,
+}: {
+  children: ReactNode;
+  permission: AdminPermissionKey;
+}) {
+  const { user } = useAuth();
+  const permissions = useAdminPermissions(user);
+
+  if (!permissions.includes(permission)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -28,18 +52,71 @@ export default function App() {
             <Route path="/" element={<MainLayout />}>
               <Route index element={<Dashboard />} />
               <Route path="analytics" element={<Analytics />} />
-              <Route path="teachers" element={<Teachers />} />
-              <Route path="students" element={<Students />} />
-              <Route path="admins" element={<Admins />} />
-              <Route path="classes" element={<Classes />} />
-              <Route path="exams" element={<Exams />} />
-              <Route path="documents" element={<Documents />} />
+              <Route
+                path="teachers"
+                element={
+                  <RequireAdminPermission permission="teachers">
+                    <Teachers />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="students"
+                element={
+                  <RequireAdminPermission permission="students">
+                    <Students />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="admins"
+                element={
+                  <RequireAdminPermission permission="admins">
+                    <Admins />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="classes"
+                element={
+                  <RequireAdminPermission permission="classes">
+                    <Classes />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="exams"
+                element={
+                  <RequireAdminPermission permission="exams">
+                    <Exams />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="documents"
+                element={
+                  <RequireAdminPermission permission="documents">
+                    <Documents />
+                  </RequireAdminPermission>
+                }
+              />
               <Route path="chat" element={<Chat />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Route>
         </Routes>
+        <ToastContainer
+          position="top-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop
+          closeOnClick
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="light"
+        />
       </AuthProvider>
     </BrowserRouter>
   );

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
-  Edit,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   Forward,
   MoreHorizontal,
@@ -209,6 +210,10 @@ export function Chat() {
     setActiveConversationId,
   } = useChatNotifications();
   const [query, setQuery] = useState("");
+  const [isConversationListCollapsed, setIsConversationListCollapsed] = useState(false);
+  const [isMobileConversationOpen, setIsMobileConversationOpen] = useState(
+    Boolean(requestedConversationId),
+  );
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [contacts, setContacts] = useState<ChatUser[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
@@ -246,6 +251,20 @@ export function Chat() {
     }
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const mobileMedia = window.matchMedia("(max-width: 767px)");
+    const resetCollapsedListOnMobile = () => {
+      if (mobileMedia.matches) {
+        setIsConversationListCollapsed(false);
+      }
+    };
+
+    resetCollapsedListOnMobile();
+    mobileMedia.addEventListener("change", resetCollapsedListOnMobile);
+    return () =>
+      mobileMedia.removeEventListener("change", resetCollapsedListOnMobile);
   }, []);
 
   useEffect(() => {
@@ -295,6 +314,12 @@ export function Chat() {
   useEffect(() => {
     selectedConversationRef.current = selectedConversationId;
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    if (requestedConversationId) {
+      setIsMobileConversationOpen(true);
+    }
+  }, [requestedConversationId]);
 
   useEffect(() => {
     hiddenConversationIdsRef.current = hiddenConversationIds;
@@ -854,6 +879,7 @@ export function Chat() {
         return [response.conversation, ...withoutDuplicate];
       });
       setSelectedConversationId(response.conversation.id);
+      setIsMobileConversationOpen(true);
       void refreshNotifications();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể tạo cuộc trò chuyện.");
@@ -1179,19 +1205,65 @@ export function Chat() {
     selectedPeer && (onlineUserIds.has(selectedPeer.id) || selectedPeer.is_online),
   );
 
+  function toggleConversationList() {
+    setOpenConversationMenu(null);
+    setIsConversationListCollapsed((current) => !current);
+  }
+
+  function openConversation(conversationId: number) {
+    setSelectedConversationId(conversationId);
+    setIsMobileConversationOpen(true);
+  }
+
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-surface">
-      <div className="w-80 border-r border-surface-variant flex flex-col bg-surface-container-lowest shrink-0">
-        <div className="p-4 border-b border-surface-variant flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <div>
+    <div className="flex h-[calc(100dvh-3.5rem)] bg-surface md:h-[calc(100dvh-4rem)]">
+      <div
+        className={`border-r border-surface-variant flex-col bg-surface-container-lowest shrink-0 overflow-hidden transition-[width] duration-200 ${
+          isMobileConversationOpen ? "hidden md:flex" : "flex"
+        } w-full ${
+          isConversationListCollapsed ? "md:w-14" : "md:w-80"
+        }`}
+      >
+        <div
+          className={`border-b border-surface-variant flex flex-col shrink-0 ${
+            isConversationListCollapsed
+              ? "h-16 p-2 gap-0 justify-center"
+              : "p-4 gap-4"
+          }`}
+        >
+          <div
+            className={`flex items-center ${
+              isConversationListCollapsed ? "justify-center" : "justify-between"
+            }`}
+          >
+            <div className={isConversationListCollapsed ? "hidden" : ""}>
               <h2 className="text-xl font-bold text-on-surface">Tin nhắn</h2>
             </div>
-            <button className="text-primary hover:bg-primary/10 p-1.5 rounded-lg transition-colors">
-              <Edit className="w-5 h-5" />
+            <button
+              type="button"
+              onClick={toggleConversationList}
+              className={`hidden text-primary hover:bg-primary/10 rounded-lg transition-colors md:flex items-center justify-center ${
+                isConversationListCollapsed ? "h-10 w-10" : "p-1.5"
+              }`}
+              aria-label={
+                isConversationListCollapsed
+                  ? "Mở danh sách tin nhắn"
+                  : "Thu gọn danh sách tin nhắn"
+              }
+              title={
+                isConversationListCollapsed
+                  ? "Mở danh sách tin nhắn"
+                  : "Thu gọn danh sách tin nhắn"
+              }
+            >
+              {isConversationListCollapsed ? (
+                <ChevronRight className="w-5 h-5" />
+              ) : (
+                <ChevronLeft className="w-5 h-5" />
+              )}
             </button>
           </div>
-          <div className="relative">
+          <div className={isConversationListCollapsed ? "hidden" : "relative"}>
             <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -1203,16 +1275,57 @@ export function Chat() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto" onScroll={() => setOpenConversationMenu(null)}>
+        <div
+          className="flex-1 overflow-x-hidden overflow-y-auto"
+          onScroll={() => setOpenConversationMenu(null)}
+        >
           {visibleConversations.map((conversation) => {
             const peer = conversationPeer(conversation, user?.id);
             const isSelected = selectedConversationId === conversation.id;
             const isPinned = pinnedConversationIds.has(conversation.id);
             const isOnline = Boolean(peer && (onlineUserIds.has(peer.id) || peer.is_online));
+
+            if (isConversationListCollapsed) {
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  onClick={() => openConversation(conversation.id)}
+                  className={`relative flex h-14 w-full items-center justify-center border-l-2 transition-colors ${
+                    isSelected
+                      ? "border-primary bg-primary/10"
+                      : "border-transparent hover:bg-surface-container-low"
+                  }`}
+                  aria-label={conversationName(conversation, user?.id)}
+                  title={conversationName(conversation, user?.id)}
+                >
+                  <div className="relative shrink-0">
+                    {peer ? (
+                      <Avatar user={peer} size="sm" />
+                    ) : (
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary-container text-xs font-bold text-on-secondary-container">
+                        ?
+                      </div>
+                    )}
+                    {isOnline && (
+                      <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-surface-container-lowest bg-emerald-500" />
+                    )}
+                  </div>
+                  {conversation.unread_count > 0 && (
+                    <span className="absolute right-0.5 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold leading-none text-on-primary">
+                      {conversation.unread_count > 99
+                        ? "99+"
+                        : conversation.unread_count}
+                    </span>
+                  )}
+                </button>
+              );
+            }
+
             return (
               <div
                 key={conversation.id}
-                onClick={() => setSelectedConversationId(conversation.id)}
+                onClick={() => openConversation(conversation.id)}
                 className={`group w-full flex gap-3 p-4 text-left cursor-pointer relative border-l-4 transition-colors ${
                   isSelected
                     ? "border-primary bg-primary/5"
@@ -1225,7 +1338,7 @@ export function Chat() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    setSelectedConversationId(conversation.id);
+                    openConversation(conversation.id);
                   }
                 }}
               >
@@ -1313,11 +1426,38 @@ export function Chat() {
 
           {shouldShowContacts && (
             <>
-              <div className="px-4 pt-4 pb-2 text-xs font-bold text-outline uppercase tracking-wider">
+              <div
+                className={
+                  isConversationListCollapsed
+                    ? "hidden"
+                    : "px-4 pt-4 pb-2 text-xs font-bold text-outline uppercase tracking-wider"
+                }
+              >
                 Liên hệ
               </div>
               {visibleContacts.map((contact) => {
                 const isOnline = onlineUserIds.has(contact.id) || contact.is_online;
+
+                if (isConversationListCollapsed) {
+                  return (
+                    <button
+                      key={contact.id}
+                      type="button"
+                      onClick={() => void startConversation(contact)}
+                      className="flex h-14 w-full items-center justify-center border-l-2 border-transparent transition-colors hover:bg-surface-container-low"
+                      aria-label={contact.full_name}
+                      title={contact.full_name}
+                    >
+                      <div className="relative shrink-0">
+                        <Avatar user={contact} size="sm" />
+                        {isOnline && (
+                          <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-surface-container-lowest bg-emerald-500" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={contact.id}
@@ -1342,18 +1482,39 @@ export function Chat() {
           )}
 
           {!visibleConversations.length && (!shouldShowContacts || !visibleContacts.length) && (
-            <div className="p-6 text-sm text-outline text-center">
+            <div
+              className={
+                isConversationListCollapsed
+                  ? "hidden"
+                  : "p-6 text-sm text-outline text-center"
+              }
+            >
               Không tìm thấy người dùng phù hợp.
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col bg-surface-container-lowest/50 min-w-0">
-        <div className="h-16 px-6 border-b border-surface-variant flex justify-between items-center bg-surface-container-lowest shrink-0">
+      <div
+        className={`flex-1 flex-col bg-surface-container-lowest/50 min-w-0 ${
+          isMobileConversationOpen ? "flex" : "hidden md:flex"
+        }`}
+      >
+        <div className="h-16 px-3 sm:px-6 border-b border-surface-variant flex justify-between items-center bg-surface-container-lowest shrink-0">
           {selectedPeer ? (
             <div className="flex items-center gap-3 min-w-0">
-              <div className="sm:hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsProfileOpen(false);
+                  setIsMobileConversationOpen(false);
+                }}
+                className="md:hidden h-9 w-9 shrink-0 rounded-lg text-outline hover:bg-surface-container-low hover:text-on-surface flex items-center justify-center"
+                aria-label="Quay lại danh sách tin nhắn"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="md:hidden">
                 <Avatar user={selectedPeer} size="sm" />
               </div>
               <div className="min-w-0">
@@ -1364,16 +1525,26 @@ export function Chat() {
               </div>
             </div>
           ) : (
-            <div>
-              <h3 className="font-bold text-on-surface">Chọn cuộc trò chuyện</h3>
-              <p className="text-xs text-outline">Chọn liên hệ bên trái để bắt đầu.</p>
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsMobileConversationOpen(false)}
+                className="md:hidden h-9 w-9 shrink-0 rounded-lg text-outline hover:bg-surface-container-low hover:text-on-surface flex items-center justify-center"
+                aria-label="Quay lại danh sách tin nhắn"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="min-w-0">
+                <h3 className="font-bold text-on-surface truncate">Chọn cuộc trò chuyện</h3>
+                <p className="text-xs text-outline truncate">Chọn liên hệ bên trái để bắt đầu.</p>
+              </div>
             </div>
           )}
-          <div className="flex items-center gap-4">
-            <button className="text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <button className="hidden sm:block text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
               <Phone className="w-5 h-5" />
             </button>
-            <button className="text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
+            <button className="hidden sm:block text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
               <Video className="w-5 h-5" />
             </button>
             <button
@@ -1400,7 +1571,7 @@ export function Chat() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-4">
           {selectedConversation && (
             <div className="text-center font-medium text-xs text-outline tracking-wider">
               {messages.length ? "Lịch sử trò chuyện" : "Chưa có tin nhắn"}
@@ -1449,7 +1620,7 @@ export function Chat() {
                 onPointerLeave={cancelMessageHold}
               >
                 <div
-                  className={`flex items-end gap-2 max-w-[84%] ${message.is_own ? "flex-row-reverse" : "flex-row"}`}
+                  className={`flex items-end gap-2 max-w-[92%] sm:max-w-[84%] ${message.is_own ? "flex-row-reverse" : "flex-row"}`}
                 >
                   <div
                     className={`min-w-0 ${
@@ -1458,12 +1629,12 @@ export function Chat() {
                         : message.attachment_url
                         ? "p-0 bg-transparent text-on-surface shadow-none"
                         : message.is_own
-                        ? "px-5 py-3 rounded-2xl shadow-sm bg-[#2E3C8A] text-white rounded-tr-sm"
+                        ? "px-5 py-3 rounded-2xl shadow-sm bg-primary text-on-primary rounded-tr-sm"
                         : "px-5 py-3 rounded-2xl shadow-sm bg-surface-container-low text-on-surface rounded-tl-sm"
                     }`}
                   >
                     {isUploadingMessage(message) ? (
-                      <div className="flex min-w-64 max-w-md flex-col gap-3">
+                      <div className="flex min-w-0 w-[min(16rem,calc(100vw-5rem))] max-w-md flex-col gap-3 sm:min-w-64 sm:w-auto">
                         {message.local_file_url && isImageAttachment(message) ? (
                           <div className="overflow-hidden rounded-xl border border-blue-100 bg-white">
                             <img
@@ -1492,7 +1663,7 @@ export function Chat() {
                         )}
                         <div className="h-2 overflow-hidden rounded-full bg-slate-300">
                           <div
-                            className="h-full rounded-full bg-[#2E3C8A] transition-[width] duration-200"
+                            className="h-full rounded-full bg-primary transition-[width] duration-200"
                             style={{ width: `${message.upload_progress || 12}%` }}
                           />
                         </div>
@@ -1503,7 +1674,7 @@ export function Chat() {
                         </div>
                       </div>
                     ) : message.attachment_url ? (
-                      <div className="flex flex-col gap-2 min-w-56">
+                      <div className="flex min-w-0 w-[min(14rem,calc(100vw-5rem))] flex-col gap-2 sm:min-w-56 sm:w-auto">
                         {isImageAttachment(message) ? (
                           <a
                             href={message.attachment_url}
@@ -1528,7 +1699,7 @@ export function Chat() {
                             rel="noreferrer"
                             className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors ${
                               message.is_own
-                                ? "border-[#2E3C8A] bg-[#2E3C8A] text-white shadow-sm hover:bg-[#2E3C8A]/90"
+                                ? "border-primary bg-primary text-on-primary shadow-sm hover:bg-primary/90"
                                 : "border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low"
                             }`}
                           >
@@ -1604,10 +1775,10 @@ export function Chat() {
 
         <form
           onSubmit={(event) => void sendMessage(event)}
-          className="p-4 bg-surface-container-lowest border-t border-surface-variant shrink-0"
+          className="p-2.5 sm:p-4 bg-surface-container-lowest border-t border-surface-variant shrink-0"
         >
           <div className="flex items-center gap-2">
-            <div className="flex-1 bg-surface-container-low rounded-xl border border-outline-variant flex items-center pl-4 pr-2 py-2">
+            <div className="flex-1 min-w-0 bg-surface-container-low rounded-xl border border-outline-variant flex items-center pl-3 sm:pl-4 pr-2 py-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -1631,13 +1802,13 @@ export function Chat() {
                 onChange={(event) => setDraft(event.target.value)}
                 disabled={!selectedConversation}
                 placeholder={selectedConversation ? "Nhập tin nhắn..." : "Chọn cuộc trò chuyện trước"}
-                className="flex-1 bg-transparent text-sm text-on-surface outline-none disabled:cursor-not-allowed"
+                className="flex-1 min-w-0 bg-transparent text-sm text-on-surface outline-none disabled:cursor-not-allowed"
               />
             </div>
             <button
               type="submit"
               disabled={!selectedConversation || !draft.trim()}
-              className="w-12 h-12 rounded-xl bg-[#2E3C8A] text-white flex items-center justify-center hover:bg-[#2E3C8A]/90 transition-colors shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-primary text-on-primary flex items-center justify-center hover:bg-primary/90 transition-colors shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-5 h-5 ml-1" />
             </button>
@@ -1740,10 +1911,18 @@ export function Chat() {
       )}
 
       {isProfileOpen && (
-      <div className="w-72 border-l border-surface-variant bg-surface-container-lowest hidden lg:flex flex-col shrink-0">
+      <div className="fixed inset-0 z-[70] flex flex-col bg-surface-container-lowest lg:static lg:z-auto lg:w-72 lg:shrink-0 lg:border-l lg:border-surface-variant">
         {selectedPeer ? (
           <>
-            <div className="p-8 flex flex-col items-center border-b border-surface-variant">
+            <div className="relative p-8 flex flex-col items-center border-b border-surface-variant">
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(false)}
+                className="absolute right-3 top-3 h-9 w-9 rounded-lg text-outline hover:bg-surface-container-low hover:text-on-surface flex items-center justify-center lg:hidden"
+                aria-label="Đóng hồ sơ"
+              >
+                <X className="h-5 w-5" />
+              </button>
               <Avatar user={selectedPeer} size="lg" />
               <h3 className="font-bold text-lg text-on-surface text-center mt-4">
                 {selectedPeer.full_name}
@@ -1752,12 +1931,12 @@ export function Chat() {
                 {roleLabel(selectedPeer.role_name)}
                 {selectedPeer.school_name ? ` • ${selectedPeer.school_name}` : ""}
               </p>
-              <button className="w-full mt-6 py-2 border border-[#2E3C8A] text-[#2E3C8A] rounded-lg text-sm font-semibold hover:bg-[#2E3C8A]/5 transition-colors">
+              <button className="w-full mt-6 py-2 border border-primary text-primary rounded-lg text-sm font-semibold hover:bg-primary/5 transition-colors">
                 Hồ sơ
               </button>
             </div>
 
-            <div className="p-6 flex-1 overflow-y-auto">
+            <div className="p-5 flex-1 overflow-y-auto">
               <h4 className="text-xs font-bold text-outline uppercase tracking-wider mb-4">
                 Tệp & phương tiện đã chia sẻ
               </h4>

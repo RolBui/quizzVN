@@ -1,20 +1,26 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  Check,
   Loader2,
+  Lock,
   Mail,
   MessageSquare,
   Plus,
   Search,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
+import { toast } from "react-toastify";
+import { adminApi, ApiError, chatApi, type AdminAccount } from "../lib/api";
 import {
-  adminApi,
-  ApiError,
-  chatApi,
-  type AdminAccount,
-} from "../lib/api";
+  defaultAdminPermissions,
+  normalizePermissions,
+  permissionOptions,
+  type AdminPermissionKey,
+} from "../lib/admin-permissions";
+import { useAppNotifications } from "../lib/app-notifications";
 import { useAuth } from "../lib/auth";
 import { useNavigate } from "react-router-dom";
 import { PaginationBar } from "../components/PaginationBar";
@@ -32,6 +38,10 @@ const emptyForm: AdminFormState = {
   email: "",
   password: "",
 };
+
+const permissionLabelByKey = new Map<AdminPermissionKey, string>(
+  permissionOptions.map((option) => [option.key, option.label] as const),
+);
 
 function getInitials(account: AdminAccount) {
   return account.full_name
@@ -69,21 +79,30 @@ function activityLabel(admin: AdminAccount) {
 
 function activityClass(admin: AdminAccount) {
   if (admin.status !== "active") {
-    return "bg-[#EF4444]/10 text-[#EF4444]";
+    return "badge-destructive";
   }
 
-  return admin.is_online
-    ? "bg-[#10B981]/10 text-[#10B981]"
-    : "bg-surface-variant text-on-surface-variant";
+  return admin.is_online ? "badge-success" : "badge-secondary";
+}
+
+function getPermissionTagLabels(admin: AdminAccount) {
+  if (admin.role_name !== "admin") {
+    return ["Toàn quyền"];
+  }
+
+  return normalizePermissions(admin.admin_permissions).map(
+    (permission) => permissionLabelByKey.get(permission) ?? permission,
+  );
 }
 
 export function Admins() {
   const { user } = useAuth();
+  const { addNotification } = useAppNotifications();
   const navigate = useNavigate();
   const canManageAdmins = user?.role_name === "administrator";
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(canManageAdmins);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -96,6 +115,13 @@ export function Admins() {
   );
   const [currentPage, setCurrentPage] = useState(1);
   const [form, setForm] = useState<AdminFormState>(emptyForm);
+  const [permissionAdmin, setPermissionAdmin] = useState<AdminAccount | null>(
+    null,
+  );
+  const [isSavingPermissions, setIsSavingPermissions] = useState(false);
+  const [permissionDraft, setPermissionDraft] = useState<AdminPermissionKey[]>(
+    defaultAdminPermissions,
+  );
 
   const loadAdmins = async () => {
     setIsLoading(true);
@@ -105,7 +131,7 @@ export function Admins() {
       setAdmins(response.items);
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        setError("Chỉ Administrator mới được quản lý tài khoản admin.");
+        setError("Bạn không có quyền xem danh sách quản trị viên.");
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -117,10 +143,10 @@ export function Admins() {
   };
 
   useEffect(() => {
-    if (canManageAdmins) {
+    if (user) {
       void loadAdmins();
     }
-  }, [canManageAdmins]);
+  }, [user?.id]);
 
   const filteredAdmins = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -128,10 +154,15 @@ export function Admins() {
       return admins;
     }
     return admins.filter((admin) => {
+      const permissionSearchText = getPermissionTagLabels(admin)
+        .join(" ")
+        .toLowerCase();
+
       return (
         admin.full_name.toLowerCase().includes(normalizedQuery) ||
         admin.email.toLowerCase().includes(normalizedQuery) ||
-        admin.role_name.toLowerCase().includes(normalizedQuery)
+        admin.role_name.toLowerCase().includes(normalizedQuery) ||
+        permissionSearchText.includes(normalizedQuery)
       );
     });
   }, [admins, query]);
@@ -163,6 +194,9 @@ export function Admins() {
   ).length;
 
   const openCreateModal = () => {
+    if (!canManageAdmins) {
+      return;
+    }
     setIsCreateModalOpen(true);
     setForm(emptyForm);
     setFormError(null);
@@ -178,9 +212,66 @@ export function Admins() {
   };
 
   const openDeleteModal = (admin: AdminAccount) => {
+    if (!canManageAdmins) {
+      return;
+    }
     setDeletingAdmin(admin);
     setDeleteError(null);
     setError(null);
+  };
+
+  const openPermissionDrawer = (admin: AdminAccount) => {
+    if (!canManageAdmins) {
+      return;
+    }
+    setPermissionAdmin(admin);
+    setPermissionDraft(normalizePermissions(admin.admin_permissions));
+  };
+
+  const closePermissionDrawer = () => {
+    if (isSavingPermissions) {
+      return;
+    }
+    setPermissionAdmin(null);
+    setPermissionDraft(defaultAdminPermissions);
+  };
+
+  const togglePermission = (permission: AdminPermissionKey) => {
+    setPermissionDraft((current) =>
+      current.includes(permission)
+        ? current.filter((item) => item !== permission)
+        : [...current, permission],
+    );
+  };
+
+  const savePermissions = async () => {
+    if (!permissionAdmin) {
+      return;
+    }
+    setIsSavingPermissions(true);
+    try {
+      const response = await adminApi.updatePermissions(
+        permissionAdmin.id,
+        permissionDraft,
+      );
+      const savedPermissions = normalizePermissions(
+        response.admin.admin_permissions,
+      );
+      setAdmins((current) =>
+        current.map((admin) =>
+          admin.id === response.admin.id
+            ? { ...response.admin, admin_permissions: savedPermissions }
+            : admin,
+        ),
+      );
+      toast.success("Đã lưu phân quyền quản trị viên.");
+      setPermissionAdmin(null);
+      setPermissionDraft(defaultAdminPermissions);
+    } catch {
+      // apiRequest already shows a failure toast for API errors.
+    } finally {
+      setIsSavingPermissions(false);
+    }
   };
 
   const closeDeleteModal = () => {
@@ -197,12 +288,17 @@ export function Admins() {
     setIsSubmitting(true);
 
     try {
-      await adminApi.createAccount({
+      const response = await adminApi.createAccount({
         full_name: form.full_name,
         email: form.email,
         password: form.password,
       });
 
+      addNotification({
+        type: "admin",
+        title: "Đã thêm quản trị viên",
+        body: `${response.admin.full_name} đã được tạo tài khoản admin.`,
+      });
       closeModal();
       await loadAdmins();
     } catch (err) {
@@ -260,37 +356,20 @@ export function Admins() {
     }
   };
 
-  if (!canManageAdmins) {
-    return (
-      <div className="p-4 md:p-6">
-        <div className="rounded-xl border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-4 py-4 flex items-start gap-3 text-on-surface">
-          <AlertCircle className="w-5 h-5 text-[#F59E0B] shrink-0 mt-0.5" />
-          <div>
-            <h1 className="text-base font-bold">
-              Chỉ Administrator được quản lý admin
-            </h1>
-            <p className="text-sm text-on-surface-variant mt-1">
-              Tài khoản admin thường chỉ được vào hệ thống, không được cấp hoặc
-              thu hồi quyền admin khác.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
-      <div className="flex justify-between items-end gap-4">
+    <div className="p-4 flex flex-col gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <h1 className="text-xl font-bold text-on-surface">Quản trị viên</h1>
+          <h1 className="text-lg font-bold text-on-surface">Quản trị viên</h1>
         </div>
-        <button
-          onClick={openCreateModal}
-          className="px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm"
-        >
-          <Plus className="w-4 h-4" /> Thêm quản trị viên
-        </button>
+        {canManageAdmins && (
+          <button
+            onClick={openCreateModal}
+            className="w-full px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 shadow-sm sm:w-auto"
+          >
+            <Plus className="w-4 h-4" /> Thêm quản trị viên
+          </button>
+        )}
       </div>
 
       {error && (
@@ -300,10 +379,10 @@ export function Admins() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
           <div>
-            <p className="text-sm text-on-surface-variant font-medium">
+            <p className="text-sm text-on-surface font-medium">
               Tổng quản trị viên
             </p>
             <p className="text-3xl font-bold text-on-surface mt-1">
@@ -352,14 +431,14 @@ export function Admins() {
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Tìm theo tên, email hoặc vai trò..."
+              placeholder="Tìm theo tên, email, vai trò hoặc tag..."
               className="w-full pl-9 pr-4 py-2 bg-surface-container-low rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[900px] text-left border-collapse">
             <thead>
               <tr className="border-b border-surface-variant bg-surface-container-low/30">
                 <th className="py-3 px-6 text-xs font-semibold text-on-surface-variant">
@@ -367,6 +446,9 @@ export function Admins() {
                 </th>
                 <th className="py-3 px-6 text-xs font-semibold text-on-surface-variant">
                   Vai trò
+                </th>
+                <th className="w-80 min-w-72 py-3 px-6 text-center text-xs font-semibold text-on-surface-variant">
+                  Tag
                 </th>
                 <th className="py-3 px-6 text-xs font-semibold text-on-surface-variant">
                   Đăng nhập cuối
@@ -383,89 +465,117 @@ export function Admins() {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="py-8 px-6 text-center text-sm text-on-surface-variant"
                   >
                     Đang tải danh sách admin...
                   </td>
                 </tr>
               ) : filteredAdmins.length > 0 ? (
-                paginatedAdmins.map((admin) => (
-                  <tr
-                    key={admin.id}
-                    className="hover:bg-surface-container-lowest/50 transition-colors"
-                  >
-                    <td className="py-4 px-6 flex items-center gap-3">
-                      {admin.avatar_url ? (
-                        <img
-                          src={admin.avatar_url}
-                          alt={admin.full_name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-surface-variant text-on-surface-variant flex items-center justify-center font-bold text-sm">
-                          {getInitials(admin)}
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-sm font-semibold text-on-surface">
-                          {admin.full_name}
-                        </p>
-                        <p className="text-xs text-outline font-medium">
-                          {admin.email}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-sm text-on-surface font-medium">
-                      {roleLabel(admin.role_name)}
-                    </td>
-                    <td
-                      className={`py-4 px-6 text-sm ${admin.last_login_at ? "text-on-surface" : "italic text-outline"}`}
+                paginatedAdmins.map((admin) => {
+                  const permissionTags = getPermissionTagLabels(admin);
+
+                  return (
+                    <tr
+                      key={admin.id}
+                      className="hover:bg-surface-container-lowest/50 transition-colors"
                     >
-                      {formatDate(admin.last_login_at)}
-                    </td>
-                    <td className="py-4 px-6">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${activityClass(admin)}`}
-                      >
-                        {activityLabel(admin)}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-right">
-                      {admin.role_name === "admin" ? (
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => void openAdminChat(admin)}
-                            disabled={openingChatAdminId === admin.id}
-                            className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
-                            title="Nhắn tin"
-                          >
-                            {openingChatAdminId === admin.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <MessageSquare className="w-4 h-4" />
-                            )}
-                          </button>
-                          <button
-                            onClick={() => openDeleteModal(admin)}
-                            className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
-                            title="Xóa admin"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                      <td className="py-4 px-6 flex items-center gap-3">
+                        {admin.avatar_url ? (
+                          <img
+                            src={admin.avatar_url}
+                            alt={admin.full_name}
+                            className="w-10 h-10 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-surface-variant text-on-surface-variant flex items-center justify-center font-bold text-sm">
+                            {getInitials(admin)}
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm font-semibold text-on-surface">
+                            {admin.full_name}
+                          </p>
+                          <p className="text-xs text-outline font-medium">
+                            {admin.email}
+                          </p>
                         </div>
-                      ) : (
-                        <span className="text-xs text-outline">
-                          Tài khoản gốc
+                      </td>
+                      <td className="py-4 px-6 text-sm text-on-surface font-medium">
+                        {roleLabel(admin.role_name)}
+                      </td>
+                      <td className="w-80 min-w-72 py-4 px-6 text-center">
+                        {permissionTags.length > 0 ? (
+                          <div className="mx-auto flex max-w-72 flex-wrap justify-center gap-1.5">
+                            {permissionTags.map((tag) => (
+                              <span key={tag} className="badge badge-secondary">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs italic text-outline">
+                            Chưa phân quyền
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={`py-4 px-6 ${admin.last_login_at ? "text-sm text-on-surface" : "text-xs italic text-outline"}`}
+                      >
+                        {formatDate(admin.last_login_at)}
+                      </td>
+                      <td className="py-4 px-6">
+                        <span className={`badge ${activityClass(admin)}`}>
+                          {activityLabel(admin)}
                         </span>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-4 px-6 text-right">
+                        {admin.role_name === "admin" ? (
+                          <div className="inline-flex items-center gap-1">
+                            {canManageAdmins && (
+                              <button
+                                onClick={() => openPermissionDrawer(admin)}
+                                className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors"
+                                title="Phân quyền"
+                              >
+                                <ShieldCheck className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => void openAdminChat(admin)}
+                              disabled={openingChatAdminId === admin.id}
+                              className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                              title="Nhắn tin"
+                            >
+                              {openingChatAdminId === admin.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <MessageSquare className="w-4 h-4" />
+                              )}
+                            </button>
+                            {canManageAdmins && (
+                              <button
+                                onClick={() => openDeleteModal(admin)}
+                                className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
+                                title="Xóa admin"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-outline">
+                            Tài khoản gốc
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="py-8 px-6 text-center text-sm text-on-surface-variant"
                   >
                     Không có quản trị viên phù hợp
@@ -482,6 +592,104 @@ export function Admins() {
           onPageChange={setCurrentPage}
         />
       </div>
+
+      {permissionAdmin && (
+        <div className="fixed inset-0 z-[90] flex justify-end bg-black/35 backdrop-blur-[2px]">
+          <button
+            type="button"
+            aria-label="Đóng form phân quyền"
+            className="hidden md:block flex-1 cursor-default"
+            onClick={closePermissionDrawer}
+          />
+          <aside className="flex h-full w-full max-w-xl flex-col bg-surface-container-lowest shadow-(--shadow-level-2)">
+            <div className="border-b border-outline-variant px-6 py-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-on-surface">
+                    Phân quyền quản trị viên
+                  </h2>
+                  <p className="mt-3 max-w-md text-sm leading-6 text-on-surface-variant">
+                    Chọn các khu vực mà quản trị viên này được phép quản lý
+                    trong hệ thống.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closePermissionDrawer}
+                  disabled={isSavingPermissions}
+                  className="rounded-lg p-2 text-outline transition-colors hover:bg-surface-container-low hover:text-on-surface"
+                  aria-label="Đóng"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-8">
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-outline">
+                  Tên quản trị viên
+                </span>
+                <div className="relative mt-3">
+                  <input
+                    value={permissionAdmin.full_name}
+                    readOnly
+                    className="h-12 w-full rounded-lg border border-outline-variant bg-surface-container-low px-4 pr-11 text-sm font-medium text-on-surface outline-none"
+                  />
+                  <Lock className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-outline" />
+                </div>
+              </label>
+
+              <div className="mt-10">
+                <p className="text-xs font-bold uppercase tracking-wide text-outline">
+                  Phạm vi quản lý
+                </p>
+                <div className="mt-5 flex flex-wrap gap-3">
+                  {permissionOptions.map((option) => {
+                    const isSelected = permissionDraft.includes(option.key);
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => togglePermission(option.key)}
+                        className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                          isSelected
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:border-primary/60 hover:text-primary"
+                        }`}
+                      >
+                        {isSelected && <Check className="h-4 w-4" />}
+                        <span>{option.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-outline-variant bg-surface-container-low px-6 py-5">
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closePermissionDrawer}
+                  disabled={isSavingPermissions}
+                  className="h-11 rounded-lg px-6 text-sm font-semibold text-on-surface transition-colors hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void savePermissions()}
+                  disabled={isSavingPermissions}
+                  className="h-11 rounded-lg bg-primary px-6 text-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingPermissions ? "Đang lưu..." : "Lưu phân quyền"}
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {deletingAdmin && (
         <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">

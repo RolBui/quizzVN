@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,11 +22,15 @@ from app.models.user_profile import UserProfile
 from app.models.user_session import UserSession
 from app.services.auth_service import (
     ADMIN_ACCESS_ROLE_NAMES,
+    ADMIN_PERMISSION_KEYS,
     ADMIN_ROLE_NAME,
     ADMINISTRATOR_ROLE_NAME,
     build_username_from_email,
+    encode_admin_permissions,
     get_or_create_role,
+    normalize_admin_permissions,
 )
+from app.services.media_service import delete_document_file, upload_document_file
 
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 ADMIN_MUTABLE_STATUSES = {"active", "disabled"}
@@ -873,8 +878,8 @@ def get_admin_classes_overview(db: Session) -> dict:
         "metrics": [
             _metric("total_classes", "Tổng lớp học", len(classrooms), subtext="tất cả lớp trên hệ thống"),
             _metric("active_classes", "Đang hoạt động", len(classrooms), subtext="lớp có thể tham gia"),
-            _metric("total_students", "Lượt học sinh", sum(student_counts.values()), subtext="theo membership lớp"),
-            _metric("class_exams", "Bài thi trong lớp", sum(exam_counts.values()), subtext="scope class"),
+            _metric("total_students", "Lượt học sinh", sum(student_counts.values()), subtext="theo thành viên lớp"),
+            _metric("class_exams", "Bài thi trong lớp", sum(exam_counts.values()), subtext="bài thi thuộc lớp"),
         ],
         "items": [
             {
@@ -963,8 +968,8 @@ def get_admin_exams_overview(db: Session) -> dict:
     return {
         "metrics": [
             _metric("average_score", "Điểm trung bình", completed_average_value, suffix="%", subtext="trên bài đã nộp"),
-            _metric("submitted_attempts", "Lượt hoàn thành", total_submitted, subtext="bài làm đã submit"),
-            _metric("active_exams", "Bài thi đang mở", sum(1 for row in rows if row.is_published and row.is_active), subtext="published và active"),
+            _metric("submitted_attempts", "Lượt hoàn thành", total_submitted, subtext="bài làm đã nộp"),
+            _metric("active_exams", "Bài thi đang mở", sum(1 for row in rows if row.is_published and row.is_active), subtext="đã xuất bản và đang mở"),
         ],
         "items": [
             {
@@ -1041,7 +1046,7 @@ def get_admin_documents_overview(db: Session) -> dict:
             _metric("total_documents", "Tổng tài liệu", len(rows), subtext="tất cả tài liệu"),
             _metric("published_documents", "Đã xuất bản", published_count, subtext="học sinh có thể xem"),
             _metric("class_documents", "Tài liệu lớp", class_count, subtext="gắn với lớp học"),
-            _metric("system_documents", "Tài liệu hệ thống", system_count, subtext="scope system"),
+            _metric("system_documents", "Tài liệu hệ thống", system_count, subtext="phạm vi hệ thống"),
         ],
         "items": [
             {
@@ -1068,6 +1073,107 @@ def get_admin_documents_overview(db: Session) -> dict:
     }
 
 
+def _admin_uploaded_document_title(title: str | None, filename: str | None) -> str:
+    normalized_title = (title or "").strip()
+    if normalized_title:
+        return normalized_title
+
+    filename_stem = Path(filename or "").stem.strip()
+    if filename_stem:
+        return filename_stem
+
+    return "Untitled document"
+
+
+def _validate_admin_document_scope(
+    db: Session,
+    scope: str,
+    classroom_id: int | None,
+) -> tuple[str, Classroom | None]:
+    normalized_scope = scope.strip().lower()
+    if normalized_scope not in {"system", "class"}:
+        raise HTTPException(status_code=400, detail="scope must be system or class")
+
+    if normalized_scope == "system":
+        if classroom_id is not None:
+            raise HTTPException(status_code=400, detail="classroom_id is not allowed for system scope")
+        return normalized_scope, None
+
+    if classroom_id is None:
+        raise HTTPException(status_code=400, detail="classroom_id is required for class scope")
+
+    classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    return normalized_scope, classroom
+
+
+def create_admin_uploaded_document(
+    db: Session,
+    current_admin: User,
+    title: str | None,
+    summary: str | None,
+    upload: UploadFile,
+    scope: str,
+    classroom_id: int | None,
+    is_published: bool,
+) -> dict:
+    normalized_scope, classroom = _validate_admin_document_scope(db, scope, classroom_id)
+    file_data = upload_document_file(upload)
+    normalized_title = _admin_uploaded_document_title(title, file_data["filename"])
+    now = utc_now()
+
+    document = LearningDocument(
+        title=normalized_title,
+        summary=summary.strip() if summary and summary.strip() else None,
+        content="",
+        file_url=file_data["url"],
+        file_name=file_data["filename"],
+        file_content_type=file_data["content_type"],
+        file_size_bytes=file_data["size_bytes"],
+        file_public_id=file_data["public_id"],
+        scope=normalized_scope,
+        classroom_id=classroom.id if classroom else None,
+        created_by_user_id=current_admin.id,
+        is_published=is_published,
+        created_at=now,
+        updated_at=now,
+    )
+
+    try:
+        db.add(document)
+        db.commit()
+    except Exception:
+        db.rollback()
+        delete_document_file(file_data.get("public_id"))
+        raise
+
+    db.refresh(document)
+    return {
+        "message": "Document uploaded successfully",
+        "document": {
+            "id": document.id,
+            "title": document.title,
+            "summary": document.summary,
+            "content_preview": (document.summary or document.content or document.file_name or "")[:160],
+            "file_url": document.file_url,
+            "file_name": document.file_name,
+            "file_content_type": document.file_content_type,
+            "file_size_bytes": document.file_size_bytes,
+            "scope": document.scope,
+            "classroom_id": document.classroom_id,
+            "classroom_name": classroom.name if classroom else None,
+            "teacher_id": document.created_by_user_id,
+            "teacher_name": current_admin.full_name,
+            "is_published": document.is_published,
+            "content_length": len(document.content or ""),
+            "created_at": document.created_at,
+            "updated_at": document.updated_at,
+        },
+    }
+
+
 def _serialize_admin_account(user: User, active_user_ids: set[int] | None = None) -> dict:
     role_name = user.role.name if user.role else ADMIN_ROLE_NAME
     return {
@@ -1078,6 +1184,7 @@ def _serialize_admin_account(user: User, active_user_ids: set[int] | None = None
         "role_name": role_name,
         "status": user.status,
         "is_online": user.status == "active" and bool(active_user_ids and user.id in active_user_ids),
+        "admin_permissions": normalize_admin_permissions(user.admin_permissions),
         "email_verified": user.email_verified,
         "auth_type": user.auth_type,
         "avatar_url": user.avatar_url,
@@ -1085,6 +1192,49 @@ def _serialize_admin_account(user: User, active_user_ids: set[int] | None = None
         "created_at": user.created_at,
         "updated_at": user.updated_at,
     }
+
+
+def _admin_role_name(user: User) -> str | None:
+    return user.role.name if user.role else None
+
+
+def _admin_permission_set(user: User) -> set[str]:
+    role_name = _admin_role_name(user)
+    if role_name == ADMINISTRATOR_ROLE_NAME:
+        return set(ADMIN_PERMISSION_KEYS)
+    if role_name != ADMIN_ROLE_NAME:
+        return set()
+    return set(normalize_admin_permissions(user.admin_permissions))
+
+
+def _require_admin_scope(current_admin: User, permission: str) -> None:
+    if _admin_role_name(current_admin) == ADMINISTRATOR_ROLE_NAME:
+        return
+    if permission not in _admin_permission_set(current_admin):
+        raise HTTPException(status_code=403, detail="Administrator permission is required")
+
+
+def _filter_visible_admin_accounts(users: list[User], current_admin: User) -> list[User]:
+    if _admin_role_name(current_admin) == ADMINISTRATOR_ROLE_NAME:
+        return users
+
+    current_permissions = _admin_permission_set(current_admin)
+    if not current_permissions:
+        return []
+
+    visible_users: list[User] = []
+    for user in users:
+        if user.id == current_admin.id:
+            visible_users.append(user)
+            continue
+
+        if _admin_role_name(user) != ADMIN_ROLE_NAME:
+            continue
+
+        if current_permissions.intersection(_admin_permission_set(user)):
+            visible_users.append(user)
+
+    return visible_users
 
 
 def _get_admin_account(db: Session, user_id: int) -> User:
@@ -1374,7 +1524,9 @@ def _hard_delete_user(db: Session, user_id: int, role_name: str | None = None) -
     db.execute(text("delete from users where id = :user_id"), {"user_id": user_id})
 
 
-def list_admin_accounts(db: Session) -> dict:
+def list_admin_accounts(db: Session, current_admin: User) -> dict:
+    _require_admin_scope(current_admin, "admins")
+
     users = (
         db.query(User)
         .options(joinedload(User.role))
@@ -1382,6 +1534,7 @@ def list_admin_accounts(db: Session) -> dict:
         .order_by(User.role_id.asc(), User.created_at.desc(), User.id.desc())
         .all()
     )
+    users = _filter_visible_admin_accounts(users, current_admin)
     admin_ids = [user.id for user in users]
     active_user_ids = _recent_activity_user_ids(db, admin_ids)
     return {"items": [_serialize_admin_account(user, active_user_ids) for user in users]}
@@ -1420,6 +1573,7 @@ def create_admin_account(
         is_first_login=False,
         max_exam_create=50,
         max_document_create=50,
+        admin_permissions="[]",
         created_at=utc_now(),
         updated_at=utc_now(),
     )
@@ -1444,6 +1598,25 @@ def delete_admin_account(
     _hard_delete_user(db, user.id, role_name)
     db.commit()
     return {"message": "Admin account deleted successfully"}
+
+
+def update_admin_permissions(
+    db: Session,
+    current_administrator: User,
+    user_id: int,
+    permissions: list[str],
+) -> dict:
+    user = _get_admin_account(db, user_id)
+    _require_editable_admin(user, current_administrator)
+    user.admin_permissions = encode_admin_permissions(permissions)
+    user.updated_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    user = _get_admin_account(db, user.id)
+    return {
+        "message": "Admin permissions updated successfully",
+        "admin": _serialize_admin_account(user),
+    }
 
 
 def delete_admin_teacher(

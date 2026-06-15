@@ -1,5 +1,5 @@
 # user của hệ thống
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -23,6 +23,7 @@ class User(Base):
     is_first_login = Column(Boolean, nullable=False, default=True)
     max_exam_create = Column(Integer, nullable=False, default=50)
     max_document_create = Column(Integer, nullable=False, default=50)
+    admin_permissions = Column(Text, nullable=False, default="[]")
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

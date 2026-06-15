@@ -7,6 +7,8 @@ load_dotenv()
 LOCAL_DEV_FRONTEND_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 )
 
 def _normalize_origin(origin: str) -> str:
@@ -52,7 +54,11 @@ def _build_allowed_origins(
     raw_origins: str,
     include_local_dev_origins: bool,
 ) -> list[str]:
-    origins = _split_origins(raw_origins) if raw_origins.strip() else [frontend_url]
+    origins = [frontend_url]
+
+    for origin in _split_origins(raw_origins):
+        if origin not in origins:
+            origins.append(origin)
 
     if include_local_dev_origins:
         for origin in LOCAL_DEV_FRONTEND_ORIGINS:
@@ -79,14 +85,23 @@ class Settings:
             _derive_origin_from_url(os.getenv("GOOGLE_REDIRECT_URI", "")) or "http://localhost:8000",
         )
     )
-    FRONTEND_URL: str = _normalize_origin(os.getenv("FRONTEND_URL", "http://localhost:3000"))
+    FRONTEND_URL: str = _normalize_origin(
+        os.getenv(
+            "FRONTEND_URL",
+            (
+                "https://quizz-vn-admin.vercel.app"
+                if BACKEND_URL.startswith("https://")
+                else "http://localhost:3000"
+            ),
+        )
+    )
     FRONTEND_AUTH_CALLBACK_PATH: str = os.getenv("FRONTEND_AUTH_CALLBACK_PATH", "/auth/callback").strip() or "/auth/callback"
     FRONTEND_EMAIL_VERIFICATION_PATH: str = (
         os.getenv("FRONTEND_EMAIL_VERIFICATION_PATH", "/verify-email").strip() or "/verify-email"
     )
     INCLUDE_LOCAL_DEV_CORS_ORIGINS: bool = _parse_bool(
         os.getenv("INCLUDE_LOCAL_DEV_CORS_ORIGINS"),
-        True,
+        not BACKEND_URL.startswith("https://"),
     )
     ALLOWED_ORIGINS: list[str] = _build_allowed_origins(
         FRONTEND_URL,
@@ -100,8 +115,14 @@ class Settings:
     REFRESH_COOKIE_NAME: str = os.getenv("REFRESH_COOKIE_NAME", "refresh_token")
     SESSION_EXPIRE_MINUTES: int = _parse_session_expire_minutes()
     SESSION_REFRESH_DAYS: int = int(os.getenv("SESSION_REFRESH_DAYS", "7"))
-    COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "False").lower() == "true"
-    COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
+    COOKIE_SECURE: bool = _parse_bool(
+        os.getenv("COOKIE_SECURE"),
+        BACKEND_URL.startswith("https://"),
+    )
+    COOKIE_SAMESITE: str = os.getenv(
+        "COOKIE_SAMESITE",
+        "none" if COOKIE_SECURE else "lax",
+    ).strip().lower()
     EMAIL_DELIVERY_MODE: str = os.getenv("EMAIL_DELIVERY_MODE", "log").strip().lower() or "log"
     EMAIL_FROM_ADDRESS: str = os.getenv("EMAIL_FROM_ADDRESS", "").strip()
     EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", APP_NAME).strip() or APP_NAME

@@ -57,6 +57,7 @@ class AdminAccountSchema(BaseModel):
     role_name: AdminAccountRole
     status: str
     is_online: bool = False
+    admin_permissions: list[str] = []
     email_verified: bool
     auth_type: str
     avatar_url: str | None = None
@@ -78,6 +79,10 @@ class CreateAdminAccountRequest(BaseModel):
 class AdminAccountResponse(BaseModel):
     message: str
     admin: AdminAccountSchema
+
+
+class UpdateAdminPermissionsRequest(BaseModel):
+    permissions: list[str] = Field(default_factory=list)
 
 
 class AdminMetricSchema(BaseModel):
@@ -210,6 +215,11 @@ class AdminDocumentSchema(BaseModel):
 class AdminDocumentOverviewResponse(BaseModel):
     metrics: list[AdminMetricSchema]
     items: list[AdminDocumentSchema]
+
+
+class AdminDocumentResponse(BaseModel):
+    message: str
+    document: AdminDocumentSchema
 
 
 class AdminTeacherClassDetailSchema(BaseModel):
