@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ChevronDown,
   Download,
   Loader2,
   MessageSquare,
@@ -20,6 +21,8 @@ import {
   type AdminStudent,
   type AdminStudentOverview,
 } from "../lib/api";
+import { useAppNotifications } from "../lib/app-notifications";
+import { datedExcelFilename, downloadExcel } from "../lib/exportExcel";
 import { formatDate, formatNumber, initials } from "../lib/format";
 
 const PAGE_SIZE = 7;
@@ -86,6 +89,7 @@ function StudentAvatar({ student }: { student: AdminStudent }) {
 
 export function Students() {
   const navigate = useNavigate();
+  const { addNotification } = useAppNotifications();
   const [overview, setOverview] =
     useState<AdminStudentOverview>(fallbackOverview);
   const [query, setQuery] = useState("");
@@ -198,6 +202,59 @@ export function Students() {
     return filteredStudents.slice(startIndex, startIndex + PAGE_SIZE);
   }, [currentPage, filteredStudents]);
 
+  const handleExportStudents = () => {
+    downloadExcel({
+      filename: datedExcelFilename("hoc-sinh"),
+      sheetName: "Hoc sinh",
+      columns: [
+        { header: "Mã số", value: (student) => student.code },
+        { header: "Họ tên", value: (student) => student.full_name },
+        { header: "Tên đăng nhập", value: (student) => student.username },
+        { header: "Email", value: (student) => student.email },
+        { header: "Số điện thoại", value: (student) => student.phone || "" },
+        {
+          header: "Trường",
+          value: (student) => student.school_name || "Chưa cập nhật",
+        },
+        {
+          header: "Ngày sinh",
+          value: (student) => formatDate(student.date_of_birth),
+        },
+        { header: "Giới tính", value: (student) => student.gender || "" },
+        { header: "Số lớp", value: (student) => student.class_count },
+        { header: "Bài làm", value: (student) => student.attempt_count },
+        {
+          header: "Điểm trung bình",
+          value: (student) => student.average_score ?? "",
+        },
+        {
+          header: "Trạng thái tài khoản",
+          value: (student) =>
+            student.status === "active" ? "Hoạt động" : "Bị khóa",
+        },
+        {
+          header: "Trạng thái hoạt động",
+          value: (student) =>
+            student.is_online ? "Đang hoạt động" : "Không hoạt động",
+        },
+        {
+          header: "Đăng nhập cuối",
+          value: (student) => formatDate(student.last_login_at),
+        },
+        {
+          header: "Ngày tạo",
+          value: (student) => formatDate(student.created_at),
+        },
+      ],
+      rows: filteredStudents,
+    });
+    addNotification({
+      type: "data_export",
+      title: "Đã xuất danh sách học sinh",
+      body: `${filteredStudents.length} học sinh đã được xuất ra file Excel.`,
+    });
+  };
+
   useEffect(() => {
     setCurrentPage(1);
   }, [query, status]);
@@ -231,15 +288,20 @@ export function Students() {
   }
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
-      <div className="flex justify-between items-end gap-4">
+    <div className="p-4 flex flex-col gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <h1 className="text-xl font-semibold text-on-surface">
-            Danh sách Học sinh
+          <h1 className="text-lg font-semibold text-on-surface">
+            Danh sách Học viên
           </h1>
         </div>
-        <button className="px-4 py-2 border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center gap-2">
-          <Download className="w-4 h-4" /> Xuất
+        <button
+          type="button"
+          onClick={handleExportStudents}
+          disabled={isLoading || filteredStudents.length === 0}
+          className="w-full px-4 py-2 border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+        >
+          <Download className="w-4 h-4" /> Xuất dữ liệu
         </button>
       </div>
 
@@ -250,7 +312,7 @@ export function Students() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {overview.metrics.map((metric) => (
           <MetricCard key={metric.key} metric={metric} />
         ))}
@@ -268,25 +330,28 @@ export function Students() {
               className="w-full pl-9 pr-4 py-2 bg-surface-container-low border border-outline-variant rounded-md text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className="bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 px-3 rounded-md focus:outline-none focus:border-primary w-full md:w-auto"
-          >
+          <div className="relative w-full md:w-48">
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              className="w-full appearance-none bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 pl-3 pr-10 rounded-md focus:outline-none focus:border-primary cursor-pointer"
+            >
             <option value="all">Tất cả trạng thái</option>
             <option value="online">Hoạt động</option>
             <option value="offline">Không hoạt động</option>
-          </select>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+          </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[900px] text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/50 border-b border-surface-variant">
-                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant  tracking-wider">
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
                   Học sinh
                 </th>
-                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant  tracking-wider">
+                <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
                   Mã số
                 </th>
                 <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
@@ -346,7 +411,7 @@ export function Students() {
                   </td>
                   <td className="py-3 px-4">
                     <span
-                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${student.is_online ? "bg-[#10B981]/10 text-[#10B981]" : "bg-surface-variant text-on-surface-variant"}`}
+                      className={`badge ${student.is_online ? "badge-success" : "badge-secondary"}`}
                     >
                       {student.is_online ? "Hoạt động" : "Không hoạt động"}
                     </span>

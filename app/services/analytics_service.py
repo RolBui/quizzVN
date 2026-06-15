@@ -1,8 +1,9 @@
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from fastapi import Request
-from sqlalchemy import distinct, func
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.security import utc_now
@@ -15,6 +16,16 @@ SESSION_TIMEOUT_MINUTES = 30
 ACTIVE_WINDOW_SECONDS = 90
 EVENT_PAGE_VIEW = "page_view"
 EVENT_HEARTBEAT = "heartbeat"
+POPULAR_PAGE_LABELS = {
+    "/": "Landing page",
+    "/login": "Login",
+    "/teacher": "Teacher",
+    "/student": "Student",
+    "/teacher/exams": "Teacher exams",
+    "/student/exams": "Student exams",
+}
+POPULAR_PAGE_PATHS = tuple(POPULAR_PAGE_LABELS.keys())
+POPULAR_PAGE_ORDER = {path: index for index, path in enumerate(POPULAR_PAGE_PATHS)}
 
 
 def bootstrap_web_analytics_storage() -> None:
@@ -34,6 +45,31 @@ def _normalize_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _normalize_path(value: str | None) -> str:
+    raw_value = (value or "").strip()
+    if not raw_value:
+        return "/"
+
+    parsed = urlparse(raw_value)
+    path = parsed.path or raw_value
+    if not path.startswith("/"):
+        path = f"/{path}"
+
+    return path.rstrip("/") or "/"
+
+
+def _tracked_page_filter(column):
+    filters = []
+    for path in POPULAR_PAGE_PATHS:
+        filters.append(column == path)
+        if path == "/":
+            filters.append(column.like("/?%"))
+            continue
+        filters.append(column == f"{path}/")
+        filters.append(column.like(f"{path}?%"))
+    return or_(*filters)
 
 
 def _period_window(now: datetime, period: str) -> dict:
@@ -211,7 +247,7 @@ def record_page_view(
     origin = _clean_text(payload.origin or request.headers.get("origin"), 512)
     visitor_id = payload.visitor_id.strip()[:128]
     session_id = payload.session_id.strip()[:128]
-    path = payload.path.strip()[:2048]
+    path = _normalize_path(payload.path)[:2048]
     title = _clean_text(payload.title, 512)
     ip_address = _client_ip(request)
     now = utc_now()
@@ -264,7 +300,7 @@ def record_heartbeat(
     origin = _clean_text(payload.origin or request.headers.get("origin"), 512)
     visitor_id = payload.visitor_id.strip()[:128]
     session_id = payload.session_id.strip()[:128]
-    path = payload.path.strip()[:2048]
+    path = _normalize_path(payload.path)[:2048]
     title = _clean_text(payload.title, 512)
     ip_address = _client_ip(request)
     now = utc_now()
@@ -314,6 +350,7 @@ def _count_page_views(db: Session, start: datetime, end: datetime) -> int:
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .scalar()
         or 0
@@ -327,6 +364,7 @@ def _count_unique(db: Session, column, start: datetime, end: datetime) -> int:
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .scalar()
         or 0
@@ -340,6 +378,7 @@ def _bounce_rate(db: Session, start: datetime, end: datetime) -> float:
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .group_by(WebAnalyticsEvent.session_id)
         .all()
@@ -385,31 +424,32 @@ def _daily_traffic(db: Session, window: dict) -> list[dict]:
     day_count = int(window["day_count"] or 7)
     current_start = window["current_start"]
     previous_start = window["previous_start"]
-    current_counts = [0 for _ in range(day_count)]
-    previous_counts = [0 for _ in range(day_count)]
+    current_visitors = [set() for _ in range(day_count)]
+    previous_visitors = [set() for _ in range(day_count)]
     current_end = current_start + timedelta(days=day_count)
 
     rows = (
-        db.query(WebAnalyticsEvent.created_at)
+        db.query(WebAnalyticsEvent.created_at, WebAnalyticsEvent.visitor_id)
         .filter(
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= previous_start,
             WebAnalyticsEvent.created_at < current_end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .all()
     )
-    for (created_at,) in rows:
+    for created_at, visitor_id in rows:
         created_at = _normalize_datetime(created_at)
         if current_start <= created_at < current_end:
-            current_counts[(created_at.date() - current_start.date()).days] += 1
+            current_visitors[(created_at.date() - current_start.date()).days].add(visitor_id)
         elif previous_start <= created_at < current_start:
-            previous_counts[(created_at.date() - previous_start.date()).days] += 1
+            previous_visitors[(created_at.date() - previous_start.date()).days].add(visitor_id)
 
     return [
         {
             "name": (current_start + timedelta(days=index)).strftime("%d/%m"),
-            "current": current_counts[index],
-            "last": previous_counts[index],
+            "current": len(current_visitors[index]),
+            "last": len(previous_visitors[index]),
         }
         for index in range(day_count)
     ]
@@ -418,29 +458,34 @@ def _daily_traffic(db: Session, window: dict) -> list[dict]:
 def _monthly_traffic(db: Session, now: datetime) -> list[dict]:
     current_year = now.year
     previous_year = current_year - 1
-    current_counts = [0 for _ in range(12)]
-    previous_counts = [0 for _ in range(12)]
+    current_visitors = [set() for _ in range(12)]
+    previous_visitors = [set() for _ in range(12)]
     start = datetime(previous_year, 1, 1, tzinfo=now.tzinfo)
     end = datetime(current_year + 1, 1, 1, tzinfo=now.tzinfo)
 
     rows = (
-        db.query(WebAnalyticsEvent.created_at)
+        db.query(WebAnalyticsEvent.created_at, WebAnalyticsEvent.visitor_id)
         .filter(
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .all()
     )
-    for (created_at,) in rows:
+    for created_at, visitor_id in rows:
         created_at = _normalize_datetime(created_at)
         if created_at.year == current_year:
-            current_counts[created_at.month - 1] += 1
+            current_visitors[created_at.month - 1].add(visitor_id)
         elif created_at.year == previous_year:
-            previous_counts[created_at.month - 1] += 1
+            previous_visitors[created_at.month - 1].add(visitor_id)
 
     return [
-        {"name": f"T{month}", "current": current_counts[month - 1], "last": previous_counts[month - 1]}
+        {
+            "name": f"T{month}",
+            "current": len(current_visitors[month - 1]),
+            "last": len(previous_visitors[month - 1]),
+        }
         for month in range(1, 13)
     ]
 
@@ -458,6 +503,7 @@ def _breakdown(db: Session, column, start: datetime, end: datetime) -> list[dict
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
         .group_by(column)
         .order_by(func.count(WebAnalyticsEvent.id).desc())
@@ -470,28 +516,38 @@ def _popular_pages(db: Session, start: datetime, end: datetime) -> list[dict]:
     rows = (
         db.query(
             WebAnalyticsEvent.path,
-            func.max(WebAnalyticsEvent.title),
-            func.count(WebAnalyticsEvent.id),
-            func.count(distinct(WebAnalyticsEvent.visitor_id)),
+            WebAnalyticsEvent.visitor_id,
         )
         .filter(
             WebAnalyticsEvent.event_type == EVENT_PAGE_VIEW,
             WebAnalyticsEvent.created_at >= start,
             WebAnalyticsEvent.created_at < end,
+            _tracked_page_filter(WebAnalyticsEvent.path),
         )
-        .group_by(WebAnalyticsEvent.path)
-        .order_by(func.count(WebAnalyticsEvent.id).desc())
-        .limit(10)
         .all()
+    )
+
+    views_by_path: dict[str, int] = defaultdict(int)
+    visitors_by_path: dict[str, set[str]] = defaultdict(set)
+    for raw_path, visitor_id in rows:
+        path = _normalize_path(raw_path)
+        if path not in POPULAR_PAGE_LABELS:
+            continue
+        views_by_path[path] += 1
+        visitors_by_path[path].add(visitor_id)
+
+    sorted_paths = sorted(
+        views_by_path,
+        key=lambda path: (-views_by_path[path], POPULAR_PAGE_ORDER[path]),
     )
     return [
         {
             "path": path,
-            "title": title,
-            "views": int(views or 0),
-            "unique_visitors": int(unique_visitors or 0),
+            "title": POPULAR_PAGE_LABELS[path],
+            "views": views_by_path[path],
+            "unique_visitors": len(visitors_by_path[path]),
         }
-        for path, title, views, unique_visitors in rows
+        for path in sorted_paths[:10]
     ]
 
 
@@ -502,27 +558,35 @@ def get_web_realtime_overview(db: Session) -> dict:
 
     active_users = int(
         db.query(func.count(distinct(WebAnalyticsPresence.visitor_id)))
-        .filter(active_filter)
+        .filter(active_filter, _tracked_page_filter(WebAnalyticsPresence.path))
         .scalar()
         or 0
     )
     active_sessions = int(
         db.query(func.count(distinct(WebAnalyticsPresence.session_id)))
-        .filter(active_filter)
+        .filter(active_filter, _tracked_page_filter(WebAnalyticsPresence.path))
         .scalar()
         or 0
     )
-    active_pages = (
+    active_page_rows = (
         db.query(
             WebAnalyticsPresence.path,
-            func.max(WebAnalyticsPresence.title),
-            func.count(distinct(WebAnalyticsPresence.visitor_id)),
+            WebAnalyticsPresence.visitor_id,
         )
-        .filter(active_filter)
-        .group_by(WebAnalyticsPresence.path)
-        .order_by(func.count(distinct(WebAnalyticsPresence.visitor_id)).desc())
-        .limit(10)
+        .filter(active_filter, _tracked_page_filter(WebAnalyticsPresence.path))
         .all()
+    )
+
+    active_visitors_by_path: dict[str, set[str]] = defaultdict(set)
+    for raw_path, visitor_id in active_page_rows:
+        path = _normalize_path(raw_path)
+        if path not in POPULAR_PAGE_LABELS:
+            continue
+        active_visitors_by_path[path].add(visitor_id)
+
+    active_pages = sorted(
+        active_visitors_by_path,
+        key=lambda path: (-len(active_visitors_by_path[path]), POPULAR_PAGE_ORDER[path]),
     )
 
     return {
@@ -531,10 +595,10 @@ def get_web_realtime_overview(db: Session) -> dict:
         "active_pages": [
             {
                 "path": path,
-                "title": title,
-                "active_users": int(count or 0),
+                "title": POPULAR_PAGE_LABELS[path],
+                "active_users": len(active_visitors_by_path[path]),
             }
-            for path, title, count in active_pages
+            for path in active_pages[:10]
         ],
         "active_window_seconds": ACTIVE_WINDOW_SECONDS,
         "last_updated_at": now,

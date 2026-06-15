@@ -45,6 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const handleUnauthorized = () => setUser(null);
+    window.addEventListener("quizzvn:auth-unauthorized", handleUnauthorized);
+    return () =>
+      window.removeEventListener(
+        "quizzvn:auth-unauthorized",
+        handleUnauthorized,
+      );
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
 
     authApi

@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Filter, Loader2, Search, Trash2, X } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  Loader2,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { adminApi, type AdminExam, type AdminExamOverview } from "../lib/api";
-import { formatDateTime, formatDecimal, formatNumber, scopeLabel } from "../lib/format";
+import {
+  formatDateTime,
+  formatDecimal,
+  formatNumber,
+  scopeLabel,
+} from "../lib/format";
 
 const fallbackOverview: AdminExamOverview = {
   metrics: [],
@@ -31,7 +43,11 @@ export function Exams() {
       })
       .catch((err) => {
         if (isMounted) {
-          setError(err instanceof Error ? err.message : "Không thể tải danh sách bài thi.");
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Không thể tải danh sách bài thi.",
+          );
         }
       })
       .finally(() => {
@@ -65,7 +81,9 @@ export function Exams() {
       setOverview(response);
       setDeletingExam(null);
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Không xóa được bài thi.");
+      setDeleteError(
+        err instanceof Error ? err.message : "Không xóa được bài thi.",
+      );
     } finally {
       setIsDeleting(false);
     }
@@ -85,14 +103,20 @@ export function Exams() {
   }, [overview.items, query, scope]);
 
   const totalExamCount = overview.items.length;
-  const submittedMetric = overview.metrics.find((metric) => metric.key === "submitted_attempts");
-  const activeMetric = overview.metrics.find((metric) => metric.key === "active_exams");
+  const submittedMetric = overview.metrics.find(
+    (metric) => metric.key === "submitted_attempts",
+  );
+  const activeMetric = overview.metrics.find(
+    (metric) => metric.key === "active_exams",
+  );
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
+    <div className="p-4 flex flex-col gap-4">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-xl md:text-xl font-bold text-on-surface">Quản lý Bài thi</h1>
+          <h1 className="text-lg  font-semibold text-on-surface">
+            Quản lý Bài thi
+          </h1>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <div className="relative w-full sm:w-80">
@@ -104,15 +128,18 @@ export function Exams() {
               className="w-full bg-surface-container-lowest border border-surface-variant rounded-lg pl-9 pr-3 py-2 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none placeholder:text-outline"
             />
           </div>
-          <select
-            value={scope}
-            onChange={(event) => setScope(event.target.value)}
-            className="bg-surface-container-lowest border border-surface-variant text-sm py-2 px-3 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
-          >
-            <option value="all">Tất cả phạm vi</option>
-            <option value="system">Hệ thống</option>
-            <option value="class">Trong lớp</option>
-          </select>
+          <div className="relative w-full sm:w-36">
+            <select
+              value={scope}
+              onChange={(event) => setScope(event.target.value)}
+              className="w-full appearance-none bg-surface-container-lowest border border-surface-variant text-sm py-2 pl-3 pr-10 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+            >
+              <option value="all">Tất cả</option>
+              <option value="system">Hệ thống</option>
+              <option value="class">Trong lớp</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+          </div>
         </div>
       </div>
 
@@ -123,95 +150,155 @@ export function Exams() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="flex w-full justify-between items-start">
-            <p className="text-sm font-medium text-outline">Tổng đề thi</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+          <div>
+            <p className="text-sm text-on-surface font-medium">Tổng đề thi</p>
           </div>
-          <p className="text-3xl font-bold text-on-surface">{formatNumber(totalExamCount)}</p>
-          <p className="text-xs text-outline">bài thi trong hệ thống</p>
+          <p className="text-3xl font-bold text-on-surface mt-1">
+            {formatNumber(totalExamCount)}
+          </p>
+          <p className="text-xs text-on-surface mt-2">bài thi trong hệ thống</p>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="flex w-full justify-between items-start">
-            <p className="text-sm font-medium text-outline">{submittedMetric?.label || "Lượt hoàn thành"}</p>
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+          <div>
+            <p className="text-sm text-on-surface font-medium">
+              {submittedMetric?.label || "Lượt hoàn thành"}
+            </p>
           </div>
-          <p className="text-3xl font-bold text-on-surface">{formatNumber(submittedMetric?.value)}</p>
-          <p className="text-xs text-outline">{submittedMetric?.subtext || "bài làm đã nộp"}</p>
+          <p className="text-3xl font-bold text-on-surface mt-1">
+            {formatNumber(submittedMetric?.value)}
+          </p>
+          <p className="text-xs text-on-surface mt-2">
+            {submittedMetric?.subtext || "bài làm đã nộp"}
+          </p>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col justify-between items-start gap-4">
-          <div className="flex w-full justify-between items-start">
-            <p className="text-sm font-medium text-outline">{activeMetric?.label || "Bài thi đang mở"}</p>
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+          <div>
+            <p className="text-sm text-on-surface font-medium">
+              {activeMetric?.label || "Bài thi đang mở"}
+            </p>
           </div>
-          <p className="text-3xl font-bold text-on-surface">{formatNumber(activeMetric?.value)}</p>
-          <p className="text-xs text-outline">{activeMetric?.subtext || "đã xuất bản và hoạt động"}</p>
+          <p className="text-3xl font-bold text-on-surface mt-1">
+            {formatNumber(activeMetric?.value)}
+          </p>
+          <p className="text-xs text-on-surface-variant mt-2">
+            {activeMetric?.subtext || "đã xuất bản và hoạt động"}
+          </p>
         </div>
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant overflow-hidden">
         <div className="p-5 border-b border-surface-variant flex justify-between items-center bg-surface-container-lowest">
-          <h3 className="text-lg font-bold text-on-surface">Bài thi trên hệ thống</h3>
-          <Filter className="w-5 h-5 text-outline" />
+          <h3 className="text-sx font-bold text-on-surface">
+            Bài thi trên hệ thống
+          </h3>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-left border-collapse min-w-[980px]">
-            <thead>
+          <table className="w-full min-w-[900px] table-fixed text-left border-collapse">
+            <thead className="bg-surface-container-lowest border-b border-surface-variant">
               <tr className="border-b border-surface-variant bg-surface-container-lowest text-outline">
-                <th className="py-4 px-6 text-xs font-semibold w-[26%]">Tên Bài thi</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[10%]">Scope</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[16%]">Giáo viên</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[8%] text-center">Câu hỏi</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[8%] text-center">Lượt làm</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[10%]">Điểm TB</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[16%]">Ngày tạo</th>
-                <th className="py-4 px-6 text-xs font-semibold w-[6%] text-center">Thao tác</th>
+                <th className="w-[24%] py-3 px-4 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Tên bài thi
+                </th>
+                <th className="w-[11%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Phân loại
+                </th>
+                <th className="w-[16%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Giáo viên
+                </th>
+                <th className="w-[8%] py-3 px-3 text-xs text-on-surface-variant font-bold text-center whitespace-nowrap">
+                  Câu hỏi
+                </th>
+                <th className="w-[8%] py-3 px-3 text-xs text-on-surface font-bold text-center whitespace-nowrap">
+                  Lượt làm
+                </th>
+                <th className="w-[11%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Điểm TB
+                </th>
+                <th className="w-[14%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Ngày tạo
+                </th>
+                <th className="w-[8%] py-3 px-3 text-xs text-on-surface font-bold text-center whitespace-nowrap">
+                  Thao tác
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-variant">
               {filteredExams.map((exam) => (
-                  <tr key={exam.id} className="hover:bg-surface-container-low/50 transition-colors bg-surface-container-lowest">
-                    <td className="py-4 px-6">
-                      <p className="text-sm font-medium text-primary">{exam.title}</p>
-                      <p className="text-xs text-outline">{exam.classroom_name || "Không gắn lớp"}</p>
-                    </td>
-                    <td className="py-4 px-6 text-sm text-outline font-medium">{scopeLabel(exam.scope)}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface">{exam.teacher_name || "Chưa xác định"}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface text-center">{exam.question_count}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface text-center">{exam.attempt_count}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface">{exam.average_score === null ? "Chưa có" : formatDecimal(exam.average_score, "%")}</td>
-                    <td className="py-4 px-6 text-sm text-on-surface">{formatDateTime(exam.created_at)}</td>
-                    <td className="py-4 px-6 text-center">
-                      <button
-                        className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
-                        title="Xóa bài thi"
-                        onClick={() => {
-                          setDeletingExam(exam);
-                          setDeleteError(null);
-                        }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                <tr
+                  key={exam.id}
+                  className="hover:bg-surface-container-low/50 transition-colors bg-surface-container-lowest"
+                >
+                  <td className="py-4 px-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-on-surface">
+                        {exam.title}
+                      </p>
+                      <p className="truncate text-xs text-outline">
+                        {exam.classroom_name || "Không gắn lớp"}
+                      </p>
+                    </div>
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface font-medium whitespace-nowrap">
+                    {scopeLabel(exam.scope)}
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface max-w-0 truncate whitespace-nowrap">
+                    {exam.teacher_name || "Chưa xác định"}
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface text-center whitespace-nowrap">
+                    {exam.question_count}
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface text-center whitespace-nowrap">
+                    {exam.attempt_count}
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface whitespace-nowrap">
+                    {exam.average_score === null
+                      ? "Chưa có"
+                      : formatDecimal(exam.average_score, "%")}
+                  </td>
+                  <td className="py-4 px-3 text-sm text-on-surface truncate whitespace-nowrap">
+                    {formatDateTime(exam.created_at)}
+                  </td>
+                  <td className="py-4 px-3 text-center whitespace-nowrap">
+                    <button
+                      className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
+                      title="Xóa bài thi"
+                      onClick={() => {
+                        setDeletingExam(exam);
+                        setDeleteError(null);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
               {!isLoading && filteredExams.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-sm text-outline">Chưa có bài thi phù hợp.</td>
+                  <td
+                    colSpan={8}
+                    className="py-10 text-center text-sm text-outline"
+                  >
+                    Chưa có bài thi phù hợp.
+                  </td>
                 </tr>
               )}
               {isLoading && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-sm text-outline">Đang tải dữ liệu bài thi...</td>
+                  <td
+                    colSpan={8}
+                    className="py-10 text-center text-sm text-outline"
+                  >
+                    Đang tải dữ liệu bài thi...
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="p-4 border-t border-surface-variant flex items-center justify-between text-sm text-outline">
-          <p>Đang hiển thị {filteredExams.length} trong số {overview.items.length} bài thi</p>
         </div>
       </div>
 

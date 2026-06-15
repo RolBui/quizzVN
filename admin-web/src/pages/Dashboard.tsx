@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowDownRight,
   ArrowUpRight,
+  ChevronDown,
   MoreHorizontal,
 } from "lucide-react";
 import {
@@ -130,12 +131,12 @@ function formatDate(value: string) {
 
 function getResultStatusClass(status: string) {
   if (status === "Hoàn thành") {
-    return "text-emerald-500 bg-emerald-500/10";
+    return "badge-success";
   }
   if (status === "Cần cải thiện") {
-    return "text-red-500 bg-red-500/10";
+    return "badge-destructive";
   }
-  return "text-amber-500 bg-amber-500/10";
+  return "badge-warning";
 }
 
 const metricSparklineConfig: Record<
@@ -143,26 +144,26 @@ const metricSparklineConfig: Record<
   { stroke: string; fill: string }
 > = {
   total_exams: {
-    stroke: "#e5a76f",
-    fill: "rgba(229, 167, 111, 0.16)",
+    stroke: "#f59e0b",
+    fill: "rgba(245, 158, 11, 0.3)",
   },
   new_users: {
-    stroke: "#8fd5b5",
-    fill: "rgba(143, 213, 181, 0.18)",
+    stroke: "#10b981",
+    fill: "rgba(16, 185, 129, 0.3)",
   },
   active_users: {
-    stroke: "#f3a0c4",
-    fill: "rgba(243, 160, 196, 0.18)",
+    stroke: "#ec4899",
+    fill: "rgba(236, 72, 153, 0.3)",
   },
   total_users: {
-    stroke: "#a8a8f0",
-    fill: "rgba(168, 168, 240, 0.18)",
+    stroke: "#818cf8",
+    fill: "rgba(129, 140, 248, 0.32)",
   },
 };
 
 const fallbackSparkline = {
-  stroke: "#94a3b8",
-  fill: "rgba(148, 163, 184, 0.16)",
+  stroke: "#64748b",
+  fill: "rgba(100, 116, 139, 0.28)",
 };
 
 function buildSmoothPath(points: { x: number; y: number }[]) {
@@ -244,7 +245,7 @@ function MetricCard({ metric }: { metric: CrmMetric }) {
     >
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-kpi-title font-semibold text-sm truncate">
+          <p className="text-on-surface font-semibold text-sm truncate">
             {metric.label}
           </p>
           <h3 className="text-2xl font-bold text-on-surface mt-3">
@@ -352,24 +353,27 @@ export function Dashboard() {
       : 0;
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
+    <div className="p-4 flex flex-col gap-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-on-surface">Dashboard</h1>
+          <h1 className="text-lg font-semibold text-on-surface">Bảng điều khiển</h1>
         </div>
-        <select
-          value={selectedPeriod}
-          onChange={(event) =>
-            setSelectedPeriod(event.target.value as CrmPeriod)
-          }
-          className="bg-surface-container-lowest border border-surface-variant text-sm py-2 px-4 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
-        >
-          {crmPeriodOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <div className="relative w-full sm:w-36">
+          <select
+            value={selectedPeriod}
+            onChange={(event) =>
+              setSelectedPeriod(event.target.value as CrmPeriod)
+            }
+            className="w-full appearance-none bg-surface-container-lowest border border-surface-variant text-sm py-2 pl-4 pr-10 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+          >
+            {crmPeriodOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+        </div>
       </div>
 
       {error && (
@@ -386,7 +390,7 @@ export function Dashboard() {
         variants={containerVariants}
         initial="hidden"
         animate="show"
-        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
+        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
       >
         {isLoading
           ? fallbackOverview.metrics.map((metric) => (
@@ -405,9 +409,9 @@ export function Dashboard() {
             ))}
       </motion.div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 bg-surface-container-lowest rounded-xl p-6 border border-surface-variant shadow-(--shadow-level-1)">
-          <div className="flex justify-between items-center mb-6 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2 bg-surface-container-lowest rounded-xl p-4 sm:p-5 border border-surface-variant shadow-(--shadow-level-1)">
+          <div className="flex flex-col items-start mb-4 gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-bold text-on-surface">
                 Lưu lượng làm bài
@@ -420,7 +424,7 @@ export function Dashboard() {
               {selectedPeriodLabel}
             </span>
           </div>
-          <div className="h-75 w-full">
+          <div className="h-56 w-full sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={data.traffic}
@@ -500,14 +504,14 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="xl:col-span-1 bg-surface-container-lowest rounded-xl p-6 shadow-(--shadow-level-1) flex flex-col">
-          <div className="flex justify-between items-center mb-6">
+        <div className="xl:col-span-1 bg-surface-container-lowest rounded-xl p-4 sm:p-5 shadow-(--shadow-level-1) flex flex-col">
+          <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold text-on-surface">{scoreDistributionTitle}</h3>
             <button className="text-outline hover:text-on-surface">
               <MoreHorizontal className="w-5 h-5" />
             </button>
           </div>
-          <div className="h-50 w-full mb-6 mt-4">
+          <div className="h-40 w-full mb-4 mt-2 sm:h-44">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={data.score_distribution}
@@ -570,13 +574,13 @@ export function Dashboard() {
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) overflow-hidden">
-        <div className="p-6 border-b border-surface-variant flex justify-between items-center">
+        <div className="p-5 border-b border-surface-variant flex justify-between items-center">
           <h3 className="text-lg font-bold text-on-surface">
             Kết quả thi mới nhất
           </h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[760px] text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/30 border-b border-surface-variant">
                 <th className="py-4 px-6 text-xs font-semibold text-outline uppercase tracking-wider">
@@ -623,7 +627,7 @@ export function Dashboard() {
                     </td>
                     <td className="py-4 px-6">
                       <span
-                        className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${getResultStatusClass(result.status)}`}
+                        className={`badge ${getResultStatusClass(result.status)}`}
                       >
                         {result.status}
                       </span>

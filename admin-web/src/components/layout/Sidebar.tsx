@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
+import {
+  useAdminPermissions,
+  type AdminPermissionKey,
+} from "../../lib/admin-permissions";
+import { useAuth } from "../../lib/auth";
 import { useChatNotifications } from "../../lib/chat-notifications";
-import quizzvnLogo from "../../assets/quizzvn-logo.jpeg";
+import { useAppNotifications } from "../../lib/app-notifications";
+import quizzvnLogo from "../../assets/logo quizzvn.png";
+import quizzvnLogoSmall from "../../assets/logoquizzsmall.png";
 import {
   School,
   Users,
@@ -18,30 +25,50 @@ import {
 
 interface SidebarProps {
   isPinned: boolean;
+  isMobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export function Sidebar({ isPinned }: SidebarProps) {
+interface SidebarRoute {
+  name: string;
+  path: string;
+  icon: typeof School;
+  permission?: AdminPermissionKey;
+}
+
+export function Sidebar({
+  isPinned,
+  isMobileOpen = false,
+  onMobileClose,
+}: SidebarProps) {
   const location = useLocation();
+  const { user } = useAuth();
   const { clearNotificationBadge, notificationCount } = useChatNotifications();
+  const { notificationPreferences } = useAppNotifications();
   const path = location.pathname;
   const [dashboardExpanded, setDashboardExpanded] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
 
-  const isMenuExpanded = isPinned || isHovered;
-  const isBrandExpanded = isPinned;
+  const isMenuExpanded = isMobileOpen || isPinned || isHovered;
+  const isBrandExpanded = isMobileOpen || isPinned;
   const messageBadge =
     notificationCount > 99 ? "99+" : String(notificationCount);
 
-  const routes = [
-    { name: "Giáo viên", path: "/teachers", icon: School },
-    { name: "Học sinh", path: "/students", icon: Users },
-    { name: "Quản trị viên", path: "/admins", icon: Shield },
-    { name: "Lớp học", path: "/classes", icon: BookOpen },
-    { name: "Bài thi", path: "/exams", icon: FileQuestion },
-    { name: "Tài liệu", path: "/documents", icon: FileText },
+  const permissions = useAdminPermissions(user);
+
+  const allRoutes: SidebarRoute[] = [
+    { name: "Giáo viên", path: "/teachers", icon: School, permission: "teachers" },
+    { name: "Học sinh", path: "/students", icon: Users, permission: "students" },
+    { name: "Quản trị viên", path: "/admins", icon: Shield, permission: "admins" },
+    { name: "Lớp học", path: "/classes", icon: BookOpen, permission: "classes" },
+    { name: "Bài thi", path: "/exams", icon: FileQuestion, permission: "exams" },
+    { name: "Tài liệu", path: "/documents", icon: FileText, permission: "documents" },
     { name: "Nhắn tin", path: "/chat", icon: MessageSquare },
     { name: "Cài đặt", path: "/settings", icon: Settings },
   ];
+  const routes = allRoutes.filter(
+    (route) => !route.permission || permissions.includes(route.permission),
+  );
 
   const dashboardRoutes = [
     { name: "CRM", path: "/" },
@@ -49,14 +76,26 @@ export function Sidebar({ isPinned }: SidebarProps) {
   ];
 
   return (
-    <aside
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={cn(
-        "fixed left-0 top-0 z-50 hidden h-screen bg-surface-container-lowest will-change-[width] transition-[width] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] md:block",
-        isPinned ? "w-[260px]" : "w-[88px]",
+    <>
+      {isMobileOpen && (
+        <button
+          type="button"
+          aria-label="Đóng menu"
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] md:hidden"
+        />
       )}
-    >
+      <aside
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className={cn(
+          "fixed left-0 top-0 z-50 h-dvh w-[260px] bg-surface-container-lowest will-change-[width,transform] transition-[width,transform] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          isMobileOpen
+            ? "translate-x-0"
+            : "-translate-x-full md:translate-x-0",
+          isPinned ? "md:w-[260px]" : "md:w-[88px]",
+        )}
+      >
       <div
         aria-hidden="true"
         className={cn(
@@ -70,22 +109,22 @@ export function Sidebar({ isPinned }: SidebarProps) {
           isBrandExpanded ? "w-[260px] px-6" : "w-[88px] justify-center px-0",
         )}
       >
-        <div className="flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden">
-          <img
-            src={quizzvnLogo}
-            alt="QuizzVN"
-            className="h-9 w-9 object-contain"
-          />
-        </div>
         <div
           className={cn(
-            "ml-3 flex flex-col justify-center overflow-hidden whitespace-nowrap transition-[width,opacity] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]",
-            isBrandExpanded ? "w-[170px] opacity-100" : "w-0 opacity-0",
+            "flex h-12 shrink-0 items-center overflow-hidden rounded-md transition-[width] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]",
+            isBrandExpanded ? "w-[205px] justify-start" : "w-11 justify-center",
           )}
         >
-          <h1 className="text-lg font-black text-on-surface leading-tight">
-            QuizzVN Admin
-          </h1>
+          <img
+            src={isBrandExpanded ? quizzvnLogo : quizzvnLogoSmall}
+            alt="QuizzVN"
+            className={cn(
+              "h-full transition-[width] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]",
+              isBrandExpanded
+                ? "w-[205px] max-w-none object-cover object-[50%_54%]"
+                : "w-11 object-contain",
+            )}
+          />
         </div>
       </div>
 
@@ -177,6 +216,7 @@ export function Sidebar({ isPinned }: SidebarProps) {
                   <Link
                     key={route.name}
                     to={route.path}
+                    onClick={onMobileClose}
                     className={cn(
                       "flex items-center px-3 h-[40px] rounded-lg transition-colors text-sm truncate whitespace-nowrap",
                       isActive
@@ -207,14 +247,20 @@ export function Sidebar({ isPinned }: SidebarProps) {
           const isActive =
             path === route.path ||
             (path.startsWith(route.path) && route.path !== "/");
-          const badgeCount = route.path === "/chat" ? notificationCount : 0;
+          const badgeCount =
+            route.path === "/chat" && notificationPreferences.messages
+              ? notificationCount
+              : 0;
           return (
             <Link
               key={route.name}
               to={route.path}
-              onClick={
-                route.path === "/chat" ? clearNotificationBadge : undefined
-              }
+              onClick={() => {
+                if (route.path === "/chat") {
+                  clearNotificationBadge();
+                }
+                onMobileClose?.();
+              }}
               className={cn(
                 "relative w-full flex items-center h-[40px] rounded-lg transition-colors group overflow-hidden whitespace-nowrap",
                 isMenuExpanded ? "px-3" : "justify-center",
@@ -257,6 +303,7 @@ export function Sidebar({ isPinned }: SidebarProps) {
           );
         })}
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }
