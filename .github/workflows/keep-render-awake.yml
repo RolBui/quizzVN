@@ -2,11 +2,17 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Render Free spins down after 15 minutes of no inbound traffic.
+    # GitHub scheduled workflows can be delayed, so ping every 5 minutes.
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: keep-render-awake
+  cancel-in-progress: false
 
 jobs:
   ping:
