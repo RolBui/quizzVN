@@ -17,6 +17,7 @@ import {
   AlertCircle,
   ArrowDownRight,
   ArrowUpRight,
+  ChevronDown,
   Monitor,
   Smartphone,
   Tablet,
@@ -63,27 +64,23 @@ const kpiOrder = [
 
 const kpiCopy: Record<
   string,
-  { title: string; unit: string; linkText: string; subtext?: string }
+  { title: string; unit: string; subtext?: string }
 > = {
   unique_visitors: {
     title: "Lưu lượng truy cập",
     unit: "Người",
-    linkText: "Khám phá lượng truy cập",
   },
   page_views: {
     title: "Lượt xem trang",
     unit: "Lượt",
-    linkText: "Khám phá lượt xem",
   },
   bounce_rate: {
     title: "Tỷ lệ thoát",
     unit: "%",
-    linkText: "Khám phá tỷ lệ thoát",
   },
   active_users: {
-    title: "Người dùng đang truy cập",
+    title: "User đang truy cập",
     unit: "Người",
-    linkText: "Khám phá người dùng",
     subtext: "Realtime",
   },
 };
@@ -99,12 +96,11 @@ const deviceConfig: Record<
 
 const sourceLabels: Record<string, string> = {
   direct: "Trực tiếp",
-  internal: "Nội bộ",
+  internal: "website",
   search: "Tìm kiếm",
   social: "Mạng xã hội",
-  referral: "Giới thiệu",
-  unknown: "Không xác định",
 };
+const sourceOrder = Object.keys(sourceLabels);
 
 function formatMetricValue(key: string, value: number) {
   if (key === "bounce_rate") {
@@ -125,6 +121,23 @@ function normalizedBreakdown(
     ...item,
     label: labels[item.name] ?? item.name,
   }));
+}
+
+function normalizedSourceBreakdown(items: AnalyticsBreakdownItem[]) {
+  const valuesByName = new Map(items.map((item) => [item.name, item.value]));
+  const knownSources = sourceOrder.map((name) => ({
+    name,
+    value: valuesByName.get(name) ?? 0,
+    label: sourceLabels[name] ?? name,
+  }));
+  const extraSources = items
+    .filter((item) => item.name !== "unknown" && !sourceLabels[item.name])
+    .map((item) => ({
+      ...item,
+      label: item.name,
+    }));
+
+  return [...knownSources, ...extraSources];
 }
 
 export function Analytics() {
@@ -218,7 +231,6 @@ export function Analytics() {
         unit: metric?.suffix || copy.unit,
         change,
         isPositive: metric?.is_up ?? true,
-        linkText: copy.linkText,
         subtext:
           key === "active_users"
             ? `${realtimeData.active_window_seconds} giây gần nhất`
@@ -244,40 +256,44 @@ export function Analytics() {
     });
   }, [overview.devices]);
   const sourceData = useMemo(
-    () => normalizedBreakdown(overview.sources, sourceLabels),
+    () => normalizedSourceBreakdown(overview.sources),
     [overview.sources],
   );
+  const sourceChartHeight = Math.max(210, sourceData.length * 32 + 28);
+  const showSourceChart = !isLoading || overview.sources.length > 0;
   const deviceTotal = deviceData.reduce((total, item) => total + item.value, 0);
   const selectedPeriodLabel =
     periodOptions.find((option) => option.value === selectedPeriod)?.label ??
     "7 ngày qua";
   const currentTrafficLabel =
     selectedPeriod === "year" ? "Năm nay" : "Kỳ hiện tại";
-  const lastTrafficLabel =
-    selectedPeriod === "year" ? "Năm ngoái" : "Kỳ trước";
+  const lastTrafficLabel = selectedPeriod === "year" ? "Năm ngoái" : "Kỳ trước";
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6">
+    <div className="p-4 flex flex-col gap-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
-          <h1 className="text-xl md:text-xl font-bold text-on-surface">
-            Analysis
+          <h1 className="text-lg font-semibold text-on-surface">
+            Phân tích
           </h1>
         </div>
         <div className="flex gap-2">
-          <select
-            value={selectedPeriod}
-            onChange={(event) =>
-              setSelectedPeriod(event.target.value as AnalyticsPeriod)
-            }
-            className="bg-surface-container-lowest border border-surface-variant text-sm py-2 px-4 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
-          >
-            {periodOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative w-full sm:w-36">
+            <select
+              value={selectedPeriod}
+              onChange={(event) =>
+                setSelectedPeriod(event.target.value as AnalyticsPeriod)
+              }
+              className="w-full appearance-none bg-surface-container-lowest border border-surface-variant text-sm py-2 pl-4 pr-10 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+            >
+              {periodOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+          </div>
         </div>
       </div>
 
@@ -299,8 +315,8 @@ export function Analytics() {
               key={kpi.key}
               className="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-(--shadow-level-1) flex flex-col"
             >
-              <div className="flex justify-between items-start p-4 border-b border-dashed border-outline-variant gap-3">
-                <p className="text-kpi-title text-base leading-tight whitespace-pre-line font-medium">
+              <div className="flex justify-between items-start p-4 gap-3">
+                <p className="text-on-surface text-base leading-tight whitespace-pre-line font-medium">
                   {kpi.title}
                 </p>
                 <span
@@ -320,29 +336,23 @@ export function Analytics() {
                 {kpi.subtext && (
                   <p className="text-xs text-outline mb-3">{kpi.subtext}</p>
                 )}
-                <div className="flex items-center justify-end mt-auto">
-                  <a
-                    href="#"
-                    className="text-sm font-medium text-kpi-link border-b border-kpi-link hover:opacity-80 transition-opacity pb-0.5 whitespace-nowrap overflow-hidden text-ellipsis ml-2"
-                  >
-                    {kpi.linkText}
-                  </a>
-                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        <div className="lg:col-span-2 bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1)">
-          <div className="flex items-center justify-between gap-4 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-surface-container-lowest p-4 sm:p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1)">
+          <div className="flex flex-col items-start gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
             <h3 className="text-base font-bold text-on-surface">
               Lưu lượng truy cập
             </h3>
-            <span className="text-sm text-outline">{selectedPeriodLabel}</span>
+            <span className="bg-surface-container text-sm py-1.5 px-3 rounded-lg text-on-surface font-medium">
+              {selectedPeriodLabel}
+            </span>
           </div>
-          <div className="h-75 w-full">
+          <div className="h-64 w-full sm:h-75">
             {trafficData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
@@ -350,7 +360,13 @@ export function Analytics() {
                   margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                 >
                   <defs>
-                    <linearGradient id="colorCurrent" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient
+                      id="colorCurrent"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
                       <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
@@ -372,6 +388,7 @@ export function Analytics() {
                     dy={10}
                   />
                   <YAxis
+                    allowDecimals={false}
                     axisLine={false}
                     tickLine={false}
                     tick={{ fontSize: 12, fill: "var(--color-outline)" }}
@@ -411,8 +428,8 @@ export function Analytics() {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1) flex flex-col">
-          <h3 className="text-base font-bold text-on-surface mb-6">Thiết bị</h3>
+        <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1) flex flex-col">
+          <h3 className="text-base font-bold text-on-surface mb-4">Thiết bị</h3>
           <div className="flex-1 h-50 w-full mb-4">
             {deviceData.length > 0 && deviceTotal > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -454,11 +471,16 @@ export function Analytics() {
             {Object.entries(deviceConfig).map(([key, config]) => {
               const item = deviceData.find((device) => device.name === key);
               const percent =
-                deviceTotal > 0 ? Math.round(((item?.value ?? 0) / deviceTotal) * 100) : 0;
+                deviceTotal > 0
+                  ? Math.round(((item?.value ?? 0) / deviceTotal) * 100)
+                  : 0;
               const Icon = config.icon;
               return (
                 <div key={key} className="flex flex-col items-center">
-                  <Icon className="w-5 h-5 mb-1" style={{ color: config.color }} />
+                  <Icon
+                    className="w-5 h-5 mb-1"
+                    style={{ color: config.color }}
+                  />
                   <span className="text-xs font-medium text-outline">
                     {percent}%
                   </span>
@@ -469,13 +491,13 @@ export function Analytics() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mt-2">
-        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1)">
-          <h3 className="text-base font-bold text-on-surface mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
+        <div className="bg-surface-container-lowest p-5 rounded-xl border border-surface-variant shadow-(--shadow-level-1) self-start">
+          <h3 className="text-base font-bold text-on-surface mb-4">
             Nguồn truy cập
           </h3>
-          <div className="h-62.5 w-full">
-            {sourceData.length > 0 ? (
+          <div className="w-full" style={{ height: sourceChartHeight }}>
+            {showSourceChart ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={sourceData}
@@ -488,6 +510,7 @@ export function Analytics() {
                     stroke="var(--color-surface-variant)"
                   />
                   <XAxis
+                    allowDecimals={false}
                     type="number"
                     axisLine={false}
                     tickLine={false}
@@ -523,7 +546,9 @@ export function Analytics() {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-sm text-outline">
-                {isLoading ? "Đang tải dữ liệu..." : "Chưa có dữ liệu nguồn truy cập"}
+                {isLoading
+                  ? "Đang tải dữ liệu..."
+                  : "Chưa có dữ liệu nguồn truy cập"}
               </div>
             )}
           </div>
@@ -556,7 +581,8 @@ export function Analytics() {
                     <td className="py-3 px-5 text-sm text-on-surface font-medium truncate max-w-50">
                       <p className="truncate">{page.title || page.path}</p>
                       <p className="text-xs text-outline truncate">
-                        {page.path} · {page.unique_visitors.toLocaleString("vi-VN")} khách
+                        {page.path} ·{" "}
+                        {page.unique_visitors.toLocaleString("vi-VN")} khách
                       </p>
                     </td>
                     <td className="py-3 px-5 text-sm text-on-surface text-right">
@@ -570,7 +596,9 @@ export function Analytics() {
                     colSpan={2}
                     className="py-10 px-5 text-center text-sm text-outline"
                   >
-                    {isLoading ? "Đang tải dữ liệu..." : "Chưa có dữ liệu trang phổ biến"}
+                    {isLoading
+                      ? "Đang tải dữ liệu..."
+                      : "Chưa có dữ liệu trang phổ biến"}
                   </td>
                 </tr>
               )}

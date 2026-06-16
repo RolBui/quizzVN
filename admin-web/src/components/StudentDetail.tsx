@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   BookOpen,
   Calendar,
+  ChevronDown,
   Edit,
   FileText,
   Loader2,
@@ -69,9 +70,7 @@ function genderLabel(gender: string | null) {
 }
 
 function activityBadge(isOnline: boolean) {
-  return isOnline
-    ? "bg-[#10B981]/10 text-[#10B981]"
-    : "bg-surface-variant text-on-surface-variant";
+  return isOnline ? "badge-success" : "badge-secondary";
 }
 
 function statusLabel(status: string) {
@@ -393,7 +392,7 @@ export function StudentDetail({
                 {currentStudent.code}
               </span>
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${activityBadge(currentStudent.is_online)}`}
+                className={`badge ${activityBadge(currentStudent.is_online)}`}
               >
                 {currentStudent.is_online ? "Hoạt động" : "Không hoạt động"}
               </span>
@@ -709,7 +708,7 @@ function AttemptsTable({ detail }: { detail: AdminStudentDetailData | null }) {
             </td>
             <td className="py-4 px-6">
               <span
-                className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${attempt.status === "submitted" ? "bg-[#10B981]/10 text-[#10B981]" : "bg-surface-variant text-on-surface-variant"}`}
+                className={`badge ${attempt.status === "submitted" ? "badge-success" : "badge-secondary"}`}
               >
                 {attempt.status === "submitted" ? "Đã nộp" : "Đang làm"}
               </span>
@@ -773,7 +772,7 @@ function ExamsTable({ detail }: { detail: AdminStudentDetailData | null }) {
             </td>
             <td className="py-4 px-6">
               <span
-                className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${exam.is_published && exam.is_active ? "bg-[#10B981]/10 text-[#10B981]" : "bg-surface-variant text-on-surface-variant"}`}
+                className={`badge ${exam.is_published && exam.is_active ? "badge-success" : "badge-secondary"}`}
               >
                 {exam.is_published && exam.is_active ? "Đang mở" : "Đã ẩn"}
               </span>
@@ -946,36 +945,45 @@ function ProfileFields({
           <label className="text-sm font-medium text-on-surface">
             Giới tính
           </label>
-          <select
-            value={form.gender}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, gender: event.target.value }))
-            }
-            className="mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-sm outline-none focus:border-primary"
-          >
+          <div className="relative mt-2">
+            <select
+              value={form.gender}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  gender: event.target.value,
+                }))
+              }
+              className="w-full appearance-none rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 pr-10 text-sm outline-none focus:border-primary cursor-pointer"
+            >
             <option value="male">Nam</option>
             <option value="female">Nữ</option>
             <option value="other">Khác</option>
-          </select>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+          </div>
         </div>
       </div>
       <div>
         <label className="text-sm font-medium text-on-surface">
           Trạng thái tài khoản
         </label>
-        <select
-          value={form.status}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              status: event.target.value as "active" | "disabled",
-            }))
-          }
-          className="mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-sm outline-none focus:border-primary"
-        >
+        <div className="relative mt-2">
+          <select
+            value={form.status}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                status: event.target.value as "active" | "disabled",
+              }))
+            }
+            className="w-full appearance-none rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 pr-10 text-sm outline-none focus:border-primary cursor-pointer"
+          >
           <option value="active">Hoạt động</option>
           <option value="disabled">Vô hiệu hóa</option>
-        </select>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+        </div>
       </div>
     </>
   );

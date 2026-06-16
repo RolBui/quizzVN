@@ -1,13 +1,75 @@
+import { toast } from "react-toastify";
+
 const configuredApiBaseUrl = (
   import.meta.env.VITE_API_BASE_URL as string | undefined
 )
   ?.trim()
   .replace(/\/$/, "");
-const API_BASE_URL = configuredApiBaseUrl || "http://localhost:8000";
+const API_BASE_URL =
+  configuredApiBaseUrl ||
+  (import.meta.env.DEV
+    ? "http://localhost:8000"
+    : "https://quizzvn.onrender.com");
+const ACCESS_TOKEN_STORAGE_KEY = "quizzvn-admin-access-token";
+const AUTH_UNAUTHORIZED_EVENT = "quizzvn:auth-unauthorized";
+
+function readStoredAccessToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.sessionStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+}
+
+function storeAccessToken(accessToken: string | null | undefined) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (accessToken) {
+    window.sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+    return;
+  }
+  window.sessionStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+}
+
+function notifyUnauthorized() {
+  storeAccessToken(null);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
+  }
+}
+
+const quietErrorPaths = [
+  "/auth/me",
+  "/auth/login",
+  "/admin/documents",
+  "/admin/analytics/realtime",
+  "/chat/contacts",
+  "/chat/conversations",
+];
+
+function shouldToastApiError(path: string, status?: number) {
+  if (status === 401) {
+    return false;
+  }
+  return !quietErrorPaths.some((quietPath) => path.startsWith(quietPath));
+}
+
+function showApiErrorToast(path: string, message: string, status?: number) {
+  if (!shouldToastApiError(path, status)) {
+    return;
+  }
+  toast.error(message || "Thao tác thất bại. Vui lòng thử lại.", {
+    toastId: `api-error:${path}:${status ?? "network"}`,
+  });
+}
 
 function apiWebSocketUrl(path: string) {
   const url = new URL(`${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const accessToken = readStoredAccessToken();
+  if (accessToken) {
+    url.searchParams.set("token", accessToken);
+  }
   return url.toString();
 }
 
@@ -26,6 +88,7 @@ export interface AuthUser {
   is_first_login: boolean;
   max_exam_create: number;
   max_document_create: number;
+  admin_permissions: string[];
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
@@ -43,6 +106,7 @@ export interface AdminAccount {
   role_name: AdminAccountRole;
   status: string;
   is_online: boolean;
+  admin_permissions: string[];
   email_verified: boolean;
   auth_type: string;
   avatar_url: string | null;
@@ -76,11 +140,17 @@ export interface AuthSessionResponse {
   message: string;
   user: AuthUser;
   session: AuthSession;
+  access_token?: string | null;
 }
 
 export interface MeResponse {
   user: AuthUser;
   session: AuthSession;
+}
+
+export interface UpdateProfileResponse {
+  message: string;
+  user: AuthUser;
 }
 
 export interface CrmMetric {
@@ -312,6 +382,11 @@ export interface AdminDocumentOverview {
   items: AdminDocument[];
 }
 
+export interface AdminDocumentResponse {
+  message: string;
+  document: AdminDocument;
+}
+
 export interface AdminTeacherClassDetail {
   id: number;
   name: string;
@@ -452,16 +527,33 @@ async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...options.headers,
-    },
-  });
+  let response: Response;
+  const accessToken = readStoredAccessToken();
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : {}),
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Không thể kết nối máy chủ. Vui lòng thử lại.";
+    showApiErrorToast(path, message);
+    throw error;
+  }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     let message = `Request failed with status ${response.status}`;
     try {
       const body = await response.json();
@@ -471,6 +563,7 @@ async function apiRequest<T>(
     } catch {
       // Keep the generic message when the API does not return JSON.
     }
+    showApiErrorToast(path, message, response.status);
     throw new ApiError(response.status, message);
   }
 
@@ -505,10 +598,30 @@ async function apiDelete<T>(path: string): Promise<T> {
 }
 
 export const authApi = {
-  login: (email: string, password: string) =>
-    apiPost<AuthSessionResponse>("/auth/login", { email, password }),
+  login: async (email: string, password: string) => {
+    const response = await apiPost<AuthSessionResponse>("/auth/login", {
+      email,
+      password,
+    });
+    storeAccessToken(response.access_token);
+    return response;
+  },
   me: () => apiGet<MeResponse>("/auth/me"),
-  logout: () => apiPost<{ message: string }>("/auth/logout"),
+  updateProfile: (payload: { full_name?: string; phone?: string | null }) =>
+    apiRequest<UpdateProfileResponse>("/auth/profile", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  logout: async () => {
+    try {
+      return await apiPost<{ message: string }>("/auth/logout");
+    } finally {
+      storeAccessToken(null);
+    }
+  },
 };
 
 export const adminApi = {
@@ -563,12 +676,22 @@ export const adminApi = {
   deleteExam: (examId: number) =>
     apiDelete<{ message: string }>(`/admin/exams/${examId}`),
   getDocumentsOverview: () => apiGet<AdminDocumentOverview>("/admin/documents"),
+  importDocument: (body: FormData) =>
+    apiPostForm<AdminDocumentResponse>("/admin/documents", body),
   listAccounts: () => apiGet<AdminAccountListResponse>("/admin/users"),
   createAccount: (payload: {
     full_name: string;
     email: string;
     password: string;
   }) => apiPost<AdminAccountResponse>("/admin/users", payload),
+  updatePermissions: (userId: number, permissions: string[]) =>
+    apiRequest<AdminAccountResponse>(`/admin/users/${userId}/permissions`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ permissions }),
+    }),
   deleteAccount: (userId: number) =>
     apiRequest<{ message: string }>(`/admin/users/${userId}`, {
       method: "DELETE",

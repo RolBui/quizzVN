@@ -34,6 +34,7 @@ class UserSchema(BaseModel):
     is_first_login: bool
     max_exam_create: int
     max_document_create: int
+    admin_permissions: list[str] = []
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -64,6 +65,7 @@ class AuthSessionResponse(BaseModel):
     message: str
     user: UserSchema
     session: SessionSchema
+    access_token: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -74,6 +76,7 @@ class MeResponse(BaseModel):
 class RefreshSessionResponse(BaseModel):
     message: str
     session: SessionSchema
+    access_token: str | None = None
 
 
 class SessionListResponse(BaseModel):

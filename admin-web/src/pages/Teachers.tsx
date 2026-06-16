@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ChevronDown,
   Download,
   Loader2,
   MessageSquare,
@@ -20,6 +21,8 @@ import {
   type AdminTeacher,
   type AdminTeacherOverview,
 } from "../lib/api";
+import { useAppNotifications } from "../lib/app-notifications";
+import { datedExcelFilename, downloadExcel } from "../lib/exportExcel";
 import { formatDate, formatNumber, initials } from "../lib/format";
 
 const PAGE_SIZE = 7;
@@ -86,6 +89,7 @@ function TeacherAvatar({ teacher }: { teacher: AdminTeacher }) {
 
 export function Teachers() {
   const navigate = useNavigate();
+  const { addNotification } = useAppNotifications();
   const [overview, setOverview] =
     useState<AdminTeacherOverview>(fallbackOverview);
   const [query, setQuery] = useState("");
@@ -198,6 +202,56 @@ export function Teachers() {
     return filteredTeachers.slice(startIndex, startIndex + PAGE_SIZE);
   }, [currentPage, filteredTeachers]);
 
+  const handleExportTeachers = () => {
+    downloadExcel({
+      filename: datedExcelFilename("giao-vien"),
+      sheetName: "Giao vien",
+      columns: [
+        { header: "ID", value: (teacher) => teacher.code },
+        { header: "Họ tên", value: (teacher) => teacher.full_name },
+        { header: "Tên đăng nhập", value: (teacher) => teacher.username },
+        { header: "Email", value: (teacher) => teacher.email },
+        { header: "Số điện thoại", value: (teacher) => teacher.phone || "" },
+        {
+          header: "Trường",
+          value: (teacher) => teacher.school_name || "Chưa cập nhật",
+        },
+        {
+          header: "Ngày sinh",
+          value: (teacher) => formatDate(teacher.date_of_birth),
+        },
+        { header: "Giới tính", value: (teacher) => teacher.gender || "" },
+        { header: "Số lớp", value: (teacher) => teacher.class_count },
+        { header: "Đề thi", value: (teacher) => teacher.exam_count },
+        { header: "Tài liệu", value: (teacher) => teacher.document_count },
+        {
+          header: "Trạng thái tài khoản",
+          value: (teacher) =>
+            teacher.status === "active" ? "Hoạt động" : "Bị khóa",
+        },
+        {
+          header: "Trạng thái hoạt động",
+          value: (teacher) =>
+            teacher.is_online ? "Đang hoạt động" : "Không hoạt động",
+        },
+        {
+          header: "Đăng nhập cuối",
+          value: (teacher) => formatDate(teacher.last_login_at),
+        },
+        {
+          header: "Ngày tạo",
+          value: (teacher) => formatDate(teacher.created_at),
+        },
+      ],
+      rows: filteredTeachers,
+    });
+    addNotification({
+      type: "data_export",
+      title: "Đã xuất danh sách giáo viên",
+      body: `${filteredTeachers.length} giáo viên đã được xuất ra file Excel.`,
+    });
+  };
+
   useEffect(() => {
     setCurrentPage(1);
   }, [query, status]);
@@ -231,14 +285,19 @@ export function Teachers() {
   }
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-6 h-full">
+    <div className="p-4 flex flex-col gap-4 h-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-on-surface">
+          <h1 className="text-lg font-semibold text-on-surface">
             Danh sách Giáo viên
           </h1>
         </div>
-        <button className="px-4 py-2 bg-surface border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleExportTeachers}
+          disabled={isLoading || filteredTeachers.length === 0}
+          className="w-full px-4 py-2 bg-surface border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+        >
           <Download className="w-4 h-4" /> Xuất dữ liệu
         </button>
       </div>
@@ -250,7 +309,7 @@ export function Teachers() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {(overview.metrics.length
           ? overview.metrics
           : fallbackOverview.metrics
@@ -271,19 +330,22 @@ export function Teachers() {
               className="w-full pl-9 pr-4 py-2 bg-surface-container-low border border-outline-variant rounded-md text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className="bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 px-3 rounded-md focus:outline-none focus:border-primary w-full md:w-auto"
-          >
+          <div className="relative w-full md:w-48">
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              className="w-full appearance-none bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 pl-3 pr-10 rounded-md focus:outline-none focus:border-primary cursor-pointer"
+            >
             <option value="all">Tất cả trạng thái</option>
             <option value="online">Hoạt động</option>
             <option value="offline">Không hoạt động</option>
-          </select>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+          </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[900px] text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/50 border-b border-surface-variant">
                 <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
@@ -349,7 +411,7 @@ export function Teachers() {
                   </td>
                   <td className="py-3 px-4">
                     <span
-                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${teacher.is_online ? "bg-[#10B981]/10 text-[#10B981]" : "bg-surface-variant text-on-surface-variant"}`}
+                      className={`badge ${teacher.is_online ? "badge-success" : "badge-secondary"}`}
                     >
                       {teacher.is_online ? "Hoạt động" : "Không hoạt động"}
                     </span>

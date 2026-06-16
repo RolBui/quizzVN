@@ -198,6 +198,14 @@ def set_auth_cookies(response: Response, tokens: dict) -> None:
     set_refresh_cookie(response, tokens)
 
 
+def build_auth_session_response(result: dict) -> dict:
+    tokens = result.get("tokens") or {}
+    return {
+        **result,
+        "access_token": tokens.get("session_token"),
+    }
+
+
 def build_frontend_auth_redirect_url(**params: str | bool) -> str:
     base_url = f"{settings.FRONTEND_URL}{settings.FRONTEND_AUTH_CALLBACK_PATH}"
     query_params = {
@@ -231,7 +239,7 @@ def register(
         user_agent=user_agent,
     )
     set_auth_cookies(response, result["tokens"])
-    return result
+    return build_auth_session_response(result)
 
 
 @router.post("/login", response_model=AuthSessionResponse)
@@ -251,7 +259,7 @@ def login(
         user_agent=user_agent,
     )
     set_auth_cookies(response, result["tokens"])
-    return result
+    return build_auth_session_response(result)
 
 
 @router.get(
@@ -368,10 +376,12 @@ def refresh_session(
     db: Session = Depends(get_db),
 ) -> RefreshSessionResponse:
     refreshed_session = refresh_user_session(db, current_session)
-    set_auth_cookies(response, serialize_session_tokens(refreshed_session))
+    tokens = serialize_session_tokens(refreshed_session)
+    set_auth_cookies(response, tokens)
     return {
         "message": "Session refreshed successfully",
         "session": serialize_session(refreshed_session),
+        "access_token": tokens["session_token"],
     }
 
 

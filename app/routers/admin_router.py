@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,6 +9,7 @@ from app.schemas.admin import (
     AdminClassOverviewResponse,
     AdminCrmOverviewResponse,
     AdminDocumentOverviewResponse,
+    AdminDocumentResponse,
     AdminExamOverviewResponse,
     AdminStudentDetailResponse,
     AdminStudentOverviewResponse,
@@ -16,12 +17,14 @@ from app.schemas.admin import (
     AdminTeacherOverviewResponse,
     CreateAdminAccountRequest,
     ResetAdminUserPasswordRequest,
+    UpdateAdminPermissionsRequest,
     UpdateAdminUserProfileRequest,
 )
 from app.schemas.analytics import AdminWebRealtimeResponse, AdminWebTrafficOverviewResponse
 from app.schemas.common import MessageResponse
 from app.services.admin_service import (
     create_admin_account,
+    create_admin_uploaded_document,
     delete_admin_account,
     delete_admin_exam,
     delete_admin_student,
@@ -37,6 +40,7 @@ from app.services.admin_service import (
     list_admin_accounts,
     reset_admin_student_password,
     reset_admin_teacher_password,
+    update_admin_permissions,
     update_admin_student_profile,
     update_admin_teacher_profile,
 )
@@ -212,13 +216,35 @@ def get_documents_overview(
     return get_admin_documents_overview(db)
 
 
+@router.post("/documents", response_model=AdminDocumentResponse)
+def post_admin_document(
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    summary: str | None = Form(None),
+    scope: str = Form("system"),
+    classroom_id: int | None = Form(None),
+    is_published: bool = Form(True),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminDocumentResponse:
+    return create_admin_uploaded_document(
+        db,
+        current_admin,
+        title,
+        summary,
+        file,
+        scope,
+        classroom_id,
+        is_published,
+    )
+
+
 @router.get("/users", response_model=AdminAccountListResponse)
 def get_admin_accounts(
     db: Session = Depends(get_db),
-    current_administrator=Depends(get_current_administrator),
+    current_admin=Depends(get_current_admin),
 ) -> AdminAccountListResponse:
-    _ = current_administrator
-    return list_admin_accounts(db)
+    return list_admin_accounts(db, current_admin)
 
 
 @router.post("/users", response_model=AdminAccountResponse)
@@ -229,6 +255,16 @@ def post_admin_account(
 ) -> AdminAccountResponse:
     _ = current_administrator
     return create_admin_account(db, payload.full_name, payload.email, payload.password)
+
+
+@router.put("/users/{user_id}/permissions", response_model=AdminAccountResponse)
+def put_admin_permissions(
+    user_id: int,
+    payload: UpdateAdminPermissionsRequest,
+    db: Session = Depends(get_db),
+    current_administrator=Depends(get_current_administrator),
+) -> AdminAccountResponse:
+    return update_admin_permissions(db, current_administrator, user_id, payload.permissions)
 
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)

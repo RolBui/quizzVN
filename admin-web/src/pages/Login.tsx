@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { AlertCircle, Loader2, Lock, Mail } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -34,6 +35,7 @@ export function Login() {
 
     try {
       await login(email, password);
+      toast.success("Đăng nhập thành công.", { toastId: "login-success" });
       navigate(state?.from?.pathname || "/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -43,6 +45,13 @@ export function Login() {
       } else {
         setError("Không thể đăng nhập. Vui lòng thử lại.");
       }
+      const toastMessage =
+        err instanceof ApiError && err.status === 401
+          ? "Email hoặc mật khẩu không đúng."
+          : err instanceof Error
+            ? err.message
+            : "Không thể đăng nhập. Vui lòng thử lại.";
+      toast.error(toastMessage, { toastId: "login-error" });
     } finally {
       setIsSubmitting(false);
     }

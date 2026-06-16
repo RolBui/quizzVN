@@ -1,0 +1,2241 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+export type AppLanguage = "vi" | "en" | "ja" | "zh-CN";
+type TranslatedLanguage = Exclude<AppLanguage, "vi">;
+
+const appLanguages: AppLanguage[] = ["vi", "en", "ja", "zh-CN"];
+const translatedLanguages: TranslatedLanguage[] = ["en", "ja", "zh-CN"];
+
+export const GENERAL_SETTINGS_KEY = "quizzvn-admin-general-settings";
+
+const ATTRIBUTE_NAMES = ["aria-label", "placeholder", "title"];
+const originalTextByNode = new WeakMap<Text, string>();
+const originalAttributeByElement = new WeakMap<Element, Map<string, string>>();
+
+const viToEn: Record<string, string> = {
+  "Danh mục": "Menu",
+  "Quản lý": "Management",
+  "Bảng điều khiển": "Dashboard",
+  "Giáo viên": "Teachers",
+  "Học sinh": "Students",
+  "Quản trị viên": "Administrators",
+  "giáo viên": "teachers",
+  "học sinh": "students",
+  "khách": "visitors",
+  "Lớp": "Classes",
+  "lớp": "classes",
+  "Lớp học": "Classes",
+  "Bài thi": "Exams",
+  "Bài làm": "Attempts",
+  "bài làm": "attempts",
+  "Tài liệu": "Documents",
+  "Nhắn tin": "Messages",
+  "Cài đặt": "Settings",
+  "Thu gọn menu": "Collapse menu",
+  "Mở rộng menu": "Expand menu",
+  "Chế độ giao diện sáng": "Light mode",
+  "Chế độ giao diện tối": "Dark mode",
+  "Thông báo": "Notifications",
+  "Thông báo gần đây": "Recent notifications",
+  "Chưa có thông báo mới": "No new notifications",
+  "Không có thông báo mới": "No new notifications",
+  "Xóa": "Delete",
+  "Xóa admin": "Delete admin",
+  "Xóa giáo viên": "Delete teacher",
+  "Xóa học sinh": "Delete student",
+  "Xóa bài thi": "Delete exam",
+  "Xóa tài khoản": "Delete account",
+  "Xem tất cả tin nhắn": "View all messages",
+  "Cuộc trò chuyện": "Conversation",
+  "Bạn có tin nhắn mới": "You have a new message",
+  "Tài khoản": "Account",
+  "Đăng xuất": "Log out",
+  "Đang đăng xuất...": "Logging out...",
+  "Đang kiểm tra phiên đăng nhập...": "Checking session...",
+
+  "Cài đặt Hệ thống": "System Settings",
+  "Hủy thay đổi": "Discard changes",
+  "Lưu cài đặt": "Save settings",
+  "Cài đặt chung": "General settings",
+  "Thông tin tài khoản": "Account information",
+  "Thông tin tài khoản quản trị viên đang đăng nhập.":
+    "Information for the signed-in administrator account.",
+  "Loại đăng nhập": "Login type",
+  "Đăng nhập gần nhất": "Last login",
+  "Sửa thông tin": "Edit information",
+  "Lưu thông tin": "Save information",
+  "Đang lưu...": "Saving...",
+  "Họ tên không được để trống.": "Full name cannot be empty.",
+  "Đã lưu thông tin tài khoản.": "Account information saved.",
+  "Phân quyền": "Permissions",
+  "Phân quyền quản trị viên": "Administrator permissions",
+  "Chọn các khu vực mà quản trị viên này được phép quản lý trong hệ thống.":
+    "Choose which areas this administrator is allowed to manage in the system.",
+  "Tên quản trị viên": "Administrator name",
+  "Phạm vi quản lý": "Management scope",
+  "Lưu phân quyền": "Save permissions",
+  "Đã lưu phân quyền quản trị viên.": "Administrator permissions saved.",
+  "Đóng form phân quyền": "Close permissions form",
+  "Tên hệ thống": "System name",
+  "Email liên hệ hệ thống": "System contact email",
+  "Thông tin và Định dạng": "Information and format",
+  "Ngôn ngữ": "Language",
+  "Ngôn ngữ mặc định": "Default language",
+  "Tiếng Việt": "Vietnamese",
+  "English": "English",
+  "Tiếng Nhật": "Japanese",
+  "Tiếng Trung (giản thể)": "Chinese (Simplified)",
+  "Múi giờ": "Timezone",
+  "Thông báo trong hệ thống": "System notifications",
+  "Bật hoặc tắt từng loại thông báo xuất hiện ở chuông góc trên.":
+    "Turn each notification type in the top notification bell on or off.",
+  "Tin nhắn mới": "New messages",
+  "Hiện badge và thông báo khi có tin nhắn mới.":
+    "Show badges and notifications for new messages.",
+  "Thêm quản trị viên": "Add administrator",
+  "Thông báo sau khi tạo tài khoản quản trị viên mới.":
+    "Notify after creating a new administrator account.",
+  "Nhập tài liệu": "Import documents",
+  "Thông báo khi upload tài liệu PDF hoặc DOCX thành công.":
+    "Notify when a PDF or DOCX document upload succeeds.",
+  "Xuất tài liệu": "Export documents",
+  "Thông báo khi tải tài liệu về máy.":
+    "Notify when a document is downloaded.",
+  "Xuất dữ liệu": "Export data",
+  "Thông báo khi xuất danh sách học sinh hoặc giáo viên.":
+    "Notify when a student or teacher list is exported.",
+  "Thông báo hệ thống": "System notifications",
+  "Các thông báo vận hành khác của dashboard admin.":
+    "Other operational notifications from the admin dashboard.",
+  "Bảo mật": "Security",
+  "Đang phát triển": "In development",
+  "Mục cài đặt này đang được cập nhật. Vui lòng quay lại sau.":
+    "This settings section is being updated. Please check back later.",
+
+  "Đăng nhập quản trị": "Admin login",
+  "Đăng nhập": "Log in",
+  "Đăng nhập thành công.": "Logged in successfully.",
+  "Chỉ tài khoản do Administrator cấp mới vào được hệ thống.":
+    "Only accounts granted by an Administrator can access the system.",
+  "Mật khẩu": "Password",
+  "Nhập mật khẩu": "Enter password",
+  "Email hoặc mật khẩu không đúng.": "Email or password is incorrect.",
+  "Không thể đăng nhập. Vui lòng thử lại.":
+    "Unable to log in. Please try again.",
+
+  "User mới": "New users",
+  "Tổng user": "Total users",
+  "so với tháng trước": "vs last month",
+  "tổng tài khoản hệ thống": "total system accounts",
+  "Lưu lượng làm bài": "Exam traffic",
+  "Số lượt bắt đầu bài thi theo tháng": "Exam starts by month",
+  "Số lượt bắt đầu bài thi theo ngày (30 ngày)":
+    "Exam starts by day (30 days)",
+  "Số lượt bắt đầu bài thi theo ngày (7 ngày)":
+    "Exam starts by day (7 days)",
+  "Phổ điểm năm nay": "Score distribution this year",
+  "Phổ điểm 30 ngày": "30-day score distribution",
+  "Phổ điểm tuần": "Weekly score distribution",
+  "Phổ điểm nhiều nhất": "Top score range",
+  "Chưa có dữ liệu năm nay": "No data this year",
+  "Chưa có dữ liệu 30 ngày qua": "No data in the last 30 days",
+  "Chưa có dữ liệu tuần này": "No data this week",
+  "Kết quả thi mới nhất": "Latest exam results",
+  "Mã bài thi": "Exam code",
+  "Kỳ thi": "Exam",
+  "Ngày nộp": "Submitted date",
+  "Điểm số": "Score",
+  "Đánh giá": "Assessment",
+  "Chưa có kết quả thi": "No exam results",
+  "Số học sinh": "Students",
+  "Hoàn thành": "Completed",
+  "Cần cải thiện": "Needs improvement",
+  "Tổng giáo viên": "Total teachers",
+  "Tổng học sinh": "Total students",
+  "Học sinh mới": "New students",
+  "Đề thi đã tạo": "Exams created",
+  "Lớp đang quản lý": "Managed classes",
+  "Tổng số lớp học": "Total classes",
+  "Tổng số học sinh": "Total students",
+  "có tương tác trong 1 giờ qua": "active in the last hour",
+  "trong tháng này": "this month",
+  "không thể đăng nhập": "cannot log in",
+  "từ tài khoản giáo viên": "from teacher accounts",
+  "lớp do giáo viên tạo": "classes created by teachers",
+  "trong tất cả lớp": "across all classes",
+  "tài liệu đã tạo": "documents created",
+  "lượt làm bài": "attempts",
+  "trên bài đã nộp": "from submitted attempts",
+  "có thể xem": "viewable",
+
+  "Lưu lượng truy cập": "Traffic",
+  "Khách truy cập": "Visitors",
+  "Phiên truy cập": "Sessions",
+  "Lượt xem trang": "Page views",
+  "Tỷ lệ thoát": "Bounce rate",
+  "User đang truy cập": "Active users",
+  "Người": "Users",
+  "Lượt": "Views",
+  "Realtime": "Realtime",
+  "7 ngày qua": "Last 7 days",
+  "30 ngày qua": "Last 30 days",
+  "Năm nay": "This year",
+  "Năm ngoái": "Last year",
+  "Kỳ hiện tại": "Current period",
+  "Kỳ trước": "Previous period",
+  "Chưa lấy được dữ liệu analytics": "Could not load analytics data",
+  "Không lấy được dữ liệu analytics.": "Could not load analytics data.",
+  "Đang tải dữ liệu...": "Loading data...",
+  "Chưa có dữ liệu truy cập": "No traffic data",
+  "Thiết bị": "Devices",
+  "Chưa có dữ liệu thiết bị": "No device data",
+  "Nguồn truy cập": "Traffic sources",
+  "Trực tiếp": "Direct",
+  "website": "Website",
+  "Tìm kiếm": "Search",
+  "Mạng xã hội": "Social",
+  "Giới thiệu": "Referral",
+  "Chưa có dữ liệu nguồn truy cập": "No traffic source data",
+  "Trang phổ biến": "Popular pages",
+  "Trang": "Page",
+  "Lượt xem": "Views",
+  "Chưa có dữ liệu trang phổ biến": "No popular page data",
+  "Landing page": "Landing page",
+  "Teacher": "Teacher",
+  "Student": "Student",
+  "Teacher exams": "Teacher exams",
+  "Student exams": "Student exams",
+
+  "Tất cả": "All",
+  "Tất cả trạng thái": "All statuses",
+  "Hoạt động": "Active",
+  "Không hoạt động": "Inactive",
+  "Đang hoạt động": "Active",
+  "Vô hiệu hóa": "Disabled",
+  "Bị khóa": "Locked",
+  "Chưa cập nhật": "Not updated",
+  "Chưa xác định": "Unknown",
+  "Không rõ": "Unknown",
+  "Chưa có": "None",
+  "Chưa từng": "Never",
+  "Hệ thống": "System",
+  "Trong lớp": "In class",
+  "Không gắn lớp": "No class",
+  "Không có mô tả": "No description",
+  "Bản nháp": "Draft",
+  "Đã xuất bản": "Published",
+  "Đã nộp": "Submitted",
+  "Đang làm": "In progress",
+  "Đang mở": "Open",
+  "Đã ẩn": "Hidden",
+  "Tổng quản trị viên": "Total administrators",
+  "Có tương tác trong 1 giờ qua": "Active in the last hour",
+  "Không thể đăng nhập": "Cannot log in",
+  "Tìm theo tên, email hoặc vai trò...":
+    "Search by name, email, or role...",
+  "Tìm theo tên, email, vai trò hoặc tag...":
+    "Search by name, email, role, or tag...",
+  "Vai trò": "Role",
+  "Tag": "Tag",
+  "Toàn quyền": "Full access",
+  "Chưa phân quyền": "No permissions",
+  "Đăng nhập cuối": "Last login",
+  "Trạng thái": "Status",
+  "Thao tác": "Actions",
+  "Đang tải danh sách admin...": "Loading administrators...",
+  "Tài khoản gốc": "Root account",
+  "Không có quản trị viên phù hợp": "No matching administrators",
+  "Hành động này không thể hoàn tác.": "This action cannot be undone.",
+  "Bạn có chắc muốn xóa tài khoản admin này?":
+    "Are you sure you want to delete this admin account?",
+  "Hủy": "Cancel",
+  "Thêm": "Add",
+  "Họ tên": "Full name",
+  "Tối thiểu 6 ký tự": "At least 6 characters",
+  "Mã số": "Code",
+  "Tên đăng nhập": "Username",
+  "Số điện thoại": "Phone number",
+  "Trường": "School",
+  "Ngày sinh": "Date of birth",
+  "Giới tính": "Gender",
+  "Số lớp": "Class count",
+  "Đề thi": "Exams",
+  "Điểm trung bình": "Average score",
+  "Trạng thái tài khoản": "Account status",
+  "Trạng thái hoạt động": "Activity status",
+  "Ngày tạo": "Created date",
+  "Danh sách Học viên": "Student list",
+  "Danh sách Giáo viên": "Teacher list",
+  "Tìm học sinh theo tên, mã hoặc email...":
+    "Search students by name, code, or email...",
+  "Tìm giáo viên theo tên, mã hoặc email...":
+    "Search teachers by name, code, or email...",
+  "Sửa học sinh": "Edit student",
+  "Sửa giáo viên": "Edit teacher",
+  "Chưa có học sinh phù hợp.": "No matching students.",
+  "Chưa có giáo viên phù hợp.": "No matching teachers.",
+  "Đang tải dữ liệu học sinh...": "Loading students...",
+  "Đang tải dữ liệu giáo viên...": "Loading teachers...",
+  "Học sinh sẽ bị xóa khỏi danh sách quản lý.":
+    "The student will be removed from the management list.",
+  "Giáo viên sẽ bị xóa khỏi danh sách quản lý.":
+    "The teacher will be removed from the management list.",
+  "Bạn có chắc muốn xóa học sinh này?":
+    "Are you sure you want to delete this student?",
+  "Bạn có chắc muốn xóa giáo viên này?":
+    "Are you sure you want to delete this teacher?",
+  "Quản lý Bài thi": "Exam management",
+  "Tìm bài thi, lớp hoặc giáo viên...":
+    "Search exams, classes, or teachers...",
+  "Tổng đề thi": "Total exams",
+  "bài thi trong hệ thống": "exams in the system",
+  "Lượt hoàn thành": "Completed attempts",
+  "bài làm đã nộp": "submitted attempts",
+  "Bài thi đang mở": "Open exams",
+  "đã xuất bản và hoạt động": "published and active",
+  "Bài thi trên hệ thống": "System exams",
+  "Tên bài thi": "Exam name",
+  "Phân loại": "Type",
+  "Câu hỏi": "Questions",
+  "Lượt làm": "Attempts",
+  "Điểm TB": "Avg. score",
+  "Chưa có bài thi phù hợp.": "No matching exams.",
+  "Đang tải dữ liệu bài thi...": "Loading exams...",
+  "Bài thi và dữ liệu làm bài liên quan sẽ bị xóa.":
+    "The exam and related attempt data will be deleted.",
+  "Bạn có chắc muốn xóa bài thi này?":
+    "Are you sure you want to delete this exam?",
+  "Tên": "Name",
+  "Người tạo": "Creator",
+  "Sửa đổi": "Modified",
+  "Chưa có tài liệu phù hợp.": "No matching documents.",
+  "Đang tải dữ liệu tài liệu...": "Loading documents...",
+  "Đóng form xuất tài liệu": "Close export form",
+  "Đóng form nhập tài liệu": "Close import form",
+  "Chọn phân loại và tải file PDF hoặc DOCX lên hệ thống.":
+    "Choose a type and upload a PDF or DOCX file to the system.",
+  "Tên tài liệu": "Document name",
+  "Để trống sẽ dùng tên file": "Leave blank to use the file name",
+  "Mô tả ngắn": "Short description",
+  "Mô tả ngắn cho tài liệu": "Short description for the document",
+  "File tài liệu": "Document file",
+  "Nhập": "Import",
+  "Xuất": "Export",
+};
+
+const viToJa: Record<string, string> = {
+  "Danh mục": "メニュー",
+  "Quản lý": "管理",
+  "Bảng điều khiển": "ダッシュボード",
+  "Giáo viên": "教師",
+  "Học sinh": "生徒",
+  "Quản trị viên": "管理者",
+  "giáo viên": "教師",
+  "học sinh": "生徒",
+  "khách": "訪問者",
+  "Lớp": "クラス",
+  "lớp": "クラス",
+  "Lớp học": "クラス",
+  "Bài thi": "試験",
+  "Bài làm": "受験",
+  "bài làm": "受験",
+  "Tài liệu": "資料",
+  "Nhắn tin": "メッセージ",
+  "Cài đặt": "設定",
+  "Thông báo": "通知",
+  "Tài khoản": "アカウント",
+  "Đăng xuất": "ログアウト",
+  "Đang đăng xuất...": "ログアウト中...",
+  "Cài đặt Hệ thống": "システム設定",
+  "Lưu cài đặt": "設定を保存",
+  "Cài đặt chung": "一般設定",
+  "Thông tin tài khoản": "アカウント情報",
+  "Thông tin tài khoản quản trị viên đang đăng nhập.":
+    "ログイン中の管理者アカウント情報です。",
+  "Thông tin và Định dạng": "情報と形式",
+  "Ngôn ngữ": "言語",
+  "Ngôn ngữ mặc định": "既定の言語",
+  "Tiếng Việt": "ベトナム語",
+  "English": "英語",
+  "Tiếng Nhật": "日本語",
+  "Tiếng Trung (giản thể)": "中国語（簡体字）",
+  "Múi giờ": "タイムゾーン",
+  "Thông báo trong hệ thống": "システム通知",
+  "Bật hoặc tắt từng loại thông báo xuất hiện ở chuông góc trên.":
+    "右上のベルに表示する通知の種類をオンまたはオフにします。",
+  "Tin nhắn mới": "新しいメッセージ",
+  "Hiện badge và thông báo khi có tin nhắn mới.":
+    "新しいメッセージのバッジと通知を表示します。",
+  "Thêm quản trị viên": "管理者を追加",
+  "Thông báo sau khi tạo tài khoản quản trị viên mới.":
+    "新しい管理者アカウント作成後に通知します。",
+  "Nhập tài liệu": "資料をインポート",
+  "Thông báo khi upload tài liệu PDF hoặc DOCX thành công.":
+    "PDFまたはDOCX資料のアップロード成功時に通知します。",
+  "Xuất tài liệu": "資料をエクスポート",
+  "Thông báo khi tải tài liệu về máy.":
+    "資料のダウンロード時に通知します。",
+  "Xuất dữ liệu": "データをエクスポート",
+  "Thông báo khi xuất danh sách học sinh hoặc giáo viên.":
+    "生徒または教師リストのエクスポート時に通知します。",
+  "Thông báo hệ thống": "システム通知",
+  "Các thông báo vận hành khác của dashboard admin.":
+    "管理ダッシュボードのその他の運用通知です。",
+  "Vai trò": "役割",
+  "Tìm theo tên, email, vai trò hoặc tag...":
+    "名前、メール、役割、タグで検索...",
+  "Tag": "タグ",
+  "Toàn quyền": "全権限",
+  "Chưa phân quyền": "未割り当て",
+  "Tài khoản gốc": "ルートアカウント",
+  "Tên đăng nhập": "ユーザー名",
+  "Email": "メール",
+  "Số điện thoại": "電話番号",
+  "Đăng nhập gần nhất": "最終ログイン",
+  "Ngày tạo": "作成日",
+  "Chưa cập nhật": "未更新",
+  "Chưa có": "なし",
+  "Sửa thông tin": "情報を編集",
+  "Lưu thông tin": "情報を保存",
+  "Đang lưu...": "保存中...",
+  "Họ tên": "氏名",
+  "Họ tên không được để trống.": "氏名は必須です。",
+  "Đã lưu thông tin tài khoản.": "アカウント情報を保存しました。",
+  "Phân quyền": "権限設定",
+  "Phân quyền quản trị viên": "管理者の権限設定",
+  "Chọn các khu vực mà quản trị viên này được phép quản lý trong hệ thống.":
+    "この管理者がシステム内で管理できる領域を選択します。",
+  "Tên quản trị viên": "管理者名",
+  "Phạm vi quản lý": "管理範囲",
+  "Lưu phân quyền": "権限を保存",
+  "Đã lưu phân quyền quản trị viên.": "管理者権限を保存しました。",
+  "Đóng form phân quyền": "権限フォームを閉じる",
+  "User mới": "新規ユーザー",
+  "Tổng user": "総ユーザー数",
+  "so với tháng trước": "前月比",
+  "tổng tài khoản hệ thống": "システム総アカウント数",
+  "Lưu lượng làm bài": "受験トラフィック",
+  "Số lượt bắt đầu bài thi theo tháng": "月別の受験開始数",
+  "Số lượt bắt đầu bài thi theo ngày (30 ngày)": "日別の受験開始数（30日）",
+  "Số lượt bắt đầu bài thi theo ngày (7 ngày)": "日別の受験開始数（7日）",
+  "Phổ điểm năm nay": "今年のスコア分布",
+  "Phổ điểm 30 ngày": "30日間のスコア分布",
+  "Phổ điểm tuần": "週間スコア分布",
+  "Phổ điểm nhiều nhất": "最多スコア帯",
+  "Chưa có dữ liệu năm nay": "今年のデータはありません",
+  "Chưa có dữ liệu 30 ngày qua": "過去30日のデータはありません",
+  "Chưa có dữ liệu tuần này": "今週のデータはありません",
+  "Kết quả thi mới nhất": "最新の試験結果",
+  "Mã bài thi": "試験コード",
+  "Kỳ thi": "試験",
+  "Ngày nộp": "提出日",
+  "Điểm số": "スコア",
+  "Đánh giá": "評価",
+  "Chưa có kết quả thi": "試験結果はありません",
+  "Số học sinh": "生徒数",
+  "Hoàn thành": "完了",
+  "Cần cải thiện": "改善が必要",
+  "Tổng giáo viên": "教師総数",
+  "Tổng học sinh": "生徒総数",
+  "Học sinh mới": "新規生徒",
+  "Đề thi đã tạo": "作成済み試験",
+  "Lớp đang quản lý": "管理中のクラス",
+  "Tổng số lớp học": "クラス総数",
+  "Tổng số học sinh": "生徒総数",
+  "có tương tác trong 1 giờ qua": "過去1時間にアクティブ",
+  "trong tháng này": "今月",
+  "không thể đăng nhập": "ログイン不可",
+  "từ tài khoản giáo viên": "教師アカウントから",
+  "lớp do giáo viên tạo": "教師が作成したクラス",
+  "trong tất cả lớp": "全クラス合計",
+  "tài liệu đã tạo": "作成済み資料",
+  "lượt làm bài": "受験回数",
+  "trên bài đã nộp": "提出済み答案から",
+  "có thể xem": "閲覧可能",
+  "Khách truy cập": "訪問者",
+  "Phiên truy cập": "セッション",
+  "Tất cả": "すべて",
+  "Tất cả trạng thái": "すべてのステータス",
+  "Hoạt động": "アクティブ",
+  "Không hoạt động": "非アクティブ",
+  "Đang hoạt động": "アクティブ",
+  "Vô hiệu hóa": "無効",
+  "Bị khóa": "ロック済み",
+  "Chưa xác định": "不明",
+  "Không rõ": "不明",
+  "Chưa từng": "未ログイン",
+  "Hệ thống": "システム",
+  "Trong lớp": "クラス内",
+  "Không gắn lớp": "クラス未設定",
+  "Không có mô tả": "説明なし",
+  "Bản nháp": "下書き",
+  "Đã xuất bản": "公開済み",
+  "Đã nộp": "提出済み",
+  "Đang làm": "進行中",
+  "Đang mở": "公開中",
+  "Đã ẩn": "非表示",
+  "Tổng quản trị viên": "管理者総数",
+  "Có tương tác trong 1 giờ qua": "過去1時間にアクティブ",
+  "Không thể đăng nhập": "ログイン不可",
+  "Tìm theo tên, email hoặc vai trò...": "名前、メール、役割で検索...",
+  "Đăng nhập cuối": "最終ログイン",
+  "Trạng thái": "ステータス",
+  "Thao tác": "操作",
+  "Đang tải danh sách admin...": "管理者一覧を読み込み中...",
+  "Không có quản trị viên phù hợp": "一致する管理者はいません",
+  "Hủy": "キャンセル",
+  "Thêm": "追加",
+  "Tối thiểu 6 ký tự": "6文字以上",
+  "Mã số": "コード",
+  "Trường": "学校",
+  "Ngày sinh": "生年月日",
+  "Giới tính": "性別",
+  "Số lớp": "クラス数",
+  "Đề thi": "試験",
+  "Điểm trung bình": "平均点",
+  "Trạng thái tài khoản": "アカウント状態",
+  "Trạng thái hoạt động": "活動状態",
+  "Danh sách Học viên": "生徒一覧",
+  "Danh sách Giáo viên": "教師一覧",
+  "Tìm học sinh theo tên, mã hoặc email...":
+    "名前、コード、メールで生徒を検索...",
+  "Tìm giáo viên theo tên, mã hoặc email...":
+    "名前、コード、メールで教師を検索...",
+  "Sửa học sinh": "生徒を編集",
+  "Sửa giáo viên": "教師を編集",
+  "Chưa có học sinh phù hợp.": "一致する生徒はいません。",
+  "Chưa có giáo viên phù hợp.": "一致する教師はいません。",
+  "Đang tải dữ liệu học sinh...": "生徒データを読み込み中...",
+  "Đang tải dữ liệu giáo viên...": "教師データを読み込み中...",
+  "Quản lý Bài thi": "試験管理",
+  "Tìm bài thi, lớp hoặc giáo viên...": "試験、クラス、教師を検索...",
+  "Tổng đề thi": "試験総数",
+  "bài thi trong hệ thống": "システム内の試験",
+  "Lượt hoàn thành": "完了回数",
+  "bài làm đã nộp": "提出済み答案",
+  "Bài thi đang mở": "公開中の試験",
+  "đã xuất bản và hoạt động": "公開済みで有効",
+  "Bài thi trên hệ thống": "システム試験",
+  "Tên bài thi": "試験名",
+  "Phân loại": "種類",
+  "Câu hỏi": "問題",
+  "Lượt làm": "受験回数",
+  "Điểm TB": "平均点",
+  "Chưa có bài thi phù hợp.": "一致する試験はありません。",
+  "Đang tải dữ liệu bài thi...": "試験データを読み込み中...",
+  "Tên": "名前",
+  "Người tạo": "作成者",
+  "Sửa đổi": "更新日時",
+  "Chưa có tài liệu phù hợp.": "一致する資料はありません。",
+  "Đang tải dữ liệu tài liệu...": "資料データを読み込み中...",
+  "Nhập": "インポート",
+  "Xuất": "エクスポート",
+  "Đăng nhập": "ログイン",
+  "Mật khẩu": "パスワード",
+};
+
+const viToZhCn: Record<string, string> = {
+  "Danh mục": "菜单",
+  "Quản lý": "管理",
+  "Bảng điều khiển": "仪表盘",
+  "Giáo viên": "教师",
+  "Học sinh": "学生",
+  "Quản trị viên": "管理员",
+  "giáo viên": "教师",
+  "học sinh": "学生",
+  "khách": "访客",
+  "Lớp": "班级",
+  "lớp": "班级",
+  "Lớp học": "班级",
+  "Bài thi": "考试",
+  "Bài làm": "答卷",
+  "bài làm": "答卷",
+  "Tài liệu": "资料",
+  "Nhắn tin": "消息",
+  "Cài đặt": "设置",
+  "Thông báo": "通知",
+  "Tài khoản": "账户",
+  "Đăng xuất": "退出登录",
+  "Đang đăng xuất...": "正在退出...",
+  "Cài đặt Hệ thống": "系统设置",
+  "Lưu cài đặt": "保存设置",
+  "Cài đặt chung": "常规设置",
+  "Thông tin tài khoản": "账户信息",
+  "Thông tin tài khoản quản trị viên đang đăng nhập.":
+    "当前登录管理员账户的信息。",
+  "Thông tin và Định dạng": "信息与格式",
+  "Ngôn ngữ": "语言",
+  "Ngôn ngữ mặc định": "默认语言",
+  "Tiếng Việt": "越南语",
+  "English": "英语",
+  "Tiếng Nhật": "日语",
+  "Tiếng Trung (giản thể)": "中文（简体）",
+  "Múi giờ": "时区",
+  "Thông báo trong hệ thống": "系统通知",
+  "Bật hoặc tắt từng loại thông báo xuất hiện ở chuông góc trên.":
+    "开启或关闭右上角铃铛中显示的通知类型。",
+  "Tin nhắn mới": "新消息",
+  "Hiện badge và thông báo khi có tin nhắn mới.":
+    "有新消息时显示徽标和通知。",
+  "Thêm quản trị viên": "添加管理员",
+  "Thông báo sau khi tạo tài khoản quản trị viên mới.":
+    "创建新管理员账户后通知。",
+  "Nhập tài liệu": "导入资料",
+  "Thông báo khi upload tài liệu PDF hoặc DOCX thành công.":
+    "PDF 或 DOCX 资料上传成功时通知。",
+  "Xuất tài liệu": "导出资料",
+  "Thông báo khi tải tài liệu về máy.":
+    "资料下载到本机时通知。",
+  "Xuất dữ liệu": "导出数据",
+  "Thông báo khi xuất danh sách học sinh hoặc giáo viên.":
+    "导出学生或教师名单时通知。",
+  "Thông báo hệ thống": "系统通知",
+  "Các thông báo vận hành khác của dashboard admin.":
+    "管理仪表盘的其他运行通知。",
+  "Vai trò": "角色",
+  "Tìm theo tên, email, vai trò hoặc tag...":
+    "按姓名、邮箱、角色或标签搜索...",
+  "Tag": "标签",
+  "Toàn quyền": "全部权限",
+  "Chưa phân quyền": "未分配权限",
+  "Tài khoản gốc": "根账户",
+  "Tên đăng nhập": "用户名",
+  "Email": "邮箱",
+  "Số điện thoại": "电话号码",
+  "Đăng nhập gần nhất": "最近登录",
+  "Ngày tạo": "创建日期",
+  "Chưa cập nhật": "未更新",
+  "Chưa có": "暂无",
+  "Sửa thông tin": "编辑信息",
+  "Lưu thông tin": "保存信息",
+  "Đang lưu...": "正在保存...",
+  "Họ tên": "姓名",
+  "Họ tên không được để trống.": "姓名不能为空。",
+  "Đã lưu thông tin tài khoản.": "账户信息已保存。",
+  "Phân quyền": "分配权限",
+  "Phân quyền quản trị viên": "管理员权限",
+  "Chọn các khu vực mà quản trị viên này được phép quản lý trong hệ thống.":
+    "选择该管理员可在系统中管理的区域。",
+  "Tên quản trị viên": "管理员姓名",
+  "Phạm vi quản lý": "管理范围",
+  "Lưu phân quyền": "保存权限",
+  "Đã lưu phân quyền quản trị viên.": "管理员权限已保存。",
+  "Đóng form phân quyền": "关闭权限表单",
+  "User mới": "新用户",
+  "Tổng user": "用户总数",
+  "so với tháng trước": "较上月",
+  "tổng tài khoản hệ thống": "系统账户总数",
+  "Lưu lượng làm bài": "考试流量",
+  "Số lượt bắt đầu bài thi theo tháng": "按月统计的考试开始次数",
+  "Số lượt bắt đầu bài thi theo ngày (30 ngày)": "按日统计的考试开始次数（30天）",
+  "Số lượt bắt đầu bài thi theo ngày (7 ngày)": "按日统计的考试开始次数（7天）",
+  "Phổ điểm năm nay": "今年分数分布",
+  "Phổ điểm 30 ngày": "30天分数分布",
+  "Phổ điểm tuần": "本周分数分布",
+  "Phổ điểm nhiều nhất": "最高频分数段",
+  "Chưa có dữ liệu năm nay": "今年暂无数据",
+  "Chưa có dữ liệu 30 ngày qua": "过去30天暂无数据",
+  "Chưa có dữ liệu tuần này": "本周暂无数据",
+  "Kết quả thi mới nhất": "最新考试结果",
+  "Mã bài thi": "考试代码",
+  "Kỳ thi": "考试",
+  "Ngày nộp": "提交日期",
+  "Điểm số": "分数",
+  "Đánh giá": "评价",
+  "Chưa có kết quả thi": "暂无考试结果",
+  "Số học sinh": "学生数",
+  "Hoàn thành": "已完成",
+  "Cần cải thiện": "需要改进",
+  "Tổng giáo viên": "教师总数",
+  "Tổng học sinh": "学生总数",
+  "Học sinh mới": "新学生",
+  "Đề thi đã tạo": "已创建考试",
+  "Lớp đang quản lý": "管理中的班级",
+  "Tổng số lớp học": "班级总数",
+  "Tổng số học sinh": "学生总数",
+  "có tương tác trong 1 giờ qua": "过去1小时有活动",
+  "trong tháng này": "本月",
+  "không thể đăng nhập": "无法登录",
+  "từ tài khoản giáo viên": "来自教师账户",
+  "lớp do giáo viên tạo": "教师创建的班级",
+  "trong tất cả lớp": "所有班级",
+  "tài liệu đã tạo": "已创建资料",
+  "lượt làm bài": "答题次数",
+  "trên bài đã nộp": "基于已提交答卷",
+  "có thể xem": "可查看",
+  "Khách truy cập": "访客",
+  "Phiên truy cập": "会话",
+  "Tất cả": "全部",
+  "Tất cả trạng thái": "全部状态",
+  "Hoạt động": "活跃",
+  "Không hoạt động": "非活跃",
+  "Đang hoạt động": "活跃",
+  "Vô hiệu hóa": "已禁用",
+  "Bị khóa": "已锁定",
+  "Chưa xác định": "未知",
+  "Không rõ": "未知",
+  "Chưa từng": "从未",
+  "Hệ thống": "系统",
+  "Trong lớp": "班级内",
+  "Không gắn lớp": "未分配班级",
+  "Không có mô tả": "无描述",
+  "Bản nháp": "草稿",
+  "Đã xuất bản": "已发布",
+  "Đã nộp": "已提交",
+  "Đang làm": "进行中",
+  "Đang mở": "开放中",
+  "Đã ẩn": "已隐藏",
+  "Tổng quản trị viên": "管理员总数",
+  "Có tương tác trong 1 giờ qua": "过去1小时有活动",
+  "Không thể đăng nhập": "无法登录",
+  "Tìm theo tên, email hoặc vai trò...": "按姓名、邮箱或角色搜索...",
+  "Đăng nhập cuối": "最后登录",
+  "Trạng thái": "状态",
+  "Thao tác": "操作",
+  "Đang tải danh sách admin...": "正在加载管理员列表...",
+  "Không có quản trị viên phù hợp": "没有匹配的管理员",
+  "Hủy": "取消",
+  "Thêm": "添加",
+  "Tối thiểu 6 ký tự": "至少6个字符",
+  "Mã số": "代码",
+  "Trường": "学校",
+  "Ngày sinh": "出生日期",
+  "Giới tính": "性别",
+  "Số lớp": "班级数",
+  "Đề thi": "考试",
+  "Điểm trung bình": "平均分",
+  "Trạng thái tài khoản": "账户状态",
+  "Trạng thái hoạt động": "活动状态",
+  "Danh sách Học viên": "学生列表",
+  "Danh sách Giáo viên": "教师列表",
+  "Tìm học sinh theo tên, mã hoặc email...": "按姓名、代码或邮箱搜索学生...",
+  "Tìm giáo viên theo tên, mã hoặc email...": "按姓名、代码或邮箱搜索教师...",
+  "Sửa học sinh": "编辑学生",
+  "Sửa giáo viên": "编辑教师",
+  "Chưa có học sinh phù hợp.": "没有匹配的学生。",
+  "Chưa có giáo viên phù hợp.": "没有匹配的教师。",
+  "Đang tải dữ liệu học sinh...": "正在加载学生数据...",
+  "Đang tải dữ liệu giáo viên...": "正在加载教师数据...",
+  "Quản lý Bài thi": "考试管理",
+  "Tìm bài thi, lớp hoặc giáo viên...": "搜索考试、班级或教师...",
+  "Tổng đề thi": "考试总数",
+  "bài thi trong hệ thống": "系统中的考试",
+  "Lượt hoàn thành": "完成次数",
+  "bài làm đã nộp": "已提交答卷",
+  "Bài thi đang mở": "开放中的考试",
+  "đã xuất bản và hoạt động": "已发布且有效",
+  "Bài thi trên hệ thống": "系统考试",
+  "Tên bài thi": "考试名称",
+  "Phân loại": "类型",
+  "Câu hỏi": "题目",
+  "Lượt làm": "答题次数",
+  "Điểm TB": "平均分",
+  "Chưa có bài thi phù hợp.": "没有匹配的考试。",
+  "Đang tải dữ liệu bài thi...": "正在加载考试数据...",
+  "Tên": "名称",
+  "Người tạo": "创建者",
+  "Sửa đổi": "修改时间",
+  "Chưa có tài liệu phù hợp.": "没有匹配的资料。",
+  "Đang tải dữ liệu tài liệu...": "正在加载资料数据...",
+  "Nhập": "导入",
+  "Xuất": "导出",
+  "Đăng nhập": "登录",
+  "Mật khẩu": "密码",
+};
+
+const viToZhTw: Record<string, string> = {
+  "Danh mục": "選單",
+  "Quản lý": "管理",
+  "Bảng điều khiển": "儀表板",
+  "Giáo viên": "教師",
+  "Học sinh": "學生",
+  "Quản trị viên": "管理員",
+  "giáo viên": "教師",
+  "học sinh": "學生",
+  "khách": "訪客",
+  "Lớp": "班級",
+  "lớp": "班級",
+  "Lớp học": "班級",
+  "Bài thi": "考試",
+  "Bài làm": "答卷",
+  "bài làm": "答卷",
+  "Tài liệu": "資料",
+  "Nhắn tin": "訊息",
+  "Cài đặt": "設定",
+  "Thông báo": "通知",
+  "Tài khoản": "帳戶",
+  "Đăng xuất": "登出",
+  "Đang đăng xuất...": "正在登出...",
+  "Cài đặt Hệ thống": "系統設定",
+  "Lưu cài đặt": "儲存設定",
+  "Cài đặt chung": "一般設定",
+  "Thông tin tài khoản": "帳戶資訊",
+  "Thông tin tài khoản quản trị viên đang đăng nhập.":
+    "目前登入管理員帳戶的資訊。",
+  "Thông tin và Định dạng": "資訊與格式",
+  "Ngôn ngữ": "語言",
+  "Ngôn ngữ mặc định": "預設語言",
+  "Tiếng Việt": "越南語",
+  "English": "英語",
+  "Tiếng Nhật": "日語",
+  "Tiếng Trung (giản thể)": "中文（簡體）",
+  "Múi giờ": "時區",
+  "Thông báo trong hệ thống": "系統通知",
+  "Bật hoặc tắt từng loại thông báo xuất hiện ở chuông góc trên.":
+    "開啟或關閉右上角鈴鐺顯示的通知類型。",
+  "Tin nhắn mới": "新訊息",
+  "Hiện badge và thông báo khi có tin nhắn mới.":
+    "有新訊息時顯示徽章與通知。",
+  "Thêm quản trị viên": "新增管理員",
+  "Thông báo sau khi tạo tài khoản quản trị viên mới.":
+    "建立新的管理員帳戶後通知。",
+  "Nhập tài liệu": "匯入資料",
+  "Thông báo khi upload tài liệu PDF hoặc DOCX thành công.":
+    "PDF 或 DOCX 資料上傳成功時通知。",
+  "Xuất tài liệu": "匯出資料",
+  "Thông báo khi tải tài liệu về máy.":
+    "資料下載到本機時通知。",
+  "Xuất dữ liệu": "匯出資料",
+  "Thông báo khi xuất danh sách học sinh hoặc giáo viên.":
+    "匯出學生或教師名單時通知。",
+  "Thông báo hệ thống": "系統通知",
+  "Các thông báo vận hành khác của dashboard admin.":
+    "管理儀表板的其他運行通知。",
+  "Vai trò": "角色",
+  "Tìm theo tên, email, vai trò hoặc tag...":
+    "依姓名、電子郵件、角色或標籤搜尋...",
+  "Tag": "標籤",
+  "Toàn quyền": "全部權限",
+  "Chưa phân quyền": "尚未分配權限",
+  "Tài khoản gốc": "根帳戶",
+  "Tên đăng nhập": "使用者名稱",
+  "Email": "電子郵件",
+  "Số điện thoại": "電話號碼",
+  "Đăng nhập gần nhất": "最近登入",
+  "Ngày tạo": "建立日期",
+  "Chưa cập nhật": "尚未更新",
+  "Chưa có": "暫無",
+  "Sửa thông tin": "編輯資訊",
+  "Lưu thông tin": "儲存資訊",
+  "Đang lưu...": "正在儲存...",
+  "Họ tên": "姓名",
+  "Họ tên không được để trống.": "姓名不得為空。",
+  "Đã lưu thông tin tài khoản.": "帳戶資訊已儲存。",
+  "Phân quyền": "分配權限",
+  "Phân quyền quản trị viên": "管理員權限",
+  "Chọn các khu vực mà quản trị viên này được phép quản lý trong hệ thống.":
+    "選擇此管理員可在系統中管理的區域。",
+  "Tên quản trị viên": "管理員姓名",
+  "Phạm vi quản lý": "管理範圍",
+  "Lưu phân quyền": "儲存權限",
+  "Đã lưu phân quyền quản trị viên.": "管理員權限已儲存。",
+  "Đóng form phân quyền": "關閉權限表單",
+  "User mới": "新使用者",
+  "Tổng user": "使用者總數",
+  "so với tháng trước": "較上月",
+  "tổng tài khoản hệ thống": "系統帳戶總數",
+  "Lưu lượng làm bài": "考試流量",
+  "Số lượt bắt đầu bài thi theo tháng": "按月統計的考試開始次數",
+  "Số lượt bắt đầu bài thi theo ngày (30 ngày)": "按日統計的考試開始次數（30天）",
+  "Số lượt bắt đầu bài thi theo ngày (7 ngày)": "按日統計的考試開始次數（7天）",
+  "Phổ điểm năm nay": "今年分數分布",
+  "Phổ điểm 30 ngày": "30天分數分布",
+  "Phổ điểm tuần": "本週分數分布",
+  "Phổ điểm nhiều nhất": "最高頻分數區間",
+  "Chưa có dữ liệu năm nay": "今年尚無資料",
+  "Chưa có dữ liệu 30 ngày qua": "過去30天尚無資料",
+  "Chưa có dữ liệu tuần này": "本週尚無資料",
+  "Kết quả thi mới nhất": "最新考試結果",
+  "Mã bài thi": "考試代碼",
+  "Kỳ thi": "考試",
+  "Ngày nộp": "提交日期",
+  "Điểm số": "分數",
+  "Đánh giá": "評估",
+  "Chưa có kết quả thi": "尚無考試結果",
+  "Số học sinh": "學生數",
+  "Hoàn thành": "已完成",
+  "Cần cải thiện": "需要改善",
+  "Tổng giáo viên": "教師總數",
+  "Tổng học sinh": "學生總數",
+  "Học sinh mới": "新學生",
+  "Đề thi đã tạo": "已建立考試",
+  "Lớp đang quản lý": "管理中的班級",
+  "Tổng số lớp học": "班級總數",
+  "Tổng số học sinh": "學生總數",
+  "có tương tác trong 1 giờ qua": "過去1小時有活動",
+  "trong tháng này": "本月",
+  "không thể đăng nhập": "無法登入",
+  "từ tài khoản giáo viên": "來自教師帳戶",
+  "lớp do giáo viên tạo": "教師建立的班級",
+  "trong tất cả lớp": "所有班級",
+  "tài liệu đã tạo": "已建立資料",
+  "lượt làm bài": "答題次數",
+  "trên bài đã nộp": "基於已提交答卷",
+  "có thể xem": "可檢視",
+  "Khách truy cập": "訪客",
+  "Phiên truy cập": "工作階段",
+  "Tất cả": "全部",
+  "Tất cả trạng thái": "全部狀態",
+  "Hoạt động": "活躍",
+  "Không hoạt động": "非活躍",
+  "Đang hoạt động": "活躍",
+  "Vô hiệu hóa": "已停用",
+  "Bị khóa": "已鎖定",
+  "Chưa xác định": "未知",
+  "Không rõ": "未知",
+  "Chưa từng": "從未",
+  "Hệ thống": "系統",
+  "Trong lớp": "班級內",
+  "Không gắn lớp": "未分配班級",
+  "Không có mô tả": "無描述",
+  "Bản nháp": "草稿",
+  "Đã xuất bản": "已發佈",
+  "Đã nộp": "已提交",
+  "Đang làm": "進行中",
+  "Đang mở": "開放中",
+  "Đã ẩn": "已隱藏",
+  "Tổng quản trị viên": "管理員總數",
+  "Có tương tác trong 1 giờ qua": "過去1小時有活動",
+  "Không thể đăng nhập": "無法登入",
+  "Tìm theo tên, email hoặc vai trò...": "依姓名、電子郵件或角色搜尋...",
+  "Đăng nhập cuối": "最後登入",
+  "Trạng thái": "狀態",
+  "Thao tác": "操作",
+  "Đang tải danh sách admin...": "正在載入管理員列表...",
+  "Không có quản trị viên phù hợp": "沒有符合的管理員",
+  "Hủy": "取消",
+  "Thêm": "新增",
+  "Tối thiểu 6 ký tự": "至少6個字元",
+  "Mã số": "代碼",
+  "Trường": "學校",
+  "Ngày sinh": "出生日期",
+  "Giới tính": "性別",
+  "Số lớp": "班級數",
+  "Đề thi": "考試",
+  "Điểm trung bình": "平均分",
+  "Trạng thái tài khoản": "帳戶狀態",
+  "Trạng thái hoạt động": "活動狀態",
+  "Danh sách Học viên": "學生列表",
+  "Danh sách Giáo viên": "教師列表",
+  "Tìm học sinh theo tên, mã hoặc email...":
+    "依姓名、代碼或電子郵件搜尋學生...",
+  "Tìm giáo viên theo tên, mã hoặc email...":
+    "依姓名、代碼或電子郵件搜尋教師...",
+  "Sửa học sinh": "編輯學生",
+  "Sửa giáo viên": "編輯教師",
+  "Chưa có học sinh phù hợp.": "沒有符合的學生。",
+  "Chưa có giáo viên phù hợp.": "沒有符合的教師。",
+  "Đang tải dữ liệu học sinh...": "正在載入學生資料...",
+  "Đang tải dữ liệu giáo viên...": "正在載入教師資料...",
+  "Quản lý Bài thi": "考試管理",
+  "Tìm bài thi, lớp hoặc giáo viên...": "搜尋考試、班級或教師...",
+  "Tổng đề thi": "考試總數",
+  "bài thi trong hệ thống": "系統中的考試",
+  "Lượt hoàn thành": "完成次數",
+  "bài làm đã nộp": "已提交答卷",
+  "Bài thi đang mở": "開放中的考試",
+  "đã xuất bản và hoạt động": "已發佈且有效",
+  "Bài thi trên hệ thống": "系統考試",
+  "Tên bài thi": "考試名稱",
+  "Phân loại": "類型",
+  "Câu hỏi": "題目",
+  "Lượt làm": "答題次數",
+  "Điểm TB": "平均分",
+  "Chưa có bài thi phù hợp.": "沒有符合的考試。",
+  "Đang tải dữ liệu bài thi...": "正在載入考試資料...",
+  "Tên": "名稱",
+  "Người tạo": "建立者",
+  "Sửa đổi": "修改時間",
+  "Chưa có tài liệu phù hợp.": "沒有符合的資料。",
+  "Đang tải dữ liệu tài liệu...": "正在載入資料...",
+  "Nhập": "匯入",
+  "Xuất": "匯出",
+  "Đăng nhập": "登入",
+  "Mật khẩu": "密碼",
+};
+
+const supplementalTranslations = {
+  en: {
+    "Analysis": "Analytics",
+    "Analytics": "Analytics",
+    "CRM": "CRM",
+    "0 phiên": "0 sessions",
+    "Bạn": "You",
+    "Bạn không có quyền xem danh sách quản trị viên.":
+      "You do not have permission to view administrators.",
+    "Bắt đầu cuộc trò chuyện": "Start conversation",
+    "Bỏ ghim hội thoại": "Unpin conversation",
+    "Bộ lọc tài liệu": "Document filters",
+    "Chọn cuộc trò chuyện trước": "Select a conversation first",
+    "Chọn file PDF hoặc DOCX trước khi nhập.":
+      "Choose a PDF or DOCX file before importing.",
+    "Chọn lớp để nhập tài liệu trong lớp.":
+      "Choose a class before importing class documents.",
+    "Chọn lớp trước khi xuất tài liệu trong lớp.":
+      "Choose a class before exporting class documents.",
+    "Chọn tài liệu cần xuất.": "Choose documents to export.",
+    "Chưa có bài làm.": "No attempts yet.",
+    "Chưa có đề thi trong lớp.": "No exams in this class yet.",
+    "Chưa có đề thi.": "No exams yet.",
+    "Chưa có file": "No file",
+    "Chưa có lớp học.": "No classes yet.",
+    "Chưa có mô tả lớp học.": "No class description.",
+    "Chưa có tài liệu khả dụng.": "No available documents.",
+    "Chưa có tài liệu phù hợp để xuất.":
+      "No matching documents to export.",
+    "Chưa có tài liệu.": "No documents yet.",
+    "Chưa có tin nhắn": "No messages",
+    "Chưa gán giáo viên": "No teacher assigned",
+    "Chưa tham gia lớp học.": "Not enrolled in any classes yet.",
+    "Chuyển tiếp": "Forward",
+    "đã chọn": "selected",
+    "Đã nhập tài liệu": "Document imported",
+    "Đã thêm quản trị viên": "Administrator added",
+    "Đã xuất danh sách giáo viên": "Teacher list exported",
+    "Đã xuất danh sách học sinh": "Student list exported",
+    "Đã xuất tài liệu": "Documents exported",
+    "Đang tải dữ liệu chi tiết...": "Loading details...",
+    "Đang xóa...": "Deleting...",
+    "Đang xử lý...": "Processing...",
+    "Đặt lại": "Reset",
+    "Đặt lại mật khẩu": "Reset password",
+    "Địa chỉ Email": "Email address",
+    "Đóng": "Close",
+    "Đóng hồ sơ": "Close profile",
+    "Ghim hội thoại": "Pin conversation",
+    "Gửi tệp": "Send file",
+    "Gửi tin nhắn": "Send message",
+    "Hôm nay": "Today",
+    "Hôm qua": "Yesterday",
+    "Khác": "Other",
+    "Không đặt lại được mật khẩu.": "Could not reset password.",
+    "Không đọc được dữ liệu realtime.": "Could not read realtime data.",
+    "Không lấy được danh sách quản trị viên.":
+      "Could not load administrators.",
+    "Không lấy được dữ liệu CRM": "Could not load CRM data",
+    "Không lưu được tài khoản admin.": "Could not save admin account.",
+    "Không lưu được thông tin.": "Could not save information.",
+    "Không mở được tin nhắn.": "Could not open messages.",
+    "Không tải được chi tiết giáo viên.": "Could not load teacher details.",
+    "Không tải được chi tiết học sinh.": "Could not load student details.",
+    "Không thể chia sẻ tệp.": "Could not share file.",
+    "Không thể gửi tệp.": "Could not send file.",
+    "Không thể gửi tin nhắn.": "Could not send message.",
+    "Không thể kết nối máy chủ. Vui lòng thử lại.":
+      "Could not connect to the server. Please try again.",
+    "Không thể mở tin nhắn.": "Could not open messages.",
+    "Không thể nhập tài liệu.": "Could not import documents.",
+    "Không thể tải danh sách bài thi.": "Could not load exams.",
+    "Không thể tải danh sách giáo viên.": "Could not load teachers.",
+    "Không thể tải danh sách học sinh.": "Could not load students.",
+    "Không thể tải danh sách lớp học.": "Could not load classes.",
+    "Không thể tải danh sách lớp.": "Could not load classes.",
+    "Không thể tải danh sách tài liệu.": "Could not load documents.",
+    "Không thể tải file tài liệu về máy.": "Could not download document file.",
+    "Không thể tải lịch sử tin nhắn.": "Could not load message history.",
+    "Không thể tải tin nhắn.": "Could not load messages.",
+    "Không thể tạo cuộc trò chuyện.": "Could not create conversation.",
+    "Không thể thu hồi tin nhắn.": "Could not recall message.",
+    "Không thể xóa hội thoại.": "Could not delete conversation.",
+    "Không tìm thấy tài liệu đã chọn.": "Selected document was not found.",
+    "Không tìm thấy tài liệu phù hợp.": "No matching document found.",
+    "Không xóa được bài thi.": "Could not delete exam.",
+    "Không xóa được giáo viên.": "Could not delete teacher.",
+    "Không xóa được học sinh.": "Could not delete student.",
+    "Không xóa được tài khoản admin.": "Could not delete admin account.",
+    "Không xóa được tài khoản.": "Could not delete account.",
+    "Lịch sử hoạt động": "Activity history",
+    "Lịch sử trò chuyện": "Chat history",
+    "lớp đang tham gia": "joined classes",
+    "Mở danh sách tin nhắn": "Open message list",
+    "Mở hồ sơ": "Open profile",
+    "Mở mục tin nhắn để xem nội dung mới nhất.":
+      "Open Messages to view the latest content.",
+    "Mở tùy chọn hội thoại": "Open conversation options",
+    "Ngày gia nhập": "Join date",
+    "Ngoại tuyến": "Offline",
+    "Người dùng": "Users",
+    "Nhập tài liệu thành công.": "Document import succeeded.",
+    "Nhập tài liệu thất bại.": "Document import failed.",
+    "Nhập tin nhắn...": "Type a message...",
+    "Nữ": "Female",
+    "Socket chat bị lỗi.": "Chat socket error.",
+    "Sửa thông tin giáo viên": "Edit teacher information",
+    "Sửa thông tin học sinh": "Edit student information",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị.":
+      "This account has not been granted admin access by an Administrator.",
+    "Tài liệu này chưa có file để xuất.":
+      "This document has no file to export.",
+    "Tất cả tài liệu": "All documents",
+    "Tệp đính kèm": "Attachment",
+    "Thao tác thất bại. Vui lòng thử lại.":
+      "Action failed. Please try again.",
+    "Thu gọn danh sách tin nhắn": "Collapse message list",
+    "Thu hồi tin nhắn": "Recall message",
+    "Tìm kiếm cuộc trò chuyện...": "Search conversations...",
+    "Tìm kiếm tài liệu...": "Search documents...",
+    "Tìm lớp, mã lớp hoặc giáo viên...":
+      "Search classes, class codes, or teachers...",
+    "Tìm tài liệu...": "Search documents...",
+    "Tổng lớp học": "Total classes",
+    "Trang trước": "Previous page",
+    "Trực tuyến": "Online",
+    "Xóa hội thoại": "Delete conversation",
+    "Xóa tài khoản giáo viên": "Delete teacher account",
+    "Xóa tài khoản học sinh": "Delete student account",
+    "Xuất tài liệu thành công.": "Document export succeeded.",
+    "Xuất tài liệu thất bại.": "Document export failed.",
+    "Chi tiết Giáo viên": "Teacher details",
+    "Chi tiết Học sinh": "Student details",
+    "Thông tin liên hệ": "Contact information",
+    "Thông tin hệ thống": "System information",
+    "Mật khẩu mới": "New password",
+    "Tên lớp": "Class name",
+    "Điểm": "Score",
+    "Ngày tham gia": "Join date",
+    "Quản lý Lớp học": "Class management",
+    "Tất cả Lớp học": "All classes",
+    "Mã lớp": "Class code",
+    "Giáo viên phụ trách": "Teacher in charge",
+    "Lượt học sinh": "Student enrollments",
+    "Bài thi trong lớp": "Class exams",
+    "tất cả lớp trên hệ thống": "all classes in the system",
+    "lớp có thể tham gia": "classes available to join",
+    "theo thành viên lớp": "class memberships",
+    "bài thi thuộc lớp": "class-scoped exams",
+    "đã xuất bản và đang mở": "published and active",
+    "phạm vi hệ thống": "system scope",
+    "Phân tích": "Analytics",
+    "Chưa có lớp": "No classes",
+    "Chưa có lớp học phù hợp.": "No matching classes.",
+    "Đang tải dữ liệu lớp học...": "Loading classes...",
+    "Chọn cuộc trò chuyện": "Select a conversation",
+    "Chọn liên hệ bên trái để bắt đầu.":
+      "Select a contact on the left to start.",
+    "Chọn một liên hệ để nhắn tin realtime.":
+      "Select a contact to start realtime messaging.",
+    "Chưa có hội thoại nào trong danh sách để chuyển tiếp.":
+      "No conversations are available for forwarding.",
+    "Chưa có tệp được chia sẻ.": "No shared files.",
+    "Chưa lấy được dữ liệu CRM": "Could not load CRM data",
+    "Chuyển tiếp tin nhắn": "Forward message",
+    "Cũ cập nhật trước": "Oldest updated first",
+    "Đang gửi": "Sending",
+    "Đang tải lớp...": "Loading classes...",
+    "Đang tải tin nhắn...": "Loading messages...",
+    "Dung lượng chữ": "Content length",
+    "Hồ sơ": "Profile",
+    "Không tìm thấy người dùng phù hợp.": "No matching users found.",
+    "Liên hệ": "Contacts",
+    "Mới cập nhật trước": "Recently updated first",
+    "Quản lý Tài liệu": "Document management",
+    "Sắp xếp": "Sort",
+    "Tên A-Z": "Name A-Z",
+    "Tên Z-A": "Name Z-A",
+    "Tệp & phương tiện đã chia sẻ": "Shared files & media",
+    "Thông tin liên hệ sẽ hiển thị ở đây.":
+      "Contact information will appear here.",
+    "Thư mục": "Folders",
+    "Tin nhắn": "Messages",
+    "Tin nhắn và thao tác hệ thống sẽ xuất hiện ở đây.":
+      "Messages and system activity will appear here.",
+    "Xóa quản trị viên": "Delete administrator",
+  },
+  ja: {
+    "0 phiên": "0セッション",
+    "Bạn": "あなた",
+    "Bạn không có quyền xem danh sách quản trị viên。":
+      "管理者一覧を表示する権限がありません。",
+    "Bạn không có quyền xem danh sách quản trị viên.":
+      "管理者一覧を表示する権限がありません。",
+    "Bắt đầu cuộc trò chuyện": "会話を開始",
+    "Bỏ ghim hội thoại": "会話のピン留めを解除",
+    "Bộ lọc tài liệu": "資料フィルター",
+    "Chọn cuộc trò chuyện trước": "先に会話を選択してください",
+    "Chọn file PDF hoặc DOCX trước khi nhập。":
+      "インポート前にPDFまたはDOCXファイルを選択してください。",
+    "Chọn file PDF hoặc DOCX trước khi nhập.":
+      "インポート前にPDFまたはDOCXファイルを選択してください。",
+    "Chọn lớp để nhập tài liệu trong lớp。":
+      "クラス資料をインポートするクラスを選択してください。",
+    "Chọn lớp để nhập tài liệu trong lớp.":
+      "クラス資料をインポートするクラスを選択してください。",
+    "Chọn lớp trước khi xuất tài liệu trong lớp。":
+      "クラス資料をエクスポートする前にクラスを選択してください。",
+    "Chọn lớp trước khi xuất tài liệu trong lớp.":
+      "クラス資料をエクスポートする前にクラスを選択してください。",
+    "Chọn tài liệu cần xuất.": "エクスポートする資料を選択してください。",
+    "Chưa có bài làm.": "答案はまだありません。",
+    "Chưa có đề thi trong lớp.": "このクラスには試験がまだありません。",
+    "Chưa có đề thi.": "試験はまだありません。",
+    "Chưa có file": "ファイルなし",
+    "Chưa có lớp học.": "クラスはまだありません。",
+    "Chưa có mô tả lớp học.": "クラス説明はありません。",
+    "Chưa có tài liệu khả dụng.": "利用可能な資料はありません。",
+    "Chưa có tài liệu phù hợp để xuất。": "エクスポートできる資料がありません。",
+    "Chưa có tài liệu phù hợp để xuất.": "エクスポートできる資料がありません。",
+    "Chưa có tài liệu.": "資料はまだありません。",
+    "Chưa có tin nhắn": "メッセージはありません",
+    "Chưa gán giáo viên": "教師未割り当て",
+    "Chưa tham gia lớp học.": "まだクラスに参加していません。",
+    "Chuyển tiếp": "転送",
+    "đã chọn": "選択済み",
+    "Đã nhập tài liệu": "資料をインポートしました",
+    "Đã thêm quản trị viên": "管理者を追加しました",
+    "Đã xuất danh sách giáo viên": "教師一覧をエクスポートしました",
+    "Đã xuất danh sách học sinh": "生徒一覧をエクスポートしました",
+    "Đã xuất tài liệu": "資料をエクスポートしました",
+    "Đang tải dữ liệu chi tiết...": "詳細を読み込み中...",
+    "Đang xóa...": "削除中...",
+    "Đang xử lý...": "処理中...",
+    "Đặt lại": "リセット",
+    "Đặt lại mật khẩu": "パスワードをリセット",
+    "Địa chỉ Email": "メールアドレス",
+    "Đóng": "閉じる",
+    "Đóng hồ sơ": "プロフィールを閉じる",
+    "Ghim hội thoại": "会話をピン留め",
+    "Gửi tệp": "ファイルを送信",
+    "Gửi tin nhắn": "メッセージを送信",
+    "Hôm nay": "今日",
+    "Hôm qua": "昨日",
+    "Khác": "その他",
+    "Lịch sử hoạt động": "活動履歴",
+    "Lịch sử trò chuyện": "チャット履歴",
+    "lớp đang tham gia": "参加中のクラス",
+    "Mở danh sách tin nhắn": "メッセージ一覧を開く",
+    "Mở hồ sơ": "プロフィールを開く",
+    "Mở mục tin nhắn để xem nội dung mới nhất。":
+      "最新内容を見るにはメッセージを開いてください。",
+    "Mở mục tin nhắn để xem nội dung mới nhất.":
+      "最新内容を見るにはメッセージを開いてください。",
+    "Mở tùy chọn hội thoại": "会話オプションを開く",
+    "Ngày gia nhập": "参加日",
+    "Ngoại tuyến": "オフライン",
+    "Người dùng": "ユーザー",
+    "Nhập tài liệu thành công.": "資料のインポートに成功しました。",
+    "Nhập tài liệu thất bại.": "資料のインポートに失敗しました。",
+    "Nhập tin nhắn...": "メッセージを入力...",
+    "Nữ": "女性",
+    "Socket chat bị lỗi.": "チャットソケットエラーです。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị。":
+      "このアカウントには管理者権限が付与されていません。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị.":
+      "このアカウントには管理者権限が付与されていません。",
+    "Tất cả tài liệu": "すべての資料",
+    "Tệp đính kèm": "添付ファイル",
+    "Thu gọn danh sách tin nhắn": "メッセージ一覧を折りたたむ",
+    "Thu hồi tin nhắn": "メッセージを取り消す",
+    "Tìm kiếm cuộc trò chuyện...": "会話を検索...",
+    "Tìm kiếm tài liệu...": "資料を検索...",
+    "Tìm lớp, mã lớp hoặc giáo viên...": "クラス、コード、教師を検索...",
+    "Tìm tài liệu...": "資料を検索...",
+    "Tổng lớp học": "クラス総数",
+    "Trang trước": "前のページ",
+    "Trực tuyến": "オンライン",
+    "Xóa hội thoại": "会話を削除",
+    "Xuất tài liệu thành công.": "資料のエクスポートに成功しました。",
+    "Xuất tài liệu thất bại.": "資料のエクスポートに失敗しました。",
+    "Chi tiết Giáo viên": "教師詳細",
+    "Chi tiết Học sinh": "生徒詳細",
+    "Thông tin liên hệ": "連絡先情報",
+    "Thông tin hệ thống": "システム情報",
+    "Mật khẩu mới": "新しいパスワード",
+    "Tên lớp": "クラス名",
+    "Điểm": "点数",
+    "Ngày tham gia": "参加日",
+    "Quản lý Lớp học": "クラス管理",
+    "Tất cả Lớp học": "すべてのクラス",
+    "Mã lớp": "クラスコード",
+    "Giáo viên phụ trách": "担当教師",
+    "Lượt học sinh": "生徒登録数",
+    "Bài thi trong lớp": "クラス試験",
+    "tất cả lớp trên hệ thống": "システム内の全クラス",
+    "lớp có thể tham gia": "参加可能なクラス",
+    "theo thành viên lớp": "クラス登録に基づく",
+    "bài thi thuộc lớp": "クラス対象の試験",
+    "đã xuất bản và đang mở": "公開中かつ有効",
+    "phạm vi hệ thống": "システム範囲",
+    "Phân tích": "分析",
+    "Chưa có lớp": "クラスなし",
+    "Chưa có lớp học phù hợp.": "一致するクラスはありません。",
+    "Đang tải dữ liệu lớp học...": "クラスデータを読み込み中...",
+    "Chọn cuộc trò chuyện": "会話を選択",
+    "Chọn liên hệ bên trái để bắt đầu.":
+      "開始するには左側の連絡先を選択してください。",
+    "Chọn một liên hệ để nhắn tin realtime.":
+      "リアルタイムでメッセージを送る連絡先を選択してください。",
+    "Chưa có hội thoại nào trong danh sách để chuyển tiếp.":
+      "転送できる会話がありません。",
+    "Chưa có tệp được chia sẻ.": "共有ファイルはありません。",
+    "Chưa lấy được dữ liệu CRM": "CRMデータを取得できませんでした",
+    "Chuyển tiếp tin nhắn": "メッセージを転送",
+    "Cũ cập nhật trước": "更新が古い順",
+    "Đang gửi": "送信中",
+    "Đang tải lớp...": "クラスを読み込み中...",
+    "Đang tải tin nhắn...": "メッセージを読み込み中...",
+    "Dung lượng chữ": "コンテンツ長",
+    "Hồ sơ": "プロフィール",
+    "Không tìm thấy người dùng phù hợp.": "一致するユーザーはいません。",
+    "Liên hệ": "連絡先",
+    "Mới cập nhật trước": "更新が新しい順",
+    "Quản lý Tài liệu": "資料管理",
+    "Sắp xếp": "並べ替え",
+    "Tên A-Z": "名前 A-Z",
+    "Tên Z-A": "名前 Z-A",
+    "Tệp & phương tiện đã chia sẻ": "共有ファイルとメディア",
+    "Thông tin liên hệ sẽ hiển thị ở đây.":
+      "連絡先情報はここに表示されます。",
+    "Thư mục": "フォルダー",
+    "Tin nhắn": "メッセージ",
+    "Tin nhắn và thao tác hệ thống sẽ xuất hiện ở đây.":
+      "メッセージとシステム操作はここに表示されます。",
+    "Xóa quản trị viên": "管理者を削除",
+  },
+  "zh-CN": {
+    "0 phiên": "0 个会话",
+    "Bạn": "你",
+    "Bạn không có quyền xem danh sách quản trị viên。": "你无权查看管理员列表。",
+    "Bạn không có quyền xem danh sách quản trị viên.": "你无权查看管理员列表。",
+    "Bắt đầu cuộc trò chuyện": "开始对话",
+    "Bỏ ghim hội thoại": "取消置顶对话",
+    "Bộ lọc tài liệu": "资料筛选",
+    "Chọn cuộc trò chuyện trước": "请先选择一个对话",
+    "Chọn file PDF hoặc DOCX trước khi nhập.": "导入前请选择 PDF 或 DOCX 文件。",
+    "Chọn lớp để nhập tài liệu trong lớp.": "请选择班级以导入班级资料。",
+    "Chọn lớp trước khi xuất tài liệu trong lớp。": "导出班级资料前请选择班级。",
+    "Chọn lớp trước khi xuất tài liệu trong lớp.": "导出班级资料前请选择班级。",
+    "Chọn tài liệu cần xuất.": "请选择要导出的资料。",
+    "Chưa có bài làm.": "暂无答卷。",
+    "Chưa có đề thi trong lớp.": "该班级暂无考试。",
+    "Chưa có đề thi.": "暂无考试。",
+    "Chưa có file": "无文件",
+    "Chưa có lớp học.": "暂无班级。",
+    "Chưa có mô tả lớp học.": "暂无班级描述。",
+    "Chưa có tài liệu khả dụng.": "暂无可用资料。",
+    "Chưa có tài liệu phù hợp để xuất.": "暂无可导出的匹配资料。",
+    "Chưa có tài liệu.": "暂无资料。",
+    "Chưa có tin nhắn": "暂无消息",
+    "Chưa gán giáo viên": "未分配教师",
+    "Chưa tham gia lớp học.": "尚未加入任何班级。",
+    "Chuyển tiếp": "转发",
+    "đã chọn": "已选择",
+    "Đã nhập tài liệu": "已导入资料",
+    "Đã thêm quản trị viên": "已添加管理员",
+    "Đã xuất danh sách giáo viên": "已导出教师列表",
+    "Đã xuất danh sách học sinh": "已导出学生列表",
+    "Đã xuất tài liệu": "已导出资料",
+    "Đang tải dữ liệu chi tiết...": "正在加载详情...",
+    "Đang xóa...": "正在删除...",
+    "Đang xử lý...": "正在处理...",
+    "Đặt lại": "重置",
+    "Đặt lại mật khẩu": "重置密码",
+    "Địa chỉ Email": "电子邮箱地址",
+    "Đóng": "关闭",
+    "Đóng hồ sơ": "关闭档案",
+    "Ghim hội thoại": "置顶对话",
+    "Gửi tệp": "发送文件",
+    "Gửi tin nhắn": "发送消息",
+    "Hôm nay": "今天",
+    "Hôm qua": "昨天",
+    "Khác": "其他",
+    "Lịch sử hoạt động": "活动历史",
+    "Lịch sử trò chuyện": "聊天历史",
+    "lớp đang tham gia": "已加入班级",
+    "Mở danh sách tin nhắn": "打开消息列表",
+    "Mở hồ sơ": "打开档案",
+    "Mở mục tin nhắn để xem nội dung mới nhất.": "打开消息查看最新内容。",
+    "Mở tùy chọn hội thoại": "打开对话选项",
+    "Ngày gia nhập": "加入日期",
+    "Ngoại tuyến": "离线",
+    "Người dùng": "用户",
+    "Nhập tài liệu thành công.": "资料导入成功。",
+    "Nhập tài liệu thất bại.": "资料导入失败。",
+    "Nhập tin nhắn...": "输入消息...",
+    "Nữ": "女",
+    "Socket chat bị lỗi.": "聊天连接出错。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị。":
+      "该账户尚未由管理员授予管理权限。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị.":
+      "该账户尚未由管理员授予管理权限。",
+    "Tất cả tài liệu": "所有资料",
+    "Tệp đính kèm": "附件",
+    "Thu gọn danh sách tin nhắn": "收起消息列表",
+    "Thu hồi tin nhắn": "撤回消息",
+    "Tìm kiếm cuộc trò chuyện...": "搜索对话...",
+    "Tìm kiếm tài liệu...": "搜索资料...",
+    "Tìm lớp, mã lớp hoặc giáo viên...": "搜索班级、班级代码或教师...",
+    "Tìm tài liệu...": "搜索资料...",
+    "Tổng lớp học": "班级总数",
+    "Trang trước": "上一页",
+    "Trực tuyến": "在线",
+    "Xóa hội thoại": "删除对话",
+    "Xuất tài liệu thành công.": "资料导出成功。",
+    "Xuất tài liệu thất bại.": "资料导出失败。",
+    "Chi tiết Giáo viên": "教师详情",
+    "Chi tiết Học sinh": "学生详情",
+    "Thông tin liên hệ": "联系信息",
+    "Thông tin hệ thống": "系统信息",
+    "Mật khẩu mới": "新密码",
+    "Tên lớp": "班级名称",
+    "Điểm": "分数",
+    "Ngày tham gia": "加入日期",
+    "Quản lý Lớp học": "班级管理",
+    "Tất cả Lớp học": "所有班级",
+    "Mã lớp": "班级代码",
+    "Giáo viên phụ trách": "负责教师",
+    "Lượt học sinh": "学生加入次数",
+    "Bài thi trong lớp": "班级考试",
+    "tất cả lớp trên hệ thống": "系统中的所有班级",
+    "lớp có thể tham gia": "可加入的班级",
+    "theo thành viên lớp": "按班级成员统计",
+    "bài thi thuộc lớp": "班级范围考试",
+    "đã xuất bản và đang mở": "已发布且开放",
+    "phạm vi hệ thống": "系统范围",
+    "Phân tích": "分析",
+    "Chưa có lớp": "暂无班级",
+    "Chưa có lớp học phù hợp.": "没有匹配的班级。",
+    "Đang tải dữ liệu lớp học...": "正在加载班级数据...",
+    "Chọn cuộc trò chuyện": "选择对话",
+    "Chọn liên hệ bên trái để bắt đầu.": "请从左侧选择联系人开始。",
+    "Chọn một liên hệ để nhắn tin realtime.":
+      "请选择联系人开始实时消息。",
+    "Chưa có hội thoại nào trong danh sách để chuyển tiếp.":
+      "没有可用于转发的对话。",
+    "Chưa có tệp được chia sẻ.": "暂无共享文件。",
+    "Chưa lấy được dữ liệu CRM": "无法获取 CRM 数据",
+    "Chuyển tiếp tin nhắn": "转发消息",
+    "Cũ cập nhật trước": "较早更新优先",
+    "Đang gửi": "正在发送",
+    "Đang tải lớp...": "正在加载班级...",
+    "Đang tải tin nhắn...": "正在加载消息...",
+    "Dung lượng chữ": "内容长度",
+    "Hồ sơ": "个人资料",
+    "Không tìm thấy người dùng phù hợp.": "没有匹配的用户。",
+    "Liên hệ": "联系人",
+    "Mới cập nhật trước": "最近更新优先",
+    "Quản lý Tài liệu": "资料管理",
+    "Sắp xếp": "排序",
+    "Tên A-Z": "名称 A-Z",
+    "Tên Z-A": "名称 Z-A",
+    "Tệp & phương tiện đã chia sẻ": "共享文件和媒体",
+    "Thông tin liên hệ sẽ hiển thị ở đây。": "联系信息将显示在这里。",
+    "Thông tin liên hệ sẽ hiển thị ở đây.": "联系信息将显示在这里。",
+    "Thư mục": "文件夹",
+    "Tin nhắn": "消息",
+    "Tin nhắn và thao tác hệ thống sẽ xuất hiện ở đây.":
+      "消息和系统操作将显示在这里。",
+    "Xóa quản trị viên": "删除管理员",
+  },
+  "zh-TW": {
+    "0 phiên": "0 個工作階段",
+    "Bạn": "你",
+    "Bạn không có quyền xem danh sách quản trị viên。": "你無權檢視管理員列表。",
+    "Bạn không có quyền xem danh sách quản trị viên.": "你無權檢視管理員列表。",
+    "Bắt đầu cuộc trò chuyện": "開始對話",
+    "Bỏ ghim hội thoại": "取消釘選對話",
+    "Bộ lọc tài liệu": "資料篩選",
+    "Chọn cuộc trò chuyện trước": "請先選擇一個對話",
+    "Chọn file PDF hoặc DOCX trước khi nhập.": "匯入前請選擇 PDF 或 DOCX 檔案。",
+    "Chọn lớp để nhập tài liệu trong lớp.": "請選擇班級以匯入班級資料。",
+    "Chọn lớp trước khi xuất tài liệu trong lớp.": "匯出班級資料前請選擇班級。",
+    "Chọn tài liệu cần xuất.": "請選擇要匯出的資料。",
+    "Chưa có bài làm.": "尚無答卷。",
+    "Chưa có đề thi trong lớp.": "此班級尚無考試。",
+    "Chưa có đề thi.": "尚無考試。",
+    "Chưa có file": "無檔案",
+    "Chưa có lớp học.": "尚無班級。",
+    "Chưa có mô tả lớp học.": "尚無班級描述。",
+    "Chưa có tài liệu khả dụng.": "尚無可用資料。",
+    "Chưa có tài liệu phù hợp để xuất.": "尚無可匯出的符合資料。",
+    "Chưa có tài liệu.": "尚無資料。",
+    "Chưa có tin nhắn": "尚無訊息",
+    "Chưa gán giáo viên": "未分配教師",
+    "Chưa tham gia lớp học.": "尚未加入任何班級。",
+    "Chuyển tiếp": "轉寄",
+    "đã chọn": "已選擇",
+    "Đã nhập tài liệu": "已匯入資料",
+    "Đã thêm quản trị viên": "已新增管理員",
+    "Đã xuất danh sách giáo viên": "已匯出教師列表",
+    "Đã xuất danh sách học sinh": "已匯出學生列表",
+    "Đã xuất tài liệu": "已匯出資料",
+    "Đang tải dữ liệu chi tiết...": "正在載入詳細資料...",
+    "Đang xóa...": "正在刪除...",
+    "Đang xử lý...": "正在處理...",
+    "Đặt lại": "重設",
+    "Đặt lại mật khẩu": "重設密碼",
+    "Địa chỉ Email": "電子郵件地址",
+    "Đóng": "關閉",
+    "Đóng hồ sơ": "關閉個人資料",
+    "Ghim hội thoại": "釘選對話",
+    "Gửi tệp": "傳送檔案",
+    "Gửi tin nhắn": "傳送訊息",
+    "Hôm nay": "今天",
+    "Hôm qua": "昨天",
+    "Khác": "其他",
+    "Lịch sử hoạt động": "活動歷史",
+    "Lịch sử trò chuyện": "聊天歷史",
+    "lớp đang tham gia": "已加入班級",
+    "Mở danh sách tin nhắn": "開啟訊息列表",
+    "Mở hồ sơ": "開啟個人資料",
+    "Mở mục tin nhắn để xem nội dung mới nhất.": "開啟訊息查看最新內容。",
+    "Mở tùy chọn hội thoại": "開啟對話選項",
+    "Ngày gia nhập": "加入日期",
+    "Ngoại tuyến": "離線",
+    "Người dùng": "使用者",
+    "Nhập tài liệu thành công.": "資料匯入成功。",
+    "Nhập tài liệu thất bại.": "資料匯入失敗。",
+    "Nhập tin nhắn...": "輸入訊息...",
+    "Nữ": "女",
+    "Socket chat bị lỗi.": "聊天連線發生錯誤。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị。":
+      "此帳戶尚未由管理員授予管理權限。",
+    "Tài khoản này chưa được Administrator cấp quyền quản trị.":
+      "此帳戶尚未由管理員授予管理權限。",
+    "Tất cả tài liệu": "所有資料",
+    "Tệp đính kèm": "附件",
+    "Thu gọn danh sách tin nhắn": "收合訊息列表",
+    "Thu hồi tin nhắn": "收回訊息",
+    "Tìm kiếm cuộc trò chuyện...": "搜尋對話...",
+    "Tìm kiếm tài liệu...": "搜尋資料...",
+    "Tìm lớp, mã lớp hoặc giáo viên...": "搜尋班級、班級代碼或教師...",
+    "Tìm tài liệu...": "搜尋資料...",
+    "Tổng lớp học": "班級總數",
+    "Trang trước": "上一頁",
+    "Trực tuyến": "線上",
+    "Xóa hội thoại": "刪除對話",
+    "Xuất tài liệu thành công.": "資料匯出成功。",
+    "Xuất tài liệu thất bại.": "資料匯出失敗。",
+    "Chi tiết Giáo viên": "教師詳細資料",
+    "Chi tiết Học sinh": "學生詳細資料",
+    "Thông tin liên hệ": "聯絡資訊",
+    "Thông tin hệ thống": "系統資訊",
+    "Mật khẩu mới": "新密碼",
+    "Tên lớp": "班級名稱",
+    "Điểm": "分數",
+    "Ngày tham gia": "加入日期",
+    "Quản lý Lớp học": "班級管理",
+    "Tất cả Lớp học": "所有班級",
+    "Mã lớp": "班級代碼",
+    "Giáo viên phụ trách": "負責教師",
+    "Lượt học sinh": "學生加入次數",
+    "Bài thi trong lớp": "班級考試",
+    "tất cả lớp trên hệ thống": "系統中的所有班級",
+    "lớp có thể tham gia": "可加入的班級",
+    "theo membership lớp": "依班級成員統計",
+    "scope class": "班級範圍考試",
+    "Chưa có lớp": "尚無班級",
+    "Chưa có lớp học phù hợp.": "沒有符合的班級。",
+    "Đang tải dữ liệu lớp học...": "正在載入班級資料...",
+    "Chọn cuộc trò chuyện": "選擇對話",
+    "Chọn liên hệ bên trái để bắt đầu.": "請從左側選擇聯絡人開始。",
+    "Chọn một liên hệ để nhắn tin realtime.":
+      "請選擇聯絡人開始即時訊息。",
+    "Chưa có hội thoại nào trong danh sách để chuyển tiếp.":
+      "沒有可用於轉寄的對話。",
+    "Chưa có tệp được chia sẻ.": "尚無共享檔案。",
+    "Chưa lấy được dữ liệu CRM": "無法取得 CRM 資料",
+    "Chuyển tiếp tin nhắn": "轉寄訊息",
+    "Cũ cập nhật trước": "較早更新優先",
+    "Đang gửi": "正在傳送",
+    "Đang tải lớp...": "正在載入班級...",
+    "Đang tải tin nhắn...": "正在載入訊息...",
+    "Dung lượng chữ": "內容長度",
+    "Hồ sơ": "個人資料",
+    "Không tìm thấy người dùng phù hợp.": "沒有符合的使用者。",
+    "Liên hệ": "聯絡人",
+    "Mới cập nhật trước": "最近更新優先",
+    "Quản lý Tài liệu": "資料管理",
+    "Sắp xếp": "排序",
+    "Tên A-Z": "名稱 A-Z",
+    "Tên Z-A": "名稱 Z-A",
+    "Tệp & phương tiện đã chia sẻ": "共享檔案與媒體",
+    "Thông tin liên hệ sẽ hiển thị ở đây.": "聯絡資訊將顯示於此。",
+    "Thư mục": "資料夾",
+    "Tin nhắn": "訊息",
+    "Tin nhắn và thao tác hệ thống sẽ xuất hiện ở đây.":
+      "訊息和系統操作將顯示於此。",
+    "Xóa quản trị viên": "刪除管理員",
+  },
+};
+
+const completeTranslations: Record<
+  Exclude<TranslatedLanguage, "en">,
+  Record<string, string>
+> = {
+  ja: {
+    "Analysis": "分析",
+    "Analytics": "分析",
+    "CRM": "顧客管理",
+    "30 ngày qua": "過去30日",
+    "7 ngày qua": "過去7日",
+    "Bài thi và dữ liệu làm bài liên quan sẽ bị xóa。":
+      "試験と関連する答案データが削除されます。",
+    "Bài thi và dữ liệu làm bài liên quan sẽ bị xóa.":
+      "試験と関連する答案データが削除されます。",
+    "Bạn có chắc muốn xóa bài thi này?": "この試験を削除しますか？",
+    "Bạn có chắc muốn xóa giáo viên này?": "この教師を削除しますか？",
+    "Bạn có chắc muốn xóa học sinh này?": "この生徒を削除しますか？",
+    "Bạn có chắc muốn xóa tài khoản admin này?":
+      "この管理者アカウントを削除しますか？",
+    "Bạn có tin nhắn mới": "新しいメッセージがあります",
+    "Bảo mật": "セキュリティ",
+    "Chế độ giao diện sáng": "ライトモード",
+    "Chế độ giao diện tối": "ダークモード",
+    "Chỉ tài khoản do Administrator cấp mới vào được hệ thống。":
+      "Administratorが許可したアカウントのみシステムを利用できます。",
+    "Chỉ tài khoản do Administrator cấp mới vào được hệ thống.":
+      "Administratorが許可したアカウントのみシステムを利用できます。",
+    "Chọn phân loại và tải file PDF hoặc DOCX lên hệ thống。":
+      "分類を選び、PDFまたはDOCXファイルをアップロードしてください。",
+    "Chọn phân loại và tải file PDF hoặc DOCX lên hệ thống.":
+      "分類を選び、PDFまたはDOCXファイルをアップロードしてください。",
+    "Chưa có dữ liệu nguồn truy cập": "流入元データはありません",
+    "Chưa có dữ liệu thiết bị": "デバイスデータはありません",
+    "Chưa có dữ liệu trang phổ biến": "人気ページのデータはありません",
+    "Chưa có dữ liệu truy cập": "アクセスデータはありません",
+    "Chưa có thông báo mới": "新しい通知はありません",
+    "Chưa lấy được dữ liệu analytics": "分析データを取得できませんでした",
+    "Cuộc trò chuyện": "会話",
+    "Đang kiểm tra phiên đăng nhập...": "ログイン状態を確認中...",
+    "Đăng nhập quản trị": "管理者ログイン",
+    "Đăng nhập thành công。": "ログインしました。",
+    "Đăng nhập thành công.": "ログインしました。",
+    "Đang phát triển": "開発中",
+    "Đang tải dữ liệu...": "データを読み込み中...",
+    "Để trống sẽ dùng tên file": "空欄の場合はファイル名を使用します",
+    "Đóng form nhập tài liệu": "資料インポートフォームを閉じる",
+    "Đóng form xuất tài liệu": "資料エクスポートフォームを閉じる",
+    "Email hoặc mật khẩu không đúng。": "メールアドレスまたはパスワードが正しくありません。",
+    "Email hoặc mật khẩu không đúng.": "メールアドレスまたはパスワードが正しくありません。",
+    "Email liên hệ hệ thống": "システム連絡先メール",
+    "File tài liệu": "資料ファイル",
+    "Giáo viên sẽ bị xóa khỏi danh sách quản lý。":
+      "教師は管理一覧から削除されます。",
+    "Giáo viên sẽ bị xóa khỏi danh sách quản lý.":
+      "教師は管理一覧から削除されます。",
+    "Giới thiệu": "参照元",
+    "Hành động này không thể hoàn tác。": "この操作は元に戻せません。",
+    "Hành động này không thể hoàn tác.": "この操作は元に戻せません。",
+    "Học sinh sẽ bị xóa khỏi danh sách quản lý。":
+      "生徒は管理一覧から削除されます。",
+    "Học sinh sẽ bị xóa khỏi danh sách quản lý.":
+      "生徒は管理一覧から削除されます。",
+    "Hủy thay đổi": "変更を破棄",
+    "Không có thông báo mới": "新しい通知はありません",
+    "Không đặt lại được mật khẩu。": "パスワードをリセットできませんでした。",
+    "Không đặt lại được mật khẩu.": "パスワードをリセットできませんでした。",
+    "Không đọc được dữ liệu realtime。": "リアルタイムデータを取得できませんでした。",
+    "Không đọc được dữ liệu realtime.": "リアルタイムデータを取得できませんでした。",
+    "Không lấy được danh sách quản trị viên。": "管理者一覧を取得できませんでした。",
+    "Không lấy được danh sách quản trị viên.": "管理者一覧を取得できませんでした。",
+    "Không lấy được dữ liệu analytics。": "分析データを取得できませんでした。",
+    "Không lấy được dữ liệu analytics.": "分析データを取得できませんでした。",
+    "Không lấy được dữ liệu CRM": "CRMデータを取得できませんでした",
+    "Không lưu được tài khoản admin。": "管理者アカウントを保存できませんでした。",
+    "Không lưu được tài khoản admin.": "管理者アカウントを保存できませんでした。",
+    "Không lưu được thông tin。": "情報を保存できませんでした。",
+    "Không lưu được thông tin.": "情報を保存できませんでした。",
+    "Không mở được tin nhắn。": "メッセージを開けませんでした。",
+    "Không mở được tin nhắn.": "メッセージを開けませんでした。",
+    "Không tải được chi tiết giáo viên。": "教師の詳細を読み込めませんでした。",
+    "Không tải được chi tiết giáo viên.": "教師の詳細を読み込めませんでした。",
+    "Không tải được chi tiết học sinh。": "生徒の詳細を読み込めませんでした。",
+    "Không tải được chi tiết học sinh.": "生徒の詳細を読み込めませんでした。",
+    "Không thể chia sẻ tệp。": "ファイルを共有できませんでした。",
+    "Không thể chia sẻ tệp.": "ファイルを共有できませんでした。",
+    "Không thể đăng nhập。 Vui lòng thử lại。": "ログインできません。もう一度お試しください。",
+    "Không thể đăng nhập. Vui lòng thử lại.": "ログインできません。もう一度お試しください。",
+    "Không thể gửi tệp。": "ファイルを送信できませんでした。",
+    "Không thể gửi tệp.": "ファイルを送信できませんでした。",
+    "Không thể gửi tin nhắn。": "メッセージを送信できませんでした。",
+    "Không thể gửi tin nhắn.": "メッセージを送信できませんでした。",
+    "Không thể kết nối máy chủ。 Vui lòng thử lại。":
+      "サーバーに接続できません。もう一度お試しください。",
+    "Không thể kết nối máy chủ. Vui lòng thử lại.":
+      "サーバーに接続できません。もう一度お試しください。",
+    "Không thể mở tin nhắn。": "メッセージを開けませんでした。",
+    "Không thể mở tin nhắn.": "メッセージを開けませんでした。",
+    "Không thể nhập tài liệu。": "資料をインポートできませんでした。",
+    "Không thể nhập tài liệu.": "資料をインポートできませんでした。",
+    "Không thể tải danh sách bài thi。": "試験一覧を読み込めませんでした。",
+    "Không thể tải danh sách bài thi.": "試験一覧を読み込めませんでした。",
+    "Không thể tải danh sách giáo viên。": "教師一覧を読み込めませんでした。",
+    "Không thể tải danh sách giáo viên.": "教師一覧を読み込めませんでした。",
+    "Không thể tải danh sách học sinh。": "生徒一覧を読み込めませんでした。",
+    "Không thể tải danh sách học sinh.": "生徒一覧を読み込めませんでした。",
+    "Không thể tải danh sách lớp học。": "クラス一覧を読み込めませんでした。",
+    "Không thể tải danh sách lớp học.": "クラス一覧を読み込めませんでした。",
+    "Không thể tải danh sách lớp。": "クラス一覧を読み込めませんでした。",
+    "Không thể tải danh sách lớp.": "クラス一覧を読み込めませんでした。",
+    "Không thể tải danh sách tài liệu。": "資料一覧を読み込めませんでした。",
+    "Không thể tải danh sách tài liệu.": "資料一覧を読み込めませんでした。",
+    "Không thể tải file tài liệu về máy。": "資料ファイルをダウンロードできませんでした。",
+    "Không thể tải file tài liệu về máy.": "資料ファイルをダウンロードできませんでした。",
+    "Không thể tải lịch sử tin nhắn。": "メッセージ履歴を読み込めませんでした。",
+    "Không thể tải lịch sử tin nhắn.": "メッセージ履歴を読み込めませんでした。",
+    "Không thể tải tin nhắn。": "メッセージを読み込めませんでした。",
+    "Không thể tải tin nhắn.": "メッセージを読み込めませんでした。",
+    "Không thể tạo cuộc trò chuyện。": "会話を作成できませんでした。",
+    "Không thể tạo cuộc trò chuyện.": "会話を作成できませんでした。",
+    "Không thể thu hồi tin nhắn。": "メッセージを取り消せませんでした。",
+    "Không thể thu hồi tin nhắn.": "メッセージを取り消せませんでした。",
+    "Không thể xóa hội thoại。": "会話を削除できませんでした。",
+    "Không thể xóa hội thoại.": "会話を削除できませんでした。",
+    "Không tìm thấy tài liệu đã chọn。": "選択した資料が見つかりません。",
+    "Không tìm thấy tài liệu đã chọn.": "選択した資料が見つかりません。",
+    "Không tìm thấy tài liệu phù hợp。": "一致する資料が見つかりません。",
+    "Không tìm thấy tài liệu phù hợp.": "一致する資料が見つかりません。",
+    "Không xóa được bài thi。": "試験を削除できませんでした。",
+    "Không xóa được bài thi.": "試験を削除できませんでした。",
+    "Không xóa được giáo viên。": "教師を削除できませんでした。",
+    "Không xóa được giáo viên.": "教師を削除できませんでした。",
+    "Không xóa được học sinh。": "生徒を削除できませんでした。",
+    "Không xóa được học sinh.": "生徒を削除できませんでした。",
+    "Không xóa được tài khoản admin。": "管理者アカウントを削除できませんでした。",
+    "Không xóa được tài khoản admin.": "管理者アカウントを削除できませんでした。",
+    "Không xóa được tài khoản。": "アカウントを削除できませんでした。",
+    "Không xóa được tài khoản.": "アカウントを削除できませんでした。",
+    "Kỳ hiện tại": "現在期間",
+    "Kỳ trước": "前期間",
+    "Landing page": "ランディングページ",
+    "Loại đăng nhập": "ログイン方式",
+    "Lượt": "件",
+    "Lượt xem": "閲覧数",
+    "Lượt xem trang": "ページビュー",
+    "Lưu lượng truy cập": "トラフィック",
+    "Mạng xã hội": "ソーシャルメディア",
+    "Mở rộng menu": "メニューを展開",
+    "Mô tả ngắn": "短い説明",
+    "Mô tả ngắn cho tài liệu": "資料の短い説明",
+    "Mục cài đặt này đang được cập nhật。 Vui lòng quay lại sau。":
+      "この設定は更新中です。後でもう一度お試しください。",
+    "Mục cài đặt này đang được cập nhật. Vui lòng quay lại sau.":
+      "この設定は更新中です。後でもう一度お試しください。",
+    "Năm nay": "今年",
+    "Năm ngoái": "昨年",
+    "Người": "人",
+    "Nguồn truy cập": "流入元",
+    "Nhập mật khẩu": "パスワードを入力",
+    "Realtime": "リアルタイム",
+    "Student": "生徒",
+    "Student exams": "生徒の試験",
+    "Sửa thông tin giáo viên": "教師情報を編集",
+    "Sửa thông tin học sinh": "生徒情報を編集",
+    "Tài liệu này chưa có file để xuất。": "この資料にはエクスポートするファイルがありません。",
+    "Tài liệu này chưa có file để xuất.": "この資料にはエクスポートするファイルがありません。",
+    "Teacher": "教師",
+    "Teacher exams": "教師の試験",
+    "Tên hệ thống": "システム名",
+    "Tên tài liệu": "資料名",
+    "Thao tác thất bại。 Vui lòng thử lại。": "操作に失敗しました。もう一度お試しください。",
+    "Thao tác thất bại. Vui lòng thử lại.": "操作に失敗しました。もう一度お試しください。",
+    "Thiết bị": "デバイス",
+    "Thông báo gần đây": "最近の通知",
+    "Thu gọn menu": "メニューを折りたたむ",
+    "Tìm kiếm": "検索",
+    "Trang": "ページ",
+    "Trang phổ biến": "人気ページ",
+    "Trực tiếp": "直接",
+    "Tỷ lệ thoát": "直帰率",
+    "User đang truy cập": "現在のユーザー",
+    "website": "ウェブサイト",
+    "Xem tất cả tin nhắn": "すべてのメッセージを表示",
+    "Xóa": "削除",
+    "Xóa admin": "管理者を削除",
+    "Xóa bài thi": "試験を削除",
+    "Xóa giáo viên": "教師を削除",
+    "Xóa học sinh": "生徒を削除",
+    "Xóa tài khoản": "アカウントを削除",
+    "Xóa tài khoản giáo viên": "教師アカウントを削除",
+    "Xóa tài khoản học sinh": "生徒アカウントを削除",
+  },
+  "zh-CN": {
+    "Analysis": "分析",
+    "Analytics": "分析",
+    "CRM": "客户管理",
+    "30 ngày qua": "过去30天",
+    "7 ngày qua": "过去7天",
+    "Bài thi và dữ liệu làm bài liên quan sẽ bị xóa。": "考试及相关答题数据将被删除。",
+    "Bài thi và dữ liệu làm bài liên quan sẽ bị xóa.": "考试及相关答题数据将被删除。",
+    "Bạn có chắc muốn xóa bài thi này?": "确定要删除此考试吗？",
+    "Bạn có chắc muốn xóa giáo viên này?": "确定要删除此教师吗？",
+    "Bạn có chắc muốn xóa học sinh này?": "确定要删除此学生吗？",
+    "Bạn có chắc muốn xóa tài khoản admin này?": "确定要删除此管理员账户吗？",
+    "Bạn có tin nhắn mới": "你有新消息",
+    "Bảo mật": "安全",
+    "Chế độ giao diện sáng": "浅色模式",
+    "Chế độ giao diện tối": "深色模式",
+    "Chỉ tài khoản do Administrator cấp mới vào được hệ thống。":
+      "只有经 Administrator 授权的账户才能进入系统。",
+    "Chỉ tài khoản do Administrator cấp mới vào được hệ thống.":
+      "只有经 Administrator 授权的账户才能进入系统。",
+    "Chọn phân loại và tải file PDF hoặc DOCX lên hệ thống。":
+      "请选择分类并上传 PDF 或 DOCX 文件。",
+    "Chọn phân loại và tải file PDF hoặc DOCX lên hệ thống.":
+      "请选择分类并上传 PDF 或 DOCX 文件。",
+    "Chưa có dữ liệu nguồn truy cập": "暂无流量来源数据",
+    "Chưa có dữ liệu thiết bị": "暂无设备数据",
+    "Chưa có dữ liệu trang phổ biến": "暂无热门页面数据",
+    "Chưa có dữ liệu truy cập": "暂无访问数据",
+    "Chưa có thông báo mới": "暂无新通知",
+    "Chưa lấy được dữ liệu analytics": "无法获取分析数据",
+    "Cuộc trò chuyện": "对话",
+    "Đang kiểm tra phiên đăng nhập...": "正在检查登录状态...",
+    "Đăng nhập quản trị": "管理员登录",
+    "Đăng nhập thành công。": "登录成功。",
+    "Đăng nhập thành công.": "登录成功。",
+    "Đang phát triển": "开发中",
+    "Đang tải dữ liệu...": "正在加载数据...",
+    "Để trống sẽ dùng tên file": "留空将使用文件名",
+    "Đóng form nhập tài liệu": "关闭资料导入表单",
+    "Đóng form xuất tài liệu": "关闭资料导出表单",
+    "Email hoặc mật khẩu không đúng。": "邮箱或密码不正确。",
+    "Email hoặc mật khẩu không đúng.": "邮箱或密码不正确。",
+    "Email liên hệ hệ thống": "系统联系邮箱",
+    "File tài liệu": "资料文件",
+    "Giáo viên sẽ bị xóa khỏi danh sách quản lý。": "教师将从管理列表中删除。",
+    "Giáo viên sẽ bị xóa khỏi danh sách quản lý.": "教师将从管理列表中删除。",
+    "Giới thiệu": "引荐",
+    "Hành động này không thể hoàn tác。": "此操作无法撤销。",
+    "Hành động này không thể hoàn tác.": "此操作无法撤销。",
+    "Học sinh sẽ bị xóa khỏi danh sách quản lý。": "学生将从管理列表中删除。",
+    "Học sinh sẽ bị xóa khỏi danh sách quản lý.": "学生将从管理列表中删除。",
+    "Hủy thay đổi": "放弃更改",
+    "Không có thông báo mới": "暂无新通知",
+    "Không đặt lại được mật khẩu。": "无法重置密码。",
+    "Không đặt lại được mật khẩu.": "无法重置密码。",
+    "Không đọc được dữ liệu realtime。": "无法读取实时数据。",
+    "Không đọc được dữ liệu realtime.": "无法读取实时数据。",
+    "Không lấy được danh sách quản trị viên。": "无法获取管理员列表。",
+    "Không lấy được danh sách quản trị viên.": "无法获取管理员列表。",
+    "Không lấy được dữ liệu analytics。": "无法获取分析数据。",
+    "Không lấy được dữ liệu analytics.": "无法获取分析数据。",
+    "Không lấy được dữ liệu CRM": "无法获取 CRM 数据",
+    "Không lưu được tài khoản admin。": "无法保存管理员账户。",
+    "Không lưu được tài khoản admin.": "无法保存管理员账户。",
+    "Không lưu được thông tin。": "无法保存信息。",
+    "Không lưu được thông tin.": "无法保存信息。",
+    "Không mở được tin nhắn。": "无法打开消息。",
+    "Không mở được tin nhắn.": "无法打开消息。",
+    "Không tải được chi tiết giáo viên。": "无法加载教师详情。",
+    "Không tải được chi tiết giáo viên.": "无法加载教师详情。",
+    "Không tải được chi tiết học sinh。": "无法加载学生详情。",
+    "Không tải được chi tiết học sinh.": "无法加载学生详情。",
+    "Không thể chia sẻ tệp。": "无法共享文件。",
+    "Không thể chia sẻ tệp.": "无法共享文件。",
+    "Không thể đăng nhập。 Vui lòng thử lại。": "无法登录，请重试。",
+    "Không thể đăng nhập. Vui lòng thử lại.": "无法登录，请重试。",
+    "Không thể gửi tệp。": "无法发送文件。",
+    "Không thể gửi tệp.": "无法发送文件。",
+    "Không thể gửi tin nhắn。": "无法发送消息。",
+    "Không thể gửi tin nhắn.": "无法发送消息。",
+    "Không thể kết nối máy chủ。 Vui lòng thử lại。": "无法连接服务器，请重试。",
+    "Không thể kết nối máy chủ. Vui lòng thử lại.": "无法连接服务器，请重试。",
+    "Không thể mở tin nhắn。": "无法打开消息。",
+    "Không thể mở tin nhắn.": "无法打开消息。",
+    "Không thể nhập tài liệu。": "无法导入资料。",
+    "Không thể nhập tài liệu.": "无法导入资料。",
+    "Không thể tải danh sách bài thi。": "无法加载考试列表。",
+    "Không thể tải danh sách bài thi.": "无法加载考试列表。",
+    "Không thể tải danh sách giáo viên。": "无法加载教师列表。",
+    "Không thể tải danh sách giáo viên.": "无法加载教师列表。",
+    "Không thể tải danh sách học sinh。": "无法加载学生列表。",
+    "Không thể tải danh sách học sinh.": "无法加载学生列表。",
+    "Không thể tải danh sách lớp học。": "无法加载班级列表。",
+    "Không thể tải danh sách lớp học.": "无法加载班级列表。",
+    "Không thể tải danh sách lớp。": "无法加载班级列表。",
+    "Không thể tải danh sách lớp.": "无法加载班级列表。",
+    "Không thể tải danh sách tài liệu。": "无法加载资料列表。",
+    "Không thể tải danh sách tài liệu.": "无法加载资料列表。",
+    "Không thể tải file tài liệu về máy。": "无法下载资料文件。",
+    "Không thể tải file tài liệu về máy.": "无法下载资料文件。",
+    "Không thể tải lịch sử tin nhắn。": "无法加载消息历史。",
+    "Không thể tải lịch sử tin nhắn.": "无法加载消息历史。",
+    "Không thể tải tin nhắn。": "无法加载消息。",
+    "Không thể tải tin nhắn.": "无法加载消息。",
+    "Không thể tạo cuộc trò chuyện。": "无法创建对话。",
+    "Không thể tạo cuộc trò chuyện.": "无法创建对话。",
+    "Không thể thu hồi tin nhắn。": "无法撤回消息。",
+    "Không thể thu hồi tin nhắn.": "无法撤回消息。",
+    "Không thể xóa hội thoại。": "无法删除对话。",
+    "Không thể xóa hội thoại.": "无法删除对话。",
+    "Không tìm thấy tài liệu đã chọn。": "未找到所选资料。",
+    "Không tìm thấy tài liệu đã chọn.": "未找到所选资料。",
+    "Không tìm thấy tài liệu phù hợp。": "未找到匹配资料。",
+    "Không tìm thấy tài liệu phù hợp.": "未找到匹配资料。",
+    "Không xóa được bài thi。": "无法删除考试。",
+    "Không xóa được bài thi.": "无法删除考试。",
+    "Không xóa được giáo viên。": "无法删除教师。",
+    "Không xóa được giáo viên.": "无法删除教师。",
+    "Không xóa được học sinh。": "无法删除学生。",
+    "Không xóa được học sinh.": "无法删除学生。",
+    "Không xóa được tài khoản admin。": "无法删除管理员账户。",
+    "Không xóa được tài khoản admin.": "无法删除管理员账户。",
+    "Không xóa được tài khoản。": "无法删除账户。",
+    "Không xóa được tài khoản.": "无法删除账户。",
+    "Kỳ hiện tại": "本期",
+    "Kỳ trước": "上期",
+    "Landing page": "着陆页",
+    "Loại đăng nhập": "登录方式",
+    "Lượt": "次",
+    "Lượt xem": "浏览量",
+    "Lượt xem trang": "页面浏览量",
+    "Lưu lượng truy cập": "流量",
+    "Mạng xã hội": "社交媒体",
+    "Mở rộng menu": "展开菜单",
+    "Mô tả ngắn": "简短描述",
+    "Mô tả ngắn cho tài liệu": "资料简短描述",
+    "Mục cài đặt này đang được cập nhật。 Vui lòng quay lại sau。":
+      "此设置正在更新，请稍后再试。",
+    "Mục cài đặt này đang được cập nhật. Vui lòng quay lại sau.":
+      "此设置正在更新，请稍后再试。",
+    "Năm nay": "今年",
+    "Năm ngoái": "去年",
+    "Người": "人",
+    "Nguồn truy cập": "流量来源",
+    "Nhập mật khẩu": "输入密码",
+    "Realtime": "实时",
+    "Student": "学生",
+    "Student exams": "学生考试",
+    "Sửa thông tin giáo viên": "编辑教师信息",
+    "Sửa thông tin học sinh": "编辑学生信息",
+    "Tài liệu này chưa có file để xuất。": "此资料没有可导出的文件。",
+    "Tài liệu này chưa có file để xuất.": "此资料没有可导出的文件。",
+    "Teacher": "教师",
+    "Teacher exams": "教师考试",
+    "Tên hệ thống": "系统名称",
+    "Tên tài liệu": "资料名称",
+    "Thao tác thất bại。 Vui lòng thử lại。": "操作失败，请重试。",
+    "Thao tác thất bại. Vui lòng thử lại.": "操作失败，请重试。",
+    "Thiết bị": "设备",
+    "Thông báo gần đây": "最近通知",
+    "Thu gọn menu": "收起菜单",
+    "Tìm kiếm": "搜索",
+    "Trang": "页面",
+    "Trang phổ biến": "热门页面",
+    "Trực tiếp": "直接访问",
+    "Tỷ lệ thoát": "跳出率",
+    "User đang truy cập": "当前用户",
+    "website": "网站",
+    "Xem tất cả tin nhắn": "查看所有消息",
+    "Xóa": "删除",
+    "Xóa admin": "删除管理员",
+    "Xóa bài thi": "删除考试",
+    "Xóa giáo viên": "删除教师",
+    "Xóa học sinh": "删除学生",
+    "Xóa tài khoản": "删除账户",
+    "Xóa tài khoản giáo viên": "删除教师账户",
+    "Xóa tài khoản học sinh": "删除学生账户",
+  },
+};
+
+const translationsByLanguage: Record<
+  TranslatedLanguage,
+  Record<string, string>
+> = {
+  en: { ...viToEn, ...supplementalTranslations.en },
+  ja: {
+    ...viToJa,
+    ...supplementalTranslations.ja,
+    ...completeTranslations.ja,
+  },
+  "zh-CN": {
+    ...viToZhCn,
+    ...supplementalTranslations["zh-CN"],
+    ...completeTranslations["zh-CN"],
+  },
+};
+
+interface LanguageContextValue {
+  language: AppLanguage;
+  setLanguage: (language: AppLanguage) => void;
+  translateText: (value: string) => string;
+}
+
+const LanguageContext = createContext<LanguageContextValue | null>(null);
+
+function isAppLanguage(value: unknown): value is AppLanguage {
+  return typeof value === "string" && appLanguages.includes(value as AppLanguage);
+}
+
+export function readStoredLanguage(): AppLanguage {
+  if (typeof window === "undefined") {
+    return "vi";
+  }
+
+  try {
+    const raw = window.localStorage.getItem(GENERAL_SETTINGS_KEY);
+    if (!raw) {
+      return "vi";
+    }
+    const settings = JSON.parse(raw) as { language?: unknown };
+    if (settings.language === "zh-TW") {
+      return "zh-CN";
+    }
+    return isAppLanguage(settings.language) ? settings.language : "vi";
+  } catch {
+    return "vi";
+  }
+}
+
+function translateDynamicText(value: string, language: AppLanguage) {
+  if (language === "en") {
+    return value
+      .replace(/^Bạn có (\d+) thông báo mới$/, "You have $1 new notifications")
+      .replace(/^Bạn có (\d+) tin nhắn mới$/, "You have $1 new messages")
+      .replace(/^(\d+) thông báo mới$/, "$1 new notifications")
+      .replace(/^(\d+) tin nhắn mới$/, "$1 new messages")
+      .replace(/^(\d+) giây gần nhất$/, "Last $1 seconds")
+      .replace(/^(\d+) ngày qua$/, "Last $1 days")
+      .replace(/^(\d+) phiên$/, "$1 sessions")
+      .replace(/^(\d+) khách$/, "$1 visitors")
+      .replace(/ · (\d+) khách/g, " · $1 visitors")
+      .replace(/^(\d+) tuổi$/, "$1 years old")
+      .replace(/^(\d+) phút$/, "$1 minutes")
+      .replace(/^(.+) điểm \((\d+) học sinh\)$/, "$1 points ($2 students)")
+      .replace(/^(\d+) học sinh đã được xuất ra file Excel\.$/, "$1 students exported to Excel.")
+      .replace(/^(\d+) giáo viên đã được xuất ra file Excel\.$/, "$1 teachers exported to Excel.")
+      .replace(/^(\d+) admin được cấp quyền$/, "$1 delegated admins")
+      .replace(/^Xóa tài khoản (.+)\? Tài khoản sẽ bị xóa khỏi danh sách quản lý\.$/,
+        "Delete account $1? This account will be removed from the management list.",
+      );
+  }
+
+  if (language === "ja") {
+    return value
+      .replace(/^Bạn có (\d+) thông báo mới$/, "新しい通知が$1件あります")
+      .replace(/^Bạn có (\d+) tin nhắn mới$/, "新しいメッセージが$1件あります")
+      .replace(/^(\d+) thông báo mới$/, "新しい通知$1件")
+      .replace(/^(\d+) tin nhắn mới$/, "新しいメッセージ$1件")
+      .replace(/^(\d+) giây gần nhất$/, "直近$1秒")
+      .replace(/^(\d+) ngày qua$/, "過去$1日")
+      .replace(/^(\d+) phiên$/, "$1セッション")
+      .replace(/^(\d+) khách$/, "$1人の訪問者")
+      .replace(/ · (\d+) khách/g, " · $1人の訪問者")
+      .replace(/^(.+) điểm \((\d+) học sinh\)$/, "$1点（$2人の生徒）")
+      .replace(/^(\d+) admin được cấp quyền$/, "権限付き管理者$1人");
+  }
+
+  if (language === "zh-CN") {
+    return value
+      .replace(/^Bạn có (\d+) thông báo mới$/, "你有 $1 条新通知")
+      .replace(/^Bạn có (\d+) tin nhắn mới$/, "你有 $1 条新消息")
+      .replace(/^(\d+) thông báo mới$/, "$1 条新通知")
+      .replace(/^(\d+) tin nhắn mới$/, "$1 条新消息")
+      .replace(/^(\d+) giây gần nhất$/, "最近 $1 秒")
+      .replace(/^(\d+) ngày qua$/, "过去 $1 天")
+      .replace(/^(\d+) phiên$/, "$1 个会话")
+      .replace(/^(\d+) khách$/, "$1 位访客")
+      .replace(/ · (\d+) khách/g, " · $1 位访客")
+      .replace(/^(.+) điểm \((\d+) học sinh\)$/, "$1 分（$2 名学生）")
+      .replace(/^(\d+) admin được cấp quyền$/, "$1 名已授权管理员");
+  }
+
+  return value;
+}
+
+export function translateUiText(value: string, language: AppLanguage) {
+  if (language === "vi") {
+    return value;
+  }
+
+  const leading = value.match(/^\s*/)?.[0] ?? "";
+  const trailing = value.match(/\s*$/)?.[0] ?? "";
+  const core = value.trim();
+  if (!core) {
+    return value;
+  }
+
+  const exact = translationsByLanguage[language][core];
+  if (exact) {
+    return `${leading}${exact}${trailing}`;
+  }
+
+  const dynamic = translateDynamicText(core, language);
+  return `${leading}${dynamic}${trailing}`;
+}
+
+function isRenderedFromOriginal(original: string, currentValue: string) {
+  if (currentValue === original) {
+    return true;
+  }
+  return translatedLanguages.some(
+    (language) => currentValue === translateUiText(original, language),
+  );
+}
+
+function shouldSkipTextNode(node: Text) {
+  const parent = node.parentElement;
+  if (!parent) {
+    return true;
+  }
+  return ["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"].includes(
+    parent.tagName,
+  );
+}
+
+function translateTextNode(node: Text, language: AppLanguage) {
+  if (shouldSkipTextNode(node)) {
+    return;
+  }
+
+  const currentValue = node.nodeValue ?? "";
+  if (language === "vi") {
+    const original = originalTextByNode.get(node);
+    if (original !== undefined && currentValue !== original) {
+      node.nodeValue = original;
+    }
+    return;
+  }
+
+  const previousOriginal = originalTextByNode.get(node);
+  const original =
+    previousOriginal === undefined ||
+    !isRenderedFromOriginal(previousOriginal, currentValue)
+      ? currentValue
+      : previousOriginal;
+  originalTextByNode.set(node, original);
+
+  const translated = translateUiText(original, language);
+  if (translated !== currentValue) {
+    node.nodeValue = translated;
+  }
+}
+
+function translateAttribute(
+  element: Element,
+  attributeName: string,
+  language: AppLanguage,
+) {
+  if (!element.hasAttribute(attributeName)) {
+    return;
+  }
+
+  let originalAttributes = originalAttributeByElement.get(element);
+  if (!originalAttributes) {
+    originalAttributes = new Map();
+    originalAttributeByElement.set(element, originalAttributes);
+  }
+
+  const currentValue = element.getAttribute(attributeName) ?? "";
+  if (language === "vi") {
+    const original = originalAttributes.get(attributeName);
+    if (original !== undefined && currentValue !== original) {
+      element.setAttribute(attributeName, original);
+    }
+    return;
+  }
+
+  const previousOriginal = originalAttributes.get(attributeName);
+  const original =
+    previousOriginal === undefined ||
+    !isRenderedFromOriginal(previousOriginal, currentValue)
+      ? currentValue
+      : previousOriginal;
+  originalAttributes.set(attributeName, original);
+
+  const translated = translateUiText(original, language);
+  if (translated !== currentValue) {
+    element.setAttribute(attributeName, translated);
+  }
+}
+
+function applyTranslations(root: HTMLElement, language: AppLanguage) {
+  const textWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let currentTextNode = textWalker.nextNode();
+  while (currentTextNode) {
+    translateTextNode(currentTextNode as Text, language);
+    currentTextNode = textWalker.nextNode();
+  }
+
+  root.querySelectorAll("*").forEach((element) => {
+    ATTRIBUTE_NAMES.forEach((attributeName) =>
+      translateAttribute(element, attributeName, language),
+    );
+  });
+}
+
+function DomLanguageSync({ language }: { language: AppLanguage }) {
+  useEffect(() => {
+    document.documentElement.lang = language;
+
+    const root = document.getElementById("root");
+    if (!root) {
+      return;
+    }
+
+    let isApplying = false;
+    let frameId = 0;
+
+    const scheduleTranslate = () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      frameId = window.requestAnimationFrame(() => {
+        isApplying = true;
+        applyTranslations(root, language);
+        isApplying = false;
+        frameId = 0;
+      });
+    };
+
+    scheduleTranslate();
+
+    const observer = new MutationObserver(() => {
+      if (!isApplying) {
+        scheduleTranslate();
+      }
+    });
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ATTRIBUTE_NAMES,
+    });
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      observer.disconnect();
+    };
+  }, [language]);
+
+  return null;
+}
+
+export function LanguageProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguage] = useState<AppLanguage>(readStoredLanguage);
+
+  const value = useMemo(
+    () => ({
+      language,
+      setLanguage,
+      translateText: (text: string) => translateUiText(text, language),
+    }),
+    [language],
+  );
+
+  return (
+    <LanguageContext.Provider value={value}>
+      <DomLanguageSync language={language} />
+      {children}
+    </LanguageContext.Provider>
+  );
+}
+
+export function useLanguage() {
+  const context = useContext(LanguageContext);
+  if (!context) {
+    throw new Error("useLanguage must be used inside LanguageProvider");
+  }
+  return context;
+}
