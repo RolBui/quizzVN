@@ -1,0 +1,28 @@
+name: Keep Render Awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Ping backend health endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      KEEP_ALIVE_URL: ${{ vars.RENDER_KEEP_ALIVE_URL || 'https://quizzvn.onrender.com/health' }}
+    steps:
+      - name: Request health check
+        run: |
+          echo "Pinging ${KEEP_ALIVE_URL}"
+          curl --fail --silent --show-error --location \
+            --max-time 70 \
+            --retry 3 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            "${KEEP_ALIVE_URL}"
+          echo
