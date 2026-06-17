@@ -1,0 +1,97 @@
+import json
+from typing import Any
+
+
+EXAM_OUTPUT_SCHEMA = {
+    "title": "string",
+    "description": "string",
+    "subject": "string",
+    "grade": "string",
+    "duration_minutes": 0,
+    "total_points": 0,
+    "questions": [
+        {
+            "type": "multiple_choice",
+            "content": "string",
+            "options": ["string", "string", "string", "string"],
+            "correct_answer": "string",
+            "explanation": "string",
+            "difficulty": "easy",
+            "points": 1,
+            "topic": "string",
+        }
+    ],
+}
+
+
+def build_exam_generation_prompt(data: dict[str, Any]) -> str:
+    question_types = ", ".join(data["question_types"])
+    difficulty_distribution = json.dumps(
+        data["difficulty_distribution"],
+        ensure_ascii=False,
+    )
+    difficulty_distribution_total = sum(data["difficulty_distribution"].values())
+    difficulty_distribution_unit = (
+        "question counts"
+        if difficulty_distribution_total == data["question_count"]
+        else "percentages"
+    )
+    output_schema = json.dumps(EXAM_OUTPUT_SCHEMA, ensure_ascii=False, indent=2)
+    additional_instructions = data.get("additional_instructions") or "None"
+
+    return f"""You are an exam generation assistant for QuizzVN.
+
+Your job is to create a high-quality exam draft for a teacher.
+
+Return only valid JSON. Do not include markdown. Do not include explanations outside the JSON.
+
+Exam requirements:
+- Subject: {data["subject"]}
+- Grade: {data["grade"]}
+- Topic: {data["topic"]}
+- Duration: {data["duration_minutes"]} minutes
+- Number of questions: {data["question_count"]}
+- Question types: {question_types}
+- Difficulty distribution ({difficulty_distribution_unit}): {difficulty_distribution}
+- Language: {data["language"]}
+- Additional instructions: {additional_instructions}
+
+Rules:
+1. The exam must be suitable for the specified grade.
+2. Do not create duplicate questions.
+3. Each question must have a clear content field.
+4. Each multiple_choice question must have exactly 4 options.
+5. correct_answer must match one of the options for multiple_choice.
+6. Each question must include explanation.
+7. Each question must include difficulty: easy, medium, or hard.
+8. Each question must include points.
+9. The number of questions must exactly match the requested question_count.
+10. Do not include unsafe, harmful, or irrelevant content.
+11. Use only these question types: {question_types}.
+12. Follow the requested difficulty distribution exactly when it is given as question counts.
+
+Return JSON in this exact structure:
+{output_schema}
+"""
+
+
+def build_exam_repair_prompt(
+    original_prompt: str,
+    previous_payload: dict[str, Any],
+    errors: list[str],
+) -> str:
+    previous_json = json.dumps(previous_payload, ensure_ascii=False, indent=2)
+    error_text = "\n".join(f"- {error}" for error in errors)
+
+    return f"""{original_prompt}
+
+The previous JSON failed validation.
+
+Errors:
+{error_text}
+
+Previous JSON:
+{previous_json}
+
+Please fix the JSON. Return only valid JSON. Do not add markdown.
+"""
