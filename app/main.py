@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.admin_router import router as admin_router
 from app.routers.analytics_router import router as analytics_router
+from app.routers.ai_exam_router import router as ai_exam_router
 from app.routers.auth_router import router as auth_router
 from app.routers.chat_router import router as chat_router
 from app.routers.student_router import router as student_router
@@ -14,6 +15,7 @@ from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
 from app.services.auth_service import bootstrap_auth_storage
 from app.services.analytics_service import bootstrap_web_analytics_storage
 from app.services.chat_service import bootstrap_chat_storage
+from app.services.ai_exam_service import bootstrap_ai_exam_storage
 from app.services.media_service import bootstrap_media_storage
 from app.services.student_service import bootstrap_student_learning_storage
 import asyncio
@@ -52,6 +54,7 @@ def startup_bootstrap() -> None:
     bootstrap_student_learning_storage()
     bootstrap_media_storage()
     bootstrap_chat_storage()
+    bootstrap_ai_exam_storage()
 
 # @app.get("/", response_model=RootResponse)
 # def root() -> RootResponse:
@@ -109,3 +112,4 @@ app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(teacher_router)
 app.include_router(chat_router)
+app.include_router(ai_exam_router)

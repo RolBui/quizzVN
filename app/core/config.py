@@ -150,5 +150,8 @@ class Settings:
     )
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
     CHAT_EVENTS_CHANNEL: str = os.getenv("CHAT_EVENTS_CHANNEL", "chat:events").strip() or "chat:events"
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini").strip().lower() or "gemini"
+    AI_MODEL: str = os.getenv("AI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
 
 settings = Settings()
