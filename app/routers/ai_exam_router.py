@@ -8,6 +8,7 @@ from app.schemas.ai_exam import (
     AIExamGenerationJobResponse,
     AIQuestionDraftResponse,
     GenerateExamRequest,
+    GenerateMoreQuestionsRequest,
     SaveAIExamToQuizRequest,
     SaveAIExamToQuizResponse,
     UpdateAIQuestionDraftRequest,
@@ -17,9 +18,11 @@ from app.services.ai_exam_service import (
     create_ai_exam_generation_job,
     get_teacher_ai_exam_job,
     run_ai_exam_generation_job,
+    run_more_questions_job,
     save_ai_exam_job_to_quiz,
     serialize_ai_exam_job,
     serialize_question_draft,
+    start_more_questions_for_teacher,
     update_teacher_question_draft,
 )
 
@@ -41,6 +44,25 @@ def post_generate_ai_exam(
     )
     background_tasks.add_task(run_ai_exam_generation_job, job.id)
 
+    return serialize_ai_exam_job(job)
+
+
+@router.post("/jobs/{job_id}/generate-more", response_model=AIExamGenerationJobResponse, include_in_schema=False)
+@router.post("/jobs/{job_id}/generate-more/", response_model=AIExamGenerationJobResponse)
+def post_generate_more_questions(
+    job_id: int,
+    payload: GenerateMoreQuestionsRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> AIExamGenerationJobResponse:
+    job, request_data = start_more_questions_for_teacher(
+        db,
+        current_teacher,
+        job_id,
+        payload.model_dump(),
+    )
+    background_tasks.add_task(run_more_questions_job, job.id, request_data)
     return serialize_ai_exam_job(job)
 
 

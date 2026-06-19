@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 AIQuestionType = Literal["multiple_choice", "true_false", "short_answer", "essay"]
@@ -71,6 +71,64 @@ class GenerateExamRequest(BaseModel):
         total = sum(normalized_distribution.values())
         if total not in {100, self.question_count}:
             raise ValueError("difficulty_distribution total must be 100 or match question_count")
+
+        self.difficulty_distribution = normalized_distribution
+        return self
+
+
+class GenerateMoreQuestionsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    question_count: int = Field(alias="count", ge=1, le=50)
+    question_types: list[AIQuestionType] | None = None
+    difficulty_distribution: dict[str, int] = Field(default_factory=dict)
+    additional_instructions: str = Field(default="", max_length=1000)
+
+    @field_validator("question_types")
+    @classmethod
+    def unique_optional_question_types(
+        cls,
+        value: list[AIQuestionType] | None,
+    ) -> list[AIQuestionType] | None:
+        if value is None:
+            return None
+        unique_values = list(dict.fromkeys(value))
+        if not unique_values:
+            raise ValueError("question_types must not be empty")
+        return unique_values
+
+    @field_validator("additional_instructions")
+    @classmethod
+    def strip_more_instructions(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_more_difficulty_distribution(self) -> "GenerateMoreQuestionsRequest":
+        if not self.difficulty_distribution:
+            return self
+
+        normalized_distribution = {
+            "easy": 0,
+            "medium": 0,
+            "hard": 0,
+        }
+        for difficulty, value in self.difficulty_distribution.items():
+            normalized_difficulty = DIFFICULTY_ALIASES.get(str(difficulty).strip().lower())
+            if normalized_difficulty is None:
+                raise ValueError("difficulty_distribution keys must be easy, medium, or hard")
+            normalized_distribution[normalized_difficulty] += value
+
+        negative_keys = [
+            difficulty
+            for difficulty, value in normalized_distribution.items()
+            if value < 0
+        ]
+        if negative_keys:
+            raise ValueError("difficulty_distribution values must be greater than or equal to 0")
+
+        total = sum(normalized_distribution.values())
+        if total not in {100, self.question_count}:
+            raise ValueError("difficulty_distribution total must be 100 or match count")
 
         self.difficulty_distribution = normalized_distribution
         return self

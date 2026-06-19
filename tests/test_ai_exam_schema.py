@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from app.schemas.ai_exam import GenerateExamRequest
+from app.schemas.ai_exam import GenerateExamRequest, GenerateMoreQuestionsRequest
 
 
 class GenerateExamRequestTest(unittest.TestCase):
@@ -60,6 +60,48 @@ class GenerateExamRequestTest(unittest.TestCase):
                     "easy": 20,
                     "medium": 10,
                     "hard": 10,
+                },
+            )
+
+
+class GenerateMoreQuestionsRequestTest(unittest.TestCase):
+    def test_accepts_count_alias_and_distribution_counts(self) -> None:
+        payload = GenerateMoreQuestionsRequest(
+            count=5,
+            question_types=["multiple_choice", "multiple_choice"],
+            difficulty_distribution={
+                "easy": 2,
+                "normal": 2,
+                "hard": 1,
+            },
+            additional_instructions="Them cau thay the.",
+        )
+
+        self.assertEqual(payload.question_count, 5)
+        self.assertEqual(payload.question_types, ["multiple_choice"])
+        self.assertEqual(
+            payload.difficulty_distribution,
+            {
+                "easy": 2,
+                "medium": 2,
+                "hard": 1,
+            },
+        )
+
+    def test_accepts_question_count_field_name(self) -> None:
+        payload = GenerateMoreQuestionsRequest(question_count=3)
+
+        self.assertEqual(payload.question_count, 3)
+        self.assertIsNone(payload.question_types)
+
+    def test_rejects_more_distribution_that_is_not_counts_or_percentages(self) -> None:
+        with self.assertRaises(ValidationError):
+            GenerateMoreQuestionsRequest(
+                count=5,
+                difficulty_distribution={
+                    "easy": 2,
+                    "medium": 2,
+                    "hard": 2,
                 },
             )
 
