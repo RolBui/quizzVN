@@ -14,6 +14,7 @@ from app.models.user import User
 from app.services.ai_exam_prompt_builder import build_exam_generation_prompt, build_exam_repair_prompt
 from app.services.ai_exam_validator import (
     build_question_payload_from_draft,
+    sanitize_ai_exam_payload,
     validate_ai_exam_payload,
     validate_ai_question_payload,
 )
@@ -100,11 +101,13 @@ def generate_exam_for_teacher(
 
     try:
         result = provider.generate_exam(prompt)
+        result.payload = sanitize_ai_exam_payload(result.payload)
         valid, errors = validate_ai_exam_payload(result.payload, request_data)
 
         if not valid:
             repair_prompt = build_exam_repair_prompt(prompt, result.payload, errors)
             retry_result = provider.generate_exam(repair_prompt)
+            retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
             retry_valid, retry_errors = validate_ai_exam_payload(retry_result.payload, request_data)
             result = retry_result
             valid = retry_valid

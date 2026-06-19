@@ -69,6 +69,9 @@ Rules:
 10. Do not include unsafe, harmful, or irrelevant content.
 11. Use only these question types: {question_types}.
 12. Follow the requested difficulty distribution exactly when it is given as question counts.
+13. Do not use underscores, markdown, or artificial markers inside answer options.
+14. For pronunciation questions, write full plain words in options. Do not write words like h_o_pe or _o_.
+15. If a question needs an underlined part but the output schema has no rich text, explain the target sound/letter in the explanation instead of marking the option text.
 
 Return JSON in this exact structure:
 {output_schema}
@@ -94,4 +97,5 @@ Previous JSON:
 {previous_json}
 
 Please fix the JSON. Return only valid JSON. Do not add markdown.
+Do not use underscores or artificial underline markers in option text.
 """
