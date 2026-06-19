@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -14,8 +14,9 @@ from app.schemas.ai_exam import (
 )
 from app.services.ai_exam_service import (
     AIExamGenerationError,
-    generate_exam_for_teacher,
+    create_ai_exam_generation_job,
     get_teacher_ai_exam_job,
+    run_ai_exam_generation_job,
     save_ai_exam_job_to_quiz,
     serialize_ai_exam_job,
     serialize_question_draft,
@@ -29,23 +30,16 @@ router = APIRouter(prefix="/api/ai-exams", tags=["AI Exams"])
 @router.post("/generate/", response_model=AIExamGenerationJobResponse)
 def post_generate_ai_exam(
     payload: GenerateExamRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
-) -> AIExamGenerationJobResponse | JSONResponse:
-    try:
-        job = generate_exam_for_teacher(
-            db,
-            current_teacher,
-            payload.model_dump(),
-        )
-    except AIExamGenerationError as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "detail": "AI exam generation failed.",
-                "errors": exc.errors,
-            },
-        )
+) -> AIExamGenerationJobResponse:
+    job = create_ai_exam_generation_job(
+        db,
+        current_teacher,
+        payload.model_dump(),
+    )
+    background_tasks.add_task(run_ai_exam_generation_job, job.id)
 
     return serialize_ai_exam_job(job)
 

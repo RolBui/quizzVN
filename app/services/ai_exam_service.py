@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.security import utc_now
-from app.database import engine
+from app.database import SessionLocal, engine
 from app.models.ai_exam import AIExamGenerationJob, AIQuestionDraft
 # Loads the referenced table for AIExamGenerationJob.quiz_id during bootstrap.
 from app.models.exam import Exam
@@ -67,12 +67,11 @@ def bootstrap_ai_exam_storage() -> None:
     AIQuestionDraft.__table__.create(bind=engine, checkfirst=True)
 
 
-def generate_exam_for_teacher(
+def create_ai_exam_generation_job(
     db: Session,
     teacher: User,
     request_data: dict[str, Any],
 ) -> AIExamGenerationJob:
-    provider = _get_ai_provider_client()
     provider_name = settings.AI_PROVIDER
     model_name = "mock" if provider_name == "mock" else settings.AI_MODEL
 
@@ -98,14 +97,45 @@ def generate_exam_for_teacher(
     db.add(job)
     db.commit()
     db.refresh(job)
+    return job
 
+
+def generate_exam_for_teacher(
+    db: Session,
+    teacher: User,
+    request_data: dict[str, Any],
+) -> AIExamGenerationJob:
+    job = create_ai_exam_generation_job(db, teacher, request_data)
+    _process_ai_exam_job(db, job, request_data)
+    return get_teacher_ai_exam_job(db, teacher, job.id)
+
+
+def run_ai_exam_generation_job(job_id: int) -> None:
+    db = SessionLocal()
     try:
-        result = provider.generate_exam(prompt)
+        job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+        if not job or job.status != "running":
+            return
+        _process_ai_exam_job(db, job, _build_request_data_from_job(job))
+    except AIExamGenerationError:
+        return
+    finally:
+        db.close()
+
+
+def _process_ai_exam_job(
+    db: Session,
+    job: AIExamGenerationJob,
+    request_data: dict[str, Any],
+) -> None:
+    try:
+        provider = _get_ai_provider_client()
+        result = provider.generate_exam(job.prompt)
         result.payload = sanitize_ai_exam_payload(result.payload)
         valid, errors = validate_ai_exam_payload(result.payload, request_data)
 
         if not valid:
-            repair_prompt = build_exam_repair_prompt(prompt, result.payload, errors)
+            repair_prompt = build_exam_repair_prompt(job.prompt, result.payload, errors)
             retry_result = provider.generate_exam(repair_prompt)
             retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
             retry_valid, retry_errors = validate_ai_exam_payload(retry_result.payload, request_data)
@@ -128,8 +158,6 @@ def generate_exam_for_teacher(
         errors = ["Unexpected AI exam generation error"]
         _mark_job_failed(db, job.id, errors)
         raise AIExamGenerationError(errors) from exc
-
-    return get_teacher_ai_exam_job(db, teacher, job.id)
 
 
 def get_teacher_ai_exam_job(db: Session, teacher: User, job_id: int) -> AIExamGenerationJob:
@@ -305,6 +333,20 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
             serialize_question_draft(draft)
             for draft in sorted(job.question_drafts, key=lambda item: item.order)
         ],
+    }
+
+
+def _build_request_data_from_job(job: AIExamGenerationJob) -> dict[str, Any]:
+    return {
+        "subject": job.subject,
+        "grade": job.grade,
+        "topic": job.topic,
+        "duration_minutes": job.duration_minutes,
+        "question_count": job.question_count,
+        "question_types": list(job.question_types or []),
+        "difficulty_distribution": dict(job.difficulty_distribution or {}),
+        "language": job.language,
+        "additional_instructions": job.additional_instructions or "",
     }
 
 
