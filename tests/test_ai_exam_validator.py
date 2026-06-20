@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.ai_exam_validator import validate_ai_exam_payload
+from app.services.ai_exam_validator import sanitize_ai_exam_payload, validate_ai_exam_payload
 
 
 REQUEST_DATA = {
@@ -87,6 +87,44 @@ class AIExamValidatorTest(unittest.TestCase):
 
         self.assertFalse(valid)
         self.assertIn("Question 2: duplicate content", errors)
+
+    def test_sanitizes_artificial_underline_markers_in_options(self) -> None:
+        payload = _payload(
+            [
+                {
+                    **_question("Choose the word whose underlined part is pronounced differently."),
+                    "options": ["h_o_pe", "h_o_me", "c_o_me", "n_o_te"],
+                    "correct_answer": "c_o_me",
+                },
+                _question("Question 2"),
+            ]
+        )
+
+        sanitized = sanitize_ai_exam_payload(payload)
+        valid, errors = validate_ai_exam_payload(sanitized, REQUEST_DATA)
+
+        self.assertTrue(valid)
+        self.assertEqual(sanitized["questions"][0]["options"], ["hope", "home", "come", "note"])
+        self.assertEqual(sanitized["questions"][0]["correct_answer"], "come")
+        self.assertEqual(errors, [])
+
+    def test_rejects_duplicate_options_after_sanitizing(self) -> None:
+        payload = _payload(
+            [
+                {
+                    **_question("Question 1"),
+                    "options": ["h_o_pe", "hope", "home", "come"],
+                    "correct_answer": "hope",
+                },
+                _question("Question 2"),
+            ]
+        )
+
+        sanitized = sanitize_ai_exam_payload(payload)
+        valid, errors = validate_ai_exam_payload(sanitized, REQUEST_DATA)
+
+        self.assertFalse(valid)
+        self.assertIn("Question 1: options must be unique", errors)
 
 
 if __name__ == "__main__":

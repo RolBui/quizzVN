@@ -2,18 +2,24 @@ import re
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.security import utc_now
-from app.database import engine
+from app.database import SessionLocal, engine
 from app.models.ai_exam import AIExamGenerationJob, AIQuestionDraft
 # Loads the referenced table for AIExamGenerationJob.quiz_id during bootstrap.
 from app.models.exam import Exam
 from app.models.user import User
-from app.services.ai_exam_prompt_builder import build_exam_generation_prompt, build_exam_repair_prompt
+from app.services.ai_exam_prompt_builder import (
+    build_exam_generation_prompt,
+    build_exam_repair_prompt,
+    build_more_questions_prompt,
+)
 from app.services.ai_exam_validator import (
     build_question_payload_from_draft,
+    sanitize_ai_exam_payload,
     validate_ai_exam_payload,
     validate_ai_question_payload,
 )
@@ -66,12 +72,11 @@ def bootstrap_ai_exam_storage() -> None:
     AIQuestionDraft.__table__.create(bind=engine, checkfirst=True)
 
 
-def generate_exam_for_teacher(
+def create_ai_exam_generation_job(
     db: Session,
     teacher: User,
     request_data: dict[str, Any],
 ) -> AIExamGenerationJob:
-    provider = _get_ai_provider_client()
     provider_name = settings.AI_PROVIDER
     model_name = "mock" if provider_name == "mock" else settings.AI_MODEL
 
@@ -97,14 +102,94 @@ def generate_exam_for_teacher(
     db.add(job)
     db.commit()
     db.refresh(job)
+    return job
 
+
+def generate_exam_for_teacher(
+    db: Session,
+    teacher: User,
+    request_data: dict[str, Any],
+) -> AIExamGenerationJob:
+    job = create_ai_exam_generation_job(db, teacher, request_data)
+    _process_ai_exam_job(db, job, request_data)
+    return get_teacher_ai_exam_job(db, teacher, job.id)
+
+
+def run_ai_exam_generation_job(job_id: int) -> None:
+    db = SessionLocal()
     try:
-        result = provider.generate_exam(prompt)
+        job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+        if not job or job.status != "running":
+            return
+        _process_ai_exam_job(db, job, _build_request_data_from_job(job))
+    except AIExamGenerationError:
+        return
+    finally:
+        db.close()
+
+
+def start_more_questions_for_teacher(
+    db: Session,
+    teacher: User,
+    job_id: int,
+    data: dict[str, Any],
+) -> tuple[AIExamGenerationJob, dict[str, Any]]:
+    job = get_teacher_ai_exam_job(db, teacher, job_id)
+    if job.status in {"running", "generating_more"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="AI exam job is already generating questions",
+        )
+
+    if job.status == "converted" and job.quiz_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Converted AI exam jobs cannot generate more questions",
+        )
+
+    if job.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only completed AI exam jobs can generate more questions",
+        )
+
+    request_data = _build_more_request_data(job, data)
+    job.status = "generating_more"
+    job.error_message = ""
+    job.updated_at = utc_now()
+    db.commit()
+    db.refresh(job)
+    return job, request_data
+
+
+def run_more_questions_job(job_id: int, request_data: dict[str, Any]) -> None:
+    db = SessionLocal()
+    try:
+        job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+        if not job or job.status != "generating_more":
+            return
+        _process_more_questions_job(db, job, request_data)
+    except AIExamGenerationError:
+        return
+    finally:
+        db.close()
+
+
+def _process_ai_exam_job(
+    db: Session,
+    job: AIExamGenerationJob,
+    request_data: dict[str, Any],
+) -> None:
+    try:
+        provider = _get_ai_provider_client()
+        result = provider.generate_exam(job.prompt)
+        result.payload = sanitize_ai_exam_payload(result.payload)
         valid, errors = validate_ai_exam_payload(result.payload, request_data)
 
         if not valid:
-            repair_prompt = build_exam_repair_prompt(prompt, result.payload, errors)
+            repair_prompt = build_exam_repair_prompt(job.prompt, result.payload, errors)
             retry_result = provider.generate_exam(repair_prompt)
+            retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
             retry_valid, retry_errors = validate_ai_exam_payload(retry_result.payload, request_data)
             result = retry_result
             valid = retry_valid
@@ -126,7 +211,49 @@ def generate_exam_for_teacher(
         _mark_job_failed(db, job.id, errors)
         raise AIExamGenerationError(errors) from exc
 
-    return get_teacher_ai_exam_job(db, teacher, job.id)
+
+def _process_more_questions_job(
+    db: Session,
+    job: AIExamGenerationJob,
+    request_data: dict[str, Any],
+) -> None:
+    existing_questions = _build_existing_question_context(db, job.id)
+    prompt = build_more_questions_prompt(request_data, existing_questions)
+
+    try:
+        provider = _get_ai_provider_client()
+        result = provider.generate_exam(prompt)
+        result.payload = sanitize_ai_exam_payload(result.payload)
+        errors = _validate_more_questions_payload(db, job.id, result.payload, request_data)
+
+        if errors:
+            repair_prompt = build_exam_repair_prompt(prompt, result.payload, errors)
+            retry_result = provider.generate_exam(repair_prompt)
+            retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
+            retry_errors = _validate_more_questions_payload(
+                db,
+                job.id,
+                retry_result.payload,
+                request_data,
+            )
+            result = retry_result
+            errors = retry_errors
+
+        if errors:
+            raise AIExamGenerationError(errors)
+
+        _append_questions_to_job(db, job, result)
+    except AIExamGenerationError as exc:
+        _mark_more_questions_failed(db, job.id, exc.errors)
+        raise
+    except AIProviderError as exc:
+        errors = [str(exc)]
+        _mark_more_questions_failed(db, job.id, errors)
+        raise AIExamGenerationError(errors) from exc
+    except Exception as exc:
+        errors = ["Unexpected AI exam generation error"]
+        _mark_more_questions_failed(db, job.id, errors)
+        raise AIExamGenerationError(errors) from exc
 
 
 def get_teacher_ai_exam_job(db: Session, teacher: User, job_id: int) -> AIExamGenerationJob:
@@ -303,6 +430,143 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
             for draft in sorted(job.question_drafts, key=lambda item: item.order)
         ],
     }
+
+
+def _build_request_data_from_job(job: AIExamGenerationJob) -> dict[str, Any]:
+    return {
+        "subject": job.subject,
+        "grade": job.grade,
+        "topic": job.topic,
+        "duration_minutes": job.duration_minutes,
+        "question_count": job.question_count,
+        "question_types": list(job.question_types or []),
+        "difficulty_distribution": dict(job.difficulty_distribution or {}),
+        "language": job.language,
+        "additional_instructions": job.additional_instructions or "",
+    }
+
+
+def _build_more_request_data(
+    job: AIExamGenerationJob,
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    extra_instructions = data.get("additional_instructions") or ""
+    base_instructions = job.additional_instructions or ""
+    if base_instructions and extra_instructions:
+        additional_instructions = f"{base_instructions}\n{extra_instructions}"
+    else:
+        additional_instructions = base_instructions or extra_instructions
+
+    return {
+        "subject": job.subject,
+        "grade": job.grade,
+        "topic": job.topic,
+        "duration_minutes": job.duration_minutes,
+        "question_count": data["question_count"],
+        "question_types": data.get("question_types") or list(job.question_types or []) or ["multiple_choice"],
+        "difficulty_distribution": data.get("difficulty_distribution")
+        or _build_default_more_difficulty_distribution(job),
+        "language": job.language,
+        "additional_instructions": additional_instructions,
+    }
+
+
+def _build_default_more_difficulty_distribution(job: AIExamGenerationJob) -> dict[str, int]:
+    default_distribution = {
+        "easy": 40,
+        "medium": 40,
+        "hard": 20,
+    }
+    distribution = job.difficulty_distribution or {}
+    values = {
+        "easy": int(distribution.get("easy") or 0),
+        "medium": int(distribution.get("medium") or 0),
+        "hard": int(distribution.get("hard") or 0),
+    }
+    total = sum(values.values())
+    if total <= 0:
+        return default_distribution
+    if total == 100:
+        return values
+
+    easy = round(values["easy"] * 100 / total)
+    medium = round(values["medium"] * 100 / total)
+    hard = max(0, 100 - easy - medium)
+    return {
+        "easy": easy,
+        "medium": medium,
+        "hard": hard,
+    }
+
+
+def _build_existing_question_context(
+    db: Session,
+    job_id: int,
+) -> list[dict[str, Any]]:
+    drafts = (
+        db.query(AIQuestionDraft)
+        .filter(AIQuestionDraft.job_id == job_id)
+        .order_by(AIQuestionDraft.order.asc())
+        .all()
+    )
+    return [
+        {
+            "id": draft.id,
+            "status": "approved" if draft.is_approved else "rejected",
+            "type": draft.question_type,
+            "content": draft.content,
+            "options": draft.options or [],
+            "difficulty": draft.difficulty,
+            "topic": draft.topic,
+        }
+        for draft in drafts
+    ]
+
+
+def _validate_more_questions_payload(
+    db: Session,
+    job_id: int,
+    payload: dict[str, Any],
+    request_data: dict[str, Any],
+) -> list[str]:
+    _, errors = validate_ai_exam_payload(payload, request_data)
+    errors.extend(_validate_new_questions_against_existing(db, job_id, payload))
+    return errors
+
+
+def _validate_new_questions_against_existing(
+    db: Session,
+    job_id: int,
+    payload: dict[str, Any],
+) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+
+    existing_contents = {
+        _normalize_duplicate_text(content)
+        for (content,) in db.query(AIQuestionDraft.content)
+        .filter(AIQuestionDraft.job_id == job_id)
+        .all()
+    }
+    existing_contents.discard("")
+
+    questions = payload.get("questions")
+    if not isinstance(questions, list):
+        return []
+
+    errors: list[str] = []
+    for index, question in enumerate(questions, start=1):
+        if not isinstance(question, dict):
+            continue
+        content_key = _normalize_duplicate_text(question.get("content"))
+        if content_key and content_key in existing_contents:
+            errors.append(f"Question {index}: duplicates an existing draft question")
+
+    return errors
+
+
+def _normalize_duplicate_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
 
 def _build_single_choice_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
@@ -543,6 +807,66 @@ def _save_completed_job(
     db.refresh(job)
 
 
+def _append_questions_to_job(
+    db: Session,
+    job: AIExamGenerationJob,
+    result: AIProviderResult,
+) -> None:
+    payload = result.payload
+    questions = payload.get("questions") or []
+    latest_order = (
+        db.query(func.max(AIQuestionDraft.order))
+        .filter(AIQuestionDraft.job_id == job.id)
+        .scalar()
+        or 0
+    )
+    existing_count = (
+        db.query(func.count(AIQuestionDraft.id))
+        .filter(AIQuestionDraft.job_id == job.id)
+        .scalar()
+        or 0
+    )
+    existing_points = (
+        db.query(func.coalesce(func.sum(AIQuestionDraft.points), 0))
+        .filter(AIQuestionDraft.job_id == job.id)
+        .scalar()
+        or 0
+    )
+
+    new_points = 0.0
+    for offset, question in enumerate(questions, start=1):
+        new_points += float(question.get("points") or 1)
+        draft = AIQuestionDraft(
+            job_id=job.id,
+            question_type=question["type"],
+            content=question["content"].strip(),
+            options=question.get("options") or [],
+            correct_answer=question.get("correct_answer"),
+            explanation=(question.get("explanation") or "").strip(),
+            difficulty=question["difficulty"],
+            points=float(question.get("points") or 1),
+            topic=(question.get("topic") or "").strip(),
+            order=latest_order + offset,
+            is_approved=True,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(draft)
+
+    if not job.title:
+        job.title = (payload.get("title") or "").strip() or None
+    if not job.description:
+        job.description = (payload.get("description") or "").strip() or None
+    job.total_points = float(existing_points or 0) + new_points
+    job.question_count = int(existing_count) + len(questions)
+    job.raw_response = result.raw_response
+    job.error_message = ""
+    job.status = "completed"
+    job.updated_at = utc_now()
+    db.commit()
+    db.refresh(job)
+
+
 def _mark_job_failed(db: Session, job_id: int, errors: list[str]) -> None:
     db.rollback()
     job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
@@ -550,6 +874,24 @@ def _mark_job_failed(db: Session, job_id: int, errors: list[str]) -> None:
         return
 
     job.status = "failed"
+    job.error_message = "\n".join(errors)
+    job.updated_at = utc_now()
+    db.commit()
+
+
+def _mark_more_questions_failed(db: Session, job_id: int, errors: list[str]) -> None:
+    db.rollback()
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        return
+
+    has_existing_drafts = (
+        db.query(AIQuestionDraft.id)
+        .filter(AIQuestionDraft.job_id == job_id)
+        .first()
+        is not None
+    )
+    job.status = "completed" if has_existing_drafts else "failed"
     job.error_message = "\n".join(errors)
     job.updated_at = utc_now()
     db.commit()

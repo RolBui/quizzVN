@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.security import utc_now
 from app.models.classroom import Classroom
 from app.models.classroom_membership import ClassroomMembership
+from app.models.ai_exam import AIExamGenerationJob
 from app.models.exam import Exam
 from app.models.exam_attempt import ExamAttempt
 from app.models.exam_question import ExamQuestion
@@ -1019,9 +1020,21 @@ def delete_teacher_exam(db: Session, teacher: User, exam_id: int) -> dict:
             status_code=400,
             detail="Cannot delete exam after students have started attempts",
         )
+    _unlink_ai_exam_jobs_for_exam(db, exam.id)
     db.delete(exam)
     db.commit()
     return {"message": "Exam deleted successfully"}
+
+
+def _unlink_ai_exam_jobs_for_exam(db: Session, exam_id: int) -> None:
+    db.query(AIExamGenerationJob).filter(AIExamGenerationJob.quiz_id == exam_id).update(
+        {
+            AIExamGenerationJob.quiz_id: None,
+            AIExamGenerationJob.status: "completed",
+            AIExamGenerationJob.updated_at: utc_now(),
+        },
+        synchronize_session=False,
+    )
 
 
 def set_teacher_exam_visibility(

@@ -1,3 +1,5 @@
+import copy
+import re
 from typing import Any
 
 
@@ -56,6 +58,54 @@ def validate_ai_exam_payload(
         errors.append("total points must be greater than 0")
 
     return not errors, errors
+
+
+def sanitize_ai_exam_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized_payload = copy.deepcopy(payload)
+    if not isinstance(sanitized_payload, dict):
+        return sanitized_payload
+
+    for field in ("title", "description", "subject", "grade"):
+        if isinstance(sanitized_payload.get(field), str):
+            sanitized_payload[field] = sanitize_ai_text(sanitized_payload[field])
+
+    questions = sanitized_payload.get("questions")
+    if not isinstance(questions, list):
+        return sanitized_payload
+
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+
+        for field in ("content", "explanation", "difficulty", "topic", "type"):
+            if isinstance(question.get(field), str):
+                question[field] = sanitize_ai_text(question[field])
+
+        options = question.get("options")
+        if isinstance(options, list):
+            question["options"] = [
+                sanitize_ai_text(option) if isinstance(option, str) else option
+                for option in options
+            ]
+
+        correct_answer = question.get("correct_answer")
+        if isinstance(correct_answer, str):
+            question["correct_answer"] = sanitize_ai_text(correct_answer)
+        elif isinstance(correct_answer, list):
+            question["correct_answer"] = [
+                sanitize_ai_text(answer) if isinstance(answer, str) else answer
+                for answer in correct_answer
+            ]
+
+    return sanitized_payload
+
+
+def sanitize_ai_text(value: str) -> str:
+    normalized = str(value).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = _strip_markdown_emphasis(normalized)
+    normalized = _strip_artificial_underline_markers(normalized)
+    return normalized.strip()
 
 
 def validate_ai_question_payload(
@@ -131,10 +181,16 @@ def _validate_multiple_choice(question: dict[str, Any], index: int) -> list[str]
         errors.append(f"Question {index}: multiple_choice must have exactly 4 options")
     if any(not option for option in normalized_options):
         errors.append(f"Question {index}: options cannot be empty")
+    if len(set(normalized_options)) != len(normalized_options):
+        errors.append(f"Question {index}: options must be unique")
+    if any(_contains_artificial_underline_marker(option) for option in normalized_options):
+        errors.append(f"Question {index}: options must not contain underscore underline markers")
 
     correct_answer = _normalize_text(question.get("correct_answer"))
     if not correct_answer:
         errors.append(f"Question {index}: correct_answer is required")
+    elif _contains_artificial_underline_marker(correct_answer):
+        errors.append(f"Question {index}: correct_answer must not contain underscore underline markers")
     elif correct_answer not in normalized_options:
         errors.append(f"Question {index}: correct_answer is not in options")
 
@@ -180,3 +236,25 @@ def _to_float(value: Any, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _strip_markdown_emphasis(value: str) -> str:
+    value = re.sub(r"\*\*([^*]+)\*\*", r"\1", value)
+    value = re.sub(r"__([^_]+)__", r"\1", value)
+    value = re.sub(r"`([^`]+)`", r"\1", value)
+    return value
+
+
+def _strip_artificial_underline_markers(value: str) -> str:
+    value = re.sub(r"(?<!\w)_([A-Za-z]+)_(?!\w)", r"\1", value)
+
+    def remove_internal_underscores(match: re.Match[str]) -> str:
+        return match.group(0).replace("_", "")
+
+    return re.sub(r"\b[A-Za-z]+(?:_[A-Za-z]+){2,}\b", remove_internal_underscores, value)
+
+
+def _contains_artificial_underline_marker(value: str) -> bool:
+    if re.search(r"(?<!\w)_[A-Za-z]+_(?!\w)", value):
+        return True
+    return bool(re.search(r"\b[A-Za-z]+(?:_[A-Za-z]+){2,}\b", value))

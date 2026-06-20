@@ -1289,6 +1289,23 @@ def _delete_exams_where(db: Session, where_sql: str, params: dict) -> None:
         return
 
     exam_ids_sql = f"select id from exams where {where_sql}"
+    if _table_exists(db, "ai_exam_generation_jobs") and _column_exists(
+        db,
+        "ai_exam_generation_jobs",
+        "quiz_id",
+    ):
+        db.execute(
+            text(
+                f"""
+                update ai_exam_generation_jobs
+                set quiz_id = null,
+                    status = 'completed',
+                    updated_at = CURRENT_TIMESTAMP
+                where quiz_id in ({exam_ids_sql})
+                """
+            ),
+            params,
+        )
     if _table_exists(db, "exam_attempt_answers") and _table_exists(db, "exam_attempts"):
         db.execute(
             text(

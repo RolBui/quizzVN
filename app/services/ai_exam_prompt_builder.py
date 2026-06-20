@@ -69,6 +69,9 @@ Rules:
 10. Do not include unsafe, harmful, or irrelevant content.
 11. Use only these question types: {question_types}.
 12. Follow the requested difficulty distribution exactly when it is given as question counts.
+13. Do not use underscores, markdown, or artificial markers inside answer options.
+14. For pronunciation questions, write full plain words in options. Do not write words like h_o_pe or _o_.
+15. If a question needs an underlined part but the output schema has no rich text, explain the target sound/letter in the explanation instead of marking the option text.
 
 Return JSON in this exact structure:
 {output_schema}
@@ -94,4 +97,27 @@ Previous JSON:
 {previous_json}
 
 Please fix the JSON. Return only valid JSON. Do not add markdown.
+Do not use underscores or artificial underline markers in option text.
+"""
+
+
+def build_more_questions_prompt(
+    data: dict[str, Any],
+    existing_questions: list[dict[str, Any]],
+) -> str:
+    base_prompt = build_exam_generation_prompt(data)
+    existing_json = json.dumps(existing_questions, ensure_ascii=False, indent=2)
+
+    return f"""{base_prompt}
+
+You are adding questions to an existing draft, not creating a replacement exam.
+
+Existing draft questions to avoid repeating:
+{existing_json}
+
+Rules for this add-on generation:
+1. Return only the requested number of new questions.
+2. Do not repeat or closely paraphrase any existing draft question, including rejected ones.
+3. Keep the same subject, grade, topic, language, and exam style.
+4. The teacher will review these new questions before saving the final exam.
 """

@@ -10,7 +10,7 @@ class AIExamGenerationJob(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    quiz_id = Column(Integer, ForeignKey("exams.id"), nullable=True)
+    quiz_id = Column(Integer, ForeignKey("exams.id", ondelete="SET NULL"), nullable=True)
 
     subject = Column(String(100), nullable=False)
     grade = Column(String(50), nullable=False)
