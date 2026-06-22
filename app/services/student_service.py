@@ -131,6 +131,18 @@ def _ensure_student_learning_columns() -> None:
             END IF;
         END $$
         """,
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_attempts' AND column_name = 'student_id'
+            ) THEN
+                EXECUTE 'ALTER TABLE exam_attempts ALTER COLUMN student_id DROP NOT NULL';
+            END IF;
+        END $$
+        """,
         "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS selected_option_id INTEGER",
         "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS answer_text TEXT",
         "ALTER TABLE exam_attempt_answers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
