@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 TeacherScope = Literal["system", "class"]
-TeacherQuestionType = Literal["single_choice", "text"]
+TeacherQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
 
 
 class TeacherClassSchema(BaseModel):

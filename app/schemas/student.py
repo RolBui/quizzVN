@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 StudentScope = Literal["system", "class"]
 AttemptStatus = Literal["in_progress", "submitted"]
-StudentQuestionType = Literal["single_choice", "text"]
+StudentQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
 
 
 class StudentClassSchema(BaseModel):

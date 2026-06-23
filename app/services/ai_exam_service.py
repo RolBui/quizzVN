@@ -29,6 +29,8 @@ from app.services.teacher_service import create_teacher_exam
 
 
 TEACHER_QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+TEACHER_QUESTION_TYPE_TRUE_FALSE = "true_false"
+TEACHER_QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 TEACHER_QUESTION_TYPE_TEXT = "text"
 OPTION_KEYS = ("A", "B", "C", "D")
 
@@ -393,7 +395,9 @@ def build_teacher_exam_questions_from_drafts(drafts: list[AIQuestionDraft]) -> l
             questions.append(_build_single_choice_question(draft, index))
         elif draft.question_type == "true_false":
             questions.append(_build_true_false_question(draft, index))
-        elif draft.question_type in {"short_answer", "essay"}:
+        elif draft.question_type == "short_answer":
+            questions.append(_build_short_answer_question(draft, index))
+        elif draft.question_type == "essay":
             questions.append(_build_text_question(draft, index))
         else:
             raise HTTPException(
@@ -592,7 +596,7 @@ def _build_single_choice_question(draft: AIQuestionDraft, order_index: int) -> d
 def _build_true_false_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
     correct_bool = _to_bool_answer(draft.correct_answer)
     return {
-        "question_type": TEACHER_QUESTION_TYPE_SINGLE_CHOICE,
+        "question_type": TEACHER_QUESTION_TYPE_TRUE_FALSE,
         "prompt": _build_exam_prompt(draft),
         "explanation": draft.explanation.strip(),
         "order_index": order_index,
@@ -610,6 +614,22 @@ def _build_true_false_question(draft: AIQuestionDraft, order_index: int) -> dict
             },
         ],
         "accepted_answers": [],
+    }
+
+
+def _build_short_answer_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
+    accepted_answers = _extract_text_answers(draft.correct_answer)
+    if not accepted_answers:
+        accepted_answers = [draft.explanation.strip()]
+
+    return {
+        "question_type": TEACHER_QUESTION_TYPE_SHORT_ANSWER,
+        "prompt": _build_exam_prompt(draft),
+        "explanation": draft.explanation.strip(),
+        "order_index": order_index,
+        "points": float(draft.points or 1),
+        "options": [],
+        "accepted_answers": accepted_answers,
     }
 
 

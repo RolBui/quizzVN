@@ -21,7 +21,11 @@ SCOPE_CLASS = "class"
 ATTEMPT_STATUS_IN_PROGRESS = "in_progress"
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+QUESTION_TYPE_TRUE_FALSE = "true_false"
+QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 QUESTION_TYPE_TEXT = "text"
+SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
+TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 PASSING_SCORE_PERCENT = 50.0
 
 
@@ -408,9 +412,22 @@ def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
 
 
 def _normalize_question_type(question_type: str | None) -> str:
-    if question_type == QUESTION_TYPE_TEXT:
-        return QUESTION_TYPE_TEXT
+    if question_type in {
+        QUESTION_TYPE_SINGLE_CHOICE,
+        QUESTION_TYPE_TRUE_FALSE,
+        QUESTION_TYPE_SHORT_ANSWER,
+        QUESTION_TYPE_TEXT,
+    }:
+        return question_type
     return QUESTION_TYPE_SINGLE_CHOICE
+
+
+def _is_selection_question_type(question_type: str) -> bool:
+    return question_type in SELECTION_QUESTION_TYPES
+
+
+def _is_text_answer_question_type(question_type: str) -> bool:
+    return question_type in TEXT_ANSWER_QUESTION_TYPES
 
 
 def _normalize_text_answer(value: str | None) -> str:
@@ -546,7 +563,7 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
                     "image_url": option.image_url,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
-                if _normalize_question_type(question.question_type) == QUESTION_TYPE_SINGLE_CHOICE
+                if _is_selection_question_type(_normalize_question_type(question.question_type))
             ],
         }
         for question in sorted(exam.questions, key=lambda item: item.order_index)
@@ -660,16 +677,16 @@ def save_student_attempt_answers(
         question_type = _normalize_question_type(question.question_type)
         normalized_answer_text = answer_text.strip() if isinstance(answer_text, str) else None
 
-        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+        if _is_selection_question_type(question_type):
             if selected_option_id is not None and not any(
                 option.id == selected_option_id for option in question.options
             ):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Option {selected_option_id} does not belong to question {question_id}",
-                )
+            )
             normalized_answer_text = None
-        else:
+        elif _is_text_answer_question_type(question_type):
             if selected_option_id is not None:
                 raise HTTPException(
                     status_code=400,
@@ -677,6 +694,8 @@ def save_student_attempt_answers(
                 )
             if normalized_answer_text == "":
                 normalized_answer_text = None
+        else:
+            raise HTTPException(status_code=400, detail=f"Question {question_id}: unsupported question type")
 
         attempt_answer = existing_answers.get(question_id)
         if not attempt_answer:
@@ -715,15 +734,17 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
         selected_answer = answer_map.get(question.id)
         selected_option = selected_answer.selected_option if selected_answer else None
         normalized_submitted_text = _normalize_text_answer(selected_answer.answer_text if selected_answer else None)
-        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+        if _is_selection_question_type(question_type):
             is_correct = bool(
                 selected_option
                 and correct_option
                 and selected_option.id == correct_option.id
             )
-        else:
+        elif _is_text_answer_question_type(question_type):
             accepted_answers = {_normalize_text_answer(option.option_text) for option in correct_options}
             is_correct = bool(normalized_submitted_text and normalized_submitted_text in accepted_answers)
+        else:
+            is_correct = False
         result_answers.append(
             {
                 "question_id": question.id,
@@ -739,7 +760,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
                 "correct_option_text": correct_option.option_text if correct_option else None,
                 "correct_option_image_url": correct_option.image_url if correct_option else None,
                 "accepted_answers": [option.option_text for option in correct_options]
-                if question_type == QUESTION_TYPE_TEXT
+                if _is_text_answer_question_type(question_type)
                 else [],
                 "is_correct": is_correct,
                 "points_earned": question.points if is_correct else 0.0,
@@ -782,18 +803,20 @@ def submit_student_attempt(db: Session, student: User, attempt_id: int) -> dict:
         correct_option = correct_options[0] if correct_options else None
         selected_answer = answer_map.get(question.id)
         selected_option = selected_answer.selected_option if selected_answer else None
-        if question_type == QUESTION_TYPE_SINGLE_CHOICE:
+        if _is_selection_question_type(question_type):
             is_correct = bool(
                 selected_option
                 and correct_option
                 and selected_option.id == correct_option.id
             )
-        else:
+        elif _is_text_answer_question_type(question_type):
             accepted_answers = {_normalize_text_answer(option.option_text) for option in correct_options}
             is_correct = bool(
                 selected_answer
                 and _normalize_text_answer(selected_answer.answer_text) in accepted_answers
             )
+        else:
+            is_correct = False
         if is_correct:
             score += question.points
             correct_answers_count += 1
