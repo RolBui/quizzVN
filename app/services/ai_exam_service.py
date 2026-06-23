@@ -574,6 +574,7 @@ def _build_single_choice_question(draft: AIQuestionDraft, order_index: int) -> d
     return {
         "question_type": TEACHER_QUESTION_TYPE_SINGLE_CHOICE,
         "prompt": _build_exam_prompt(draft),
+        "explanation": draft.explanation.strip(),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [
@@ -593,6 +594,7 @@ def _build_true_false_question(draft: AIQuestionDraft, order_index: int) -> dict
     return {
         "question_type": TEACHER_QUESTION_TYPE_SINGLE_CHOICE,
         "prompt": _build_exam_prompt(draft),
+        "explanation": draft.explanation.strip(),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [
@@ -619,6 +621,7 @@ def _build_text_question(draft: AIQuestionDraft, order_index: int) -> dict[str, 
     return {
         "question_type": TEACHER_QUESTION_TYPE_TEXT,
         "prompt": _build_exam_prompt(draft, include_explanation=draft.question_type == "essay"),
+        "explanation": draft.explanation.strip(),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [],

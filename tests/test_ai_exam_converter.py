@@ -29,6 +29,7 @@ class AIExamConverterTest(unittest.TestCase):
         self.assertEqual(len(questions[0]["options"]), 4)
         self.assertEqual(questions[0]["options"][0]["option_key"], "A")
         self.assertTrue(questions[0]["options"][0]["is_correct"])
+        self.assertEqual(questions[0]["explanation"], "Python is a programming language.")
 
     def test_maps_true_false_to_single_choice(self) -> None:
         questions = build_teacher_exam_questions_from_drafts(
@@ -76,6 +77,7 @@ class AIExamConverterTest(unittest.TestCase):
         self.assertEqual(questions[0]["question_type"], "text")
         self.assertIn("Hướng dẫn chấm", questions[0]["prompt"])
         self.assertEqual(questions[0]["accepted_answers"], ["Grade clarity and textual evidence."])
+        self.assertEqual(questions[0]["explanation"], "Grade clarity and textual evidence.")
 
 
 if __name__ == "__main__":

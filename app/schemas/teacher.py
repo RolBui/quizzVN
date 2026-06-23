@@ -104,6 +104,7 @@ class TeacherExamQuestionSchema(BaseModel):
     question_type: TeacherQuestionType
     order_index: int
     prompt: str
+    explanation: str = ""
     image_url: str | None = None
     points: float
     options: list[TeacherExamOptionSchema]
@@ -146,6 +147,7 @@ class TeacherExamOptionInput(BaseModel):
 class TeacherExamQuestionInput(BaseModel):
     question_type: TeacherQuestionType = "single_choice"
     prompt: str = ""
+    explanation: str = ""
     image_url: str | None = None
     order_index: int | None = None
     points: float = Field(default=1.0, gt=0)
