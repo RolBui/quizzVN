@@ -111,7 +111,9 @@ def _ensure_student_learning_columns() -> None:
         "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS total_points NUMERIC(10, 4) DEFAULT 0",
         "ALTER TABLE exam_attempts ALTER COLUMN score TYPE NUMERIC(10, 4) USING score::numeric",
         "ALTER TABLE exam_attempts ALTER COLUMN total_points TYPE NUMERIC(10, 4) USING total_points::numeric",
+        "ALTER TABLE exam_attempts ALTER COLUMN score DROP NOT NULL",
         "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS correct_answers_count INTEGER",
+        "ALTER TABLE exam_attempts ALTER COLUMN correct_answers_count DROP NOT NULL",
         "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
         "UPDATE exam_attempts SET total_points = COALESCE(total_points, 0)",
         "UPDATE exam_attempts SET updated_at = COALESCE(updated_at, submitted_at, started_at, created_at, CURRENT_TIMESTAMP)",
@@ -128,6 +130,30 @@ def _ensure_student_learning_columns() -> None:
                     SET user_id = COALESCE(user_id, student_id)
                     WHERE user_id IS NULL
                 ';
+            END IF;
+        END $$
+        """,
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_attempts' AND column_name = 'student_id'
+            ) THEN
+                EXECUTE 'ALTER TABLE exam_attempts ALTER COLUMN student_id DROP NOT NULL';
+            END IF;
+        END $$
+        """,
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'exam_attempts' AND column_name = 'submitted_at'
+            ) THEN
+                EXECUTE 'ALTER TABLE exam_attempts ALTER COLUMN submitted_at DROP NOT NULL';
             END IF;
         END $$
         """,
