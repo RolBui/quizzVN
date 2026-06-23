@@ -24,7 +24,11 @@ STUDENT_ROLE_NAME = "student"
 SCOPE_SYSTEM = "system"
 SCOPE_CLASS = "class"
 QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+QUESTION_TYPE_TRUE_FALSE = "true_false"
+QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 QUESTION_TYPE_TEXT = "text"
+SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
+TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 
 
 def require_teacher_user(db: Session, user_id: int) -> User:
@@ -653,14 +657,14 @@ def _serialize_exam_detail(exam: Exam) -> dict:
                     "is_correct": option.is_correct,
                 }
                 for option in sorted(question.options, key=lambda item: item.id)
-                if _normalize_question_type(question.question_type) == QUESTION_TYPE_SINGLE_CHOICE
+                if _is_selection_question_type(_normalize_question_type(question.question_type))
             ],
             "accepted_answers": [
                 option.option_text
                 for option in sorted(question.options, key=lambda item: item.id)
                 if option.is_correct
             ]
-            if _normalize_question_type(question.question_type) == QUESTION_TYPE_TEXT
+            if _is_text_answer_question_type(_normalize_question_type(question.question_type))
             else [],
         }
         for question in sorted(exam.questions, key=lambda item: item.order_index)
@@ -759,40 +763,10 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
         points = float(question["points"])
         normalized_options = []
         if question_type == QUESTION_TYPE_SINGLE_CHOICE:
-            options = question["options"]
-            if len(options) < 2:
-                raise HTTPException(status_code=400, detail=f"Question {index} must have at least 2 options")
-
-            correct_options = [option for option in options if option["is_correct"]]
-            if len(correct_options) != 1:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Question {index} must have exactly 1 correct option",
-                )
-
-            for option_index, option in enumerate(options, start=1):
-                option_key = option["option_key"].strip()
-                option_text = (option.get("option_text") or "").strip()
-                option_image_url = (option.get("image_url") or "").strip() or None
-                if not option_key:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Question {index} option {option_index} key is required",
-                    )
-                if not option_text and not option_image_url:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Question {index} option {option_index} must include option_text or image_url",
-                    )
-                normalized_options.append(
-                    {
-                        "option_key": option_key,
-                        "option_text": option_text,
-                        "image_url": option_image_url,
-                        "is_correct": option["is_correct"],
-                    }
-                )
-        else:
+            normalized_options = _normalize_single_choice_options(question, index)
+        elif question_type == QUESTION_TYPE_TRUE_FALSE:
+            normalized_options = _normalize_true_false_options(question, index)
+        elif _is_text_answer_question_type(question_type):
             accepted_answers = question.get("accepted_answers") or []
             if not accepted_answers:
                 raise HTTPException(
@@ -818,6 +792,8 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
                         "is_correct": True,
                     }
                 )
+        else:
+            raise HTTPException(status_code=400, detail=f"Question {index}: unsupported question type")
 
         normalized_questions.append(
             {
@@ -861,9 +837,118 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
 
 
 def _normalize_question_type(question_type: str | None) -> str:
-    if question_type == QUESTION_TYPE_TEXT:
-        return QUESTION_TYPE_TEXT
+    if question_type in {
+        QUESTION_TYPE_SINGLE_CHOICE,
+        QUESTION_TYPE_TRUE_FALSE,
+        QUESTION_TYPE_SHORT_ANSWER,
+        QUESTION_TYPE_TEXT,
+    }:
+        return question_type
     return QUESTION_TYPE_SINGLE_CHOICE
+
+
+def _is_selection_question_type(question_type: str) -> bool:
+    return question_type in SELECTION_QUESTION_TYPES
+
+
+def _is_text_answer_question_type(question_type: str) -> bool:
+    return question_type in TEXT_ANSWER_QUESTION_TYPES
+
+
+def _normalize_single_choice_options(question: dict, index: int) -> list[dict]:
+    options = question["options"]
+    if len(options) < 2:
+        raise HTTPException(status_code=400, detail=f"Question {index} must have at least 2 options")
+
+    correct_options = [option for option in options if option["is_correct"]]
+    if len(correct_options) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Question {index} must have exactly 1 correct option",
+        )
+
+    normalized_options = []
+    for option_index, option in enumerate(options, start=1):
+        option_key = option["option_key"].strip()
+        option_text = (option.get("option_text") or "").strip()
+        option_image_url = (option.get("image_url") or "").strip() or None
+        if not option_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {index} option {option_index} key is required",
+            )
+        if not option_text and not option_image_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {index} option {option_index} must include option_text or image_url",
+            )
+        normalized_options.append(
+            {
+                "option_key": option_key,
+                "option_text": option_text,
+                "image_url": option_image_url,
+                "is_correct": option["is_correct"],
+            }
+        )
+
+    return normalized_options
+
+
+def _normalize_true_false_options(question: dict, index: int) -> list[dict]:
+    correct_answer = _extract_true_false_correct_answer(question)
+    if correct_answer is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Question {index} must identify whether true or false is correct",
+        )
+
+    return [
+        {
+            "option_key": "A",
+            "option_text": "Đúng",
+            "image_url": None,
+            "is_correct": correct_answer is True,
+        },
+        {
+            "option_key": "B",
+            "option_text": "Sai",
+            "image_url": None,
+            "is_correct": correct_answer is False,
+        },
+    ]
+
+
+def _extract_true_false_correct_answer(question: dict) -> bool | None:
+    options = question.get("options") or []
+    correct_options = [option for option in options if option.get("is_correct")]
+    if len(correct_options) == 1:
+        correct_option = correct_options[0]
+        normalized = _normalize_true_false_answer(correct_option.get("option_text"))
+        if normalized is not None:
+            return normalized
+
+        try:
+            option_index = options.index(correct_option)
+        except ValueError:
+            option_index = 0
+        return option_index == 0
+
+    accepted_answers = question.get("accepted_answers") or []
+    for answer in accepted_answers:
+        normalized = _normalize_true_false_answer(answer)
+        if normalized is not None:
+            return normalized
+
+    return None
+
+
+def _normalize_true_false_answer(value: str | None) -> bool | None:
+    normalized = _normalize_text_answer(value)
+    if normalized in {"true", "yes", "1", "dung", "đúng"}:
+        return True
+    if normalized in {"false", "no", "0", "sai"}:
+        return False
+    return None
 
 
 def _normalize_text_answer(value: str | None) -> str:

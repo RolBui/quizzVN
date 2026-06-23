@@ -31,7 +31,7 @@ class AIExamConverterTest(unittest.TestCase):
         self.assertTrue(questions[0]["options"][0]["is_correct"])
         self.assertEqual(questions[0]["explanation"], "Python is a programming language.")
 
-    def test_maps_true_false_to_single_choice(self) -> None:
+    def test_maps_true_false_to_true_false(self) -> None:
         questions = build_teacher_exam_questions_from_drafts(
             [
                 _draft(
@@ -42,12 +42,12 @@ class AIExamConverterTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(questions[0]["question_type"], "single_choice")
+        self.assertEqual(questions[0]["question_type"], "true_false")
         self.assertEqual(questions[0]["options"][0]["option_text"], "Đúng")
         self.assertFalse(questions[0]["options"][0]["is_correct"])
         self.assertTrue(questions[0]["options"][1]["is_correct"])
 
-    def test_maps_short_answer_to_text(self) -> None:
+    def test_maps_short_answer_to_short_answer(self) -> None:
         questions = build_teacher_exam_questions_from_drafts(
             [
                 _draft(
@@ -58,7 +58,7 @@ class AIExamConverterTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(questions[0]["question_type"], "text")
+        self.assertEqual(questions[0]["question_type"], "short_answer")
         self.assertEqual(questions[0]["accepted_answers"], ["Python", "python"])
 
     def test_maps_essay_rubric_into_prompt(self) -> None:
