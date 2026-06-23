@@ -158,6 +158,7 @@ class AttemptResultAnswerSchema(BaseModel):
     question_id: int
     question_type: StudentQuestionType
     prompt: str
+    explanation: str | None = None
     question_image_url: str | None = None
     selected_option_id: int | None = None
     selected_option_text: str | None = None

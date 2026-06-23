@@ -641,6 +641,7 @@ def _serialize_exam_detail(exam: Exam) -> dict:
             "question_type": _normalize_question_type(question.question_type),
             "order_index": question.order_index,
             "prompt": question.prompt,
+            "explanation": question.explanation or "",
             "image_url": question.image_url,
             "points": question.points,
             "options": [
@@ -747,6 +748,7 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
     for index, question in enumerate(questions, start=1):
         question_type = _normalize_question_type(question.get("question_type"))
         prompt = (question.get("prompt") or "").strip()
+        explanation = (question.get("explanation") or "").strip()
         question_image_url = (question.get("image_url") or "").strip() or None
         if not prompt and not question_image_url:
             raise HTTPException(
@@ -821,6 +823,7 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
             {
                 "question_type": question_type,
                 "prompt": prompt,
+                "explanation": explanation,
                 "image_url": question_image_url,
                 "order_index": question.get("order_index") or index,
                 "points": points,
@@ -838,6 +841,7 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
         exam_question = ExamQuestion(
             question_type=question["question_type"],
             prompt=question["prompt"],
+            explanation=question.get("explanation") or "",
             image_url=question.get("image_url"),
             order_index=question["order_index"],
             points=question["points"],
