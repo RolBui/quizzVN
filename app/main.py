@@ -19,8 +19,14 @@ from app.services.ai_exam_service import bootstrap_ai_exam_storage
 from app.services.media_service import bootstrap_media_storage
 from app.services.student_service import bootstrap_student_learning_storage
 import asyncio
+from pathlib import Path
+
+from fastapi.responses import FileResponse
 from app.routers.chat_router import INSTANCE_ID, manager
 from app.services.realtime_broker import broker
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+FAVICON_PATH = BASE_DIR / "admin-web" / "src" / "assets" / "logoquizzsmall.png"
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -31,6 +37,13 @@ app = FastAPI(
         "withCredentials": True,
     },
 )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(FAVICON_PATH, media_type="image/png")
+
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.SESSION_SECRET_KEY,
