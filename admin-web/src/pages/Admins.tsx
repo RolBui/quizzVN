@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
+  Inbox,
   Loader2,
   Lock,
   Mail,
@@ -13,7 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "react-toastify";
-import { adminApi, ApiError, chatApi, type AdminAccount } from "../lib/api";
+import {
+  adminApi,
+  ApiError,
+  chatApi,
+  type AdminAccount,
+  type AdminInvitation,
+} from "../lib/api";
 import {
   defaultAdminPermissions,
   normalizePermissions,
@@ -28,15 +35,11 @@ import { PaginationBar } from "../components/PaginationBar";
 const PAGE_SIZE = 7;
 
 interface AdminFormState {
-  full_name: string;
   email: string;
-  password: string;
 }
 
 const emptyForm: AdminFormState = {
-  full_name: "",
   email: "",
-  password: "",
 };
 
 const permissionLabelByKey = new Map<AdminPermissionKey, string>(
@@ -95,6 +98,37 @@ function getPermissionTagLabels(admin: AdminAccount) {
   );
 }
 
+function invitationStatusLabel(status: AdminInvitation["status"]) {
+  switch (status) {
+    case "otp_pending":
+      return "Chờ xác thực OTP";
+    case "pending_approval":
+      return "Chờ duyệt";
+    case "approved":
+      return "Đã duyệt";
+    case "rejected":
+      return "Đã từ chối";
+    case "expired":
+      return "Hết hạn";
+    default:
+      return status;
+  }
+}
+
+function invitationStatusClass(status: AdminInvitation["status"]) {
+  switch (status) {
+    case "pending_approval":
+      return "badge-warning";
+    case "approved":
+      return "badge-success";
+    case "rejected":
+    case "expired":
+      return "badge-destructive";
+    default:
+      return "badge-secondary";
+  }
+}
+
 export function Admins() {
   const { user } = useAuth();
   const { addNotification } = useAppNotifications();
@@ -107,6 +141,13 @@ export function Admins() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [invitations, setInvitations] = useState<AdminInvitation[]>([]);
+  const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
+  const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
+  const [invitationError, setInvitationError] = useState<string | null>(null);
+  const [invitationActionId, setInvitationActionId] = useState<string | null>(
+    null,
+  );
   const [deletingAdmin, setDeletingAdmin] = useState<AdminAccount | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -142,11 +183,35 @@ export function Admins() {
     }
   };
 
+  const loadInvitations = async () => {
+    if (!canManageAdmins) {
+      return;
+    }
+
+    setIsLoadingInvitations(true);
+    setInvitationError(null);
+    try {
+      const response = await adminApi.listInvitations();
+      setInvitations(response.items);
+    } catch (err) {
+      setInvitationError(
+        err instanceof Error
+          ? err.message
+          : "Không lấy được danh sách lời mời.",
+      );
+    } finally {
+      setIsLoadingInvitations(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       void loadAdmins();
+      if (canManageAdmins) {
+        void loadInvitations();
+      }
     }
-  }, [user?.id]);
+  }, [user?.id, canManageAdmins]);
 
   const filteredAdmins = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -192,6 +257,28 @@ export function Admins() {
   const disabledCount = admins.filter(
     (admin) => admin.status !== "active",
   ).length;
+  const pendingApprovalInvitations = invitations.filter(
+    (invitation) => invitation.status === "pending_approval",
+  );
+  const openInvitationCount = invitations.filter((invitation) =>
+    ["otp_pending", "pending_approval"].includes(invitation.status),
+  ).length;
+
+  const openInvitationModal = () => {
+    if (!canManageAdmins) {
+      return;
+    }
+    setIsInvitationModalOpen(true);
+    void loadInvitations();
+  };
+
+  const closeInvitationModal = () => {
+    if (invitationActionId) {
+      return;
+    }
+    setIsInvitationModalOpen(false);
+    setInvitationError(null);
+  };
 
   const openCreateModal = () => {
     if (!canManageAdmins) {
@@ -288,19 +375,17 @@ export function Admins() {
     setIsSubmitting(true);
 
     try {
-      const response = await adminApi.createAccount({
-        full_name: form.full_name,
+      const response = await adminApi.createInvitation({
         email: form.email,
-        password: form.password,
       });
 
       addNotification({
         type: "admin",
-        title: "Đã thêm quản trị viên",
-        body: `${response.admin.full_name} đã được tạo tài khoản admin.`,
+        title: "Đã gửi lời mời quản trị viên",
+        body: `${response.invitation.email} đã được gửi email xác thực OTP.`,
       });
       closeModal();
-      await loadAdmins();
+      await Promise.all([loadAdmins(), loadInvitations()]);
     } catch (err) {
       if (err instanceof ApiError) {
         setFormError(err.message);
@@ -311,6 +396,40 @@ export function Admins() {
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const approveInvitation = async (invitation: AdminInvitation) => {
+    const actionId = `approve:${invitation.id}`;
+    setInvitationActionId(actionId);
+    setInvitationError(null);
+    try {
+      await adminApi.approveInvitation(invitation.id, defaultAdminPermissions);
+      toast.success("Đã duyệt lời mời quản trị viên.");
+      await Promise.all([loadAdmins(), loadInvitations()]);
+    } catch (err) {
+      setInvitationError(
+        err instanceof Error ? err.message : "Không duyệt được lời mời.",
+      );
+    } finally {
+      setInvitationActionId(null);
+    }
+  };
+
+  const rejectInvitation = async (invitation: AdminInvitation) => {
+    const actionId = `reject:${invitation.id}`;
+    setInvitationActionId(actionId);
+    setInvitationError(null);
+    try {
+      await adminApi.rejectInvitation(invitation.id);
+      toast.success("Đã từ chối lời mời quản trị viên.");
+      await loadInvitations();
+    } catch (err) {
+      setInvitationError(
+        err instanceof Error ? err.message : "Không từ chối được lời mời.",
+      );
+    } finally {
+      setInvitationActionId(null);
     }
   };
 
@@ -363,12 +482,29 @@ export function Admins() {
           <h1 className="text-lg font-bold text-on-surface">Quản trị viên</h1>
         </div>
         {canManageAdmins && (
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <button
+              type="button"
+              onClick={openInvitationModal}
+              className="relative w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-2 text-sm font-medium text-on-surface shadow-sm transition-colors hover:bg-surface-container-low sm:w-auto"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <Inbox className="w-4 h-4" />
+                Lời mời
+              </span>
+              {openInvitationCount > 0 && (
+                <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-error px-1.5 py-0.5 text-xs font-bold leading-none text-on-error">
+                  {pendingApprovalInvitations.length || openInvitationCount}
+                </span>
+              )}
+            </button>
           <button
             onClick={openCreateModal}
             className="w-full px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 shadow-sm sm:w-auto"
           >
             <Plus className="w-4 h-4" /> Thêm quản trị viên
           </button>
+          </div>
         )}
       </div>
 
@@ -691,6 +827,194 @@ export function Admins() {
         </div>
       )}
 
+      {isInvitationModalOpen && (
+        <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">
+          <div className="w-full max-w-5xl bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
+            <div className="px-5 py-4 border-b border-outline-variant flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-on-surface">
+                  Lời mời quản trị viên
+                </h2>
+                <p className="mt-1 text-sm text-outline">
+                  Theo dõi ai đã gửi lời mời và các yêu cầu đang chờ duyệt.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeInvitationModal}
+                disabled={Boolean(invitationActionId)}
+                className="p-2 rounded-lg hover:bg-surface-container-low text-outline disabled:opacity-60"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <span className="badge badge-warning">
+                    {pendingApprovalInvitations.length} chờ duyệt
+                  </span>
+                  <span className="badge badge-secondary">
+                    {openInvitationCount} đang mở
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadInvitations()}
+                  disabled={isLoadingInvitations || Boolean(invitationActionId)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-outline-variant px-4 text-sm font-medium text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-60"
+                >
+                  {isLoadingInvitations && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  Tải lại
+                </button>
+              </div>
+
+              {invitationError && (
+                <div className="rounded-lg border border-error-container bg-error-container/60 px-3 py-2 flex items-start gap-2 text-sm text-on-error-container">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{invitationError}</span>
+                </div>
+              )}
+
+              <div className="max-h-[60vh] overflow-auto rounded-xl border border-outline-variant">
+                <table className="w-full min-w-[900px] text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-surface-variant bg-surface-container-low/50">
+                      <th className="py-3 px-4 text-xs font-semibold text-on-surface-variant">
+                        Người nhận
+                      </th>
+                      <th className="py-3 px-4 text-xs font-semibold text-on-surface-variant">
+                        Người gửi
+                      </th>
+                      <th className="py-3 px-4 text-xs font-semibold text-on-surface-variant">
+                        Trạng thái
+                      </th>
+                      <th className="py-3 px-4 text-xs font-semibold text-on-surface-variant">
+                        Thời gian
+                      </th>
+                      <th className="py-3 px-4 text-xs font-semibold text-on-surface-variant text-right">
+                        Thao tác
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-variant">
+                    {isLoadingInvitations ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="py-8 px-4 text-center text-sm text-on-surface-variant"
+                        >
+                          Đang tải danh sách lời mời...
+                        </td>
+                      </tr>
+                    ) : invitations.length > 0 ? (
+                      invitations.map((invitation) => {
+                        const approveActionId = `approve:${invitation.id}`;
+                        const rejectActionId = `reject:${invitation.id}`;
+                        const isActing =
+                          invitationActionId === approveActionId ||
+                          invitationActionId === rejectActionId;
+                        const inviter =
+                          invitation.invited_by_name ||
+                          invitation.invited_by_email ||
+                          "Không rõ";
+
+                        return (
+                          <tr
+                            key={invitation.id}
+                            className="hover:bg-surface-container-lowest/50"
+                          >
+                            <td className="py-4 px-4">
+                              <p className="text-sm font-semibold text-on-surface">
+                                {invitation.full_name || invitation.email}
+                              </p>
+                              <p className="text-xs text-outline">
+                                {invitation.email}
+                              </p>
+                            </td>
+                            <td className="py-4 px-4">
+                              <p className="text-sm font-medium text-on-surface">
+                                {inviter}
+                              </p>
+                              {invitation.invited_by_name &&
+                                invitation.invited_by_email && (
+                                  <p className="text-xs text-outline">
+                                    {invitation.invited_by_email}
+                                  </p>
+                                )}
+                            </td>
+                            <td className="py-4 px-4">
+                              <span
+                                className={`badge ${invitationStatusClass(invitation.status)}`}
+                              >
+                                {invitationStatusLabel(invitation.status)}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 text-sm text-on-surface">
+                              {formatDate(invitation.created_at)}
+                            </td>
+                            <td className="py-4 px-4 text-right">
+                              {invitation.status === "pending_approval" ? (
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void approveInvitation(invitation)
+                                    }
+                                    disabled={Boolean(invitationActionId)}
+                                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
+                                  >
+                                    {invitationActionId === approveActionId && (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    )}
+                                    Duyệt
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void rejectInvitation(invitation)
+                                    }
+                                    disabled={Boolean(invitationActionId)}
+                                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-error-container px-3 text-xs font-semibold text-error transition-colors hover:bg-error-container disabled:opacity-60"
+                                  >
+                                    {invitationActionId === rejectActionId && (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    )}
+                                    Từ chối
+                                  </button>
+                                </div>
+                              ) : isActing ? (
+                                <Loader2 className="ml-auto h-4 w-4 animate-spin text-outline" />
+                              ) : (
+                                <span className="text-xs text-outline">
+                                  Không cần xử lý
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="py-8 px-4 text-center text-sm text-on-surface-variant"
+                        >
+                          Chưa có lời mời quản trị viên nào.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deletingAdmin && (
         <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">
           <div className="w-full max-w-md bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
@@ -792,23 +1116,6 @@ export function Admins() {
 
               <label className="block">
                 <span className="text-sm font-semibold text-on-surface">
-                  Họ tên
-                </span>
-                <input
-                  value={form.full_name}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      full_name: event.target.value,
-                    }))
-                  }
-                  required
-                  className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-on-surface">
                   Email
                 </span>
                 <input
@@ -822,25 +1129,6 @@ export function Admins() {
                   }
                   required
                   className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-on-surface">
-                  Mật khẩu
-                </span>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      password: event.target.value,
-                    }))
-                  }
-                  required
-                  placeholder="Tối thiểu 6 ký tự"
-                  className="mt-2 w-full h-10 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-outline"
                 />
               </label>
 

@@ -20,6 +20,7 @@ from app.core.security import generate_refresh_token
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_profile import UserProfile
+from app.models.admin_invitation import AdminInvitation
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
@@ -62,6 +63,8 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
 
 def bootstrap_auth_storage() -> None:
     UserProfile.__table__.create(bind=engine, checkfirst=True)
+    AdminInvitation.__table__.create(bind=engine, checkfirst=True)
+    _ensure_admin_invitation_columns()
     _ensure_admin_permissions_column()
     _ensure_user_status_constraint()
 
@@ -98,6 +101,17 @@ def _ensure_admin_permissions_column() -> None:
         UPDATE users
         SET admin_permissions = '[]'
         WHERE admin_permissions IS NULL OR btrim(admin_permissions) = '';
+    """
+    with engine.begin() as connection:
+        connection.execute(text(statement))
+
+
+def _ensure_admin_invitation_columns() -> None:
+    statement = """
+        ALTER TABLE admin_invitations
+        ADD COLUMN IF NOT EXISTS phone VARCHAR,
+        ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+        ADD COLUMN IF NOT EXISTS gender VARCHAR;
     """
     with engine.begin() as connection:
         connection.execute(text(statement))

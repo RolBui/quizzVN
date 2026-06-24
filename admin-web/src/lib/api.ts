@@ -124,6 +124,51 @@ export interface AdminAccountResponse {
   admin: AdminAccount;
 }
 
+export type AdminInvitationStatus =
+  | "otp_pending"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "expired";
+
+export interface AdminInvitation {
+  id: number;
+  email: string;
+  full_name: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  status: AdminInvitationStatus;
+  otp_expires_at: string;
+  invited_by_user_id: number | null;
+  invited_by_name: string | null;
+  invited_by_email: string | null;
+  submitted_at: string | null;
+  approved_by_user_id: number | null;
+  approved_at: string | null;
+  rejected_by_user_id: number | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  generated_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminInvitationResponse {
+  message: string;
+  invitation: AdminInvitation;
+}
+
+export interface AdminInvitationListResponse {
+  items: AdminInvitation[];
+}
+
+export interface ApproveAdminInvitationResponse {
+  message: string;
+  invitation: AdminInvitation;
+  admin: AdminAccount;
+}
+
 export interface AuthSession {
   id: number;
   login_method: string;
@@ -679,6 +724,22 @@ export const adminApi = {
   importDocument: (body: FormData) =>
     apiPostForm<AdminDocumentResponse>("/admin/documents", body),
   listAccounts: () => apiGet<AdminAccountListResponse>("/admin/users"),
+  listInvitations: (status?: AdminInvitationStatus) =>
+    apiGet<AdminInvitationListResponse>(
+      `/admin/invitations${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  createInvitation: (payload: { email: string }) =>
+    apiPost<AdminInvitationResponse>("/admin/invitations", payload),
+  approveInvitation: (invitationId: number, permissions: string[] = []) =>
+    apiPost<ApproveAdminInvitationResponse>(
+      `/admin/invitations/${invitationId}/approve`,
+      { permissions },
+    ),
+  rejectInvitation: (invitationId: number, reason?: string | null) =>
+    apiPost<AdminInvitationResponse>(
+      `/admin/invitations/${invitationId}/reject`,
+      { reason: reason ?? null },
+    ),
   createAccount: (payload: {
     full_name: string;
     email: string;

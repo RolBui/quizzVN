@@ -40,6 +40,17 @@ def build_frontend_email_verification_redirect_url(status_value: str) -> str:
     return f"{settings.FRONTEND_URL}{settings.FRONTEND_EMAIL_VERIFICATION_PATH}?{query_string}"
 
 
+def _build_plain_email_message(recipient_email: str, subject: str, text_body: str) -> EmailMessage:
+    message = EmailMessage()
+    from_name = settings.EMAIL_FROM_NAME
+    from_address = settings.EMAIL_FROM_ADDRESS or "no-reply@example.com"
+    message["Subject"] = subject
+    message["From"] = f"{from_name} <{from_address}>"
+    message["To"] = recipient_email
+    message.set_content(text_body)
+    return message
+
+
 def _build_email_message(recipient_email: str, recipient_name: str, verify_url: str) -> EmailMessage:
     app_name = settings.APP_NAME
     subject = f"Verify your email for {app_name}"
@@ -51,15 +62,7 @@ def _build_email_message(recipient_email: str, recipient_name: str, verify_url: 
         f"This link expires in {settings.EMAIL_VERIFICATION_EXPIRE_HOURS} hour(s).\n\n"
         "If you did not create this account, you can ignore this email."
     )
-
-    message = EmailMessage()
-    from_name = settings.EMAIL_FROM_NAME
-    from_address = settings.EMAIL_FROM_ADDRESS or "no-reply@example.com"
-    message["Subject"] = subject
-    message["From"] = f"{from_name} <{from_address}>"
-    message["To"] = recipient_email
-    message.set_content(text_body)
-    return message
+    return _build_plain_email_message(recipient_email, subject, text_body)
 
 
 def _send_via_smtp(message: EmailMessage) -> None:
@@ -79,6 +82,18 @@ def _send_via_smtp(message: EmailMessage) -> None:
         if settings.SMTP_USERNAME:
             smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
         smtp.send_message(message)
+
+
+def send_plain_email(recipient_email: str, subject: str, text_body: str) -> None:
+    message = _build_plain_email_message(recipient_email, subject, text_body)
+
+    if settings.EMAIL_DELIVERY_MODE == "smtp":
+        _send_via_smtp(message)
+        logger.info("Email sent to %s with subject %s", recipient_email, subject)
+        return
+
+    logger.info("EMAIL_DELIVERY_MODE=%s", settings.EMAIL_DELIVERY_MODE)
+    logger.info("Email to %s subject=%s\n%s", recipient_email, subject, text_body)
 
 
 def send_email_verification_email(user: User) -> str:

@@ -99,6 +99,13 @@ class Settings:
     FRONTEND_EMAIL_VERIFICATION_PATH: str = (
         os.getenv("FRONTEND_EMAIL_VERIFICATION_PATH", "/verify-email").strip() or "/verify-email"
     )
+    FRONTEND_ADMIN_INVITATION_PATH: str = (
+        os.getenv("FRONTEND_ADMIN_INVITATION_PATH", "/admin/invitations/accept").strip()
+        or "/admin/invitations/accept"
+    )
+    ADMIN_INVITATION_BASE_URL: str = _normalize_origin(
+        os.getenv("ADMIN_INVITATION_BASE_URL", BACKEND_URL)
+    )
     INCLUDE_LOCAL_DEV_CORS_ORIGINS: bool = _parse_bool(
         os.getenv("INCLUDE_LOCAL_DEV_CORS_ORIGINS"),
         not BACKEND_URL.startswith("https://"),
@@ -136,6 +143,8 @@ class Settings:
         os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET_KEY).strip() or SESSION_SECRET_KEY
     )
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))
+    ADMIN_INVITATION_OTP_EXPIRE_MINUTES: int = int(os.getenv("ADMIN_INVITATION_OTP_EXPIRE_MINUTES", "15"))
+    ADMIN_INVITATION_OTP_MAX_ATTEMPTS: int = int(os.getenv("ADMIN_INVITATION_OTP_MAX_ATTEMPTS", "5"))
     MAX_IMAGE_UPLOAD_BYTES: int = int(os.getenv("MAX_IMAGE_UPLOAD_BYTES", str(5 * 1024 * 1024)))
     MAX_CHAT_FILE_UPLOAD_BYTES: int = int(os.getenv("MAX_CHAT_FILE_UPLOAD_BYTES", str(10 * 1024 * 1024)))
     MAX_DOCUMENT_UPLOAD_BYTES: int = int(os.getenv("MAX_DOCUMENT_UPLOAD_BYTES", str(20 * 1024 * 1024)))

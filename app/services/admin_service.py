@@ -1,11 +1,18 @@
+import hashlib
+import logging
+import secrets
+import string
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.security import hash_password, utc_now
+from app.core.config import settings
+from app.core.security import hash_password, utc_now, verify_password
+from app.models.admin_invitation import AdminInvitation
 from app.models.classroom import Classroom
 from app.models.classroom_membership import ClassroomMembership
 from app.models.exam import Exam
@@ -30,13 +37,17 @@ from app.services.auth_service import (
     get_or_create_role,
     normalize_admin_permissions,
 )
+from app.services.email_verification_service import send_plain_email
 from app.services.media_service import delete_document_file, upload_document_file
 
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 ADMIN_MUTABLE_STATUSES = {"active", "disabled"}
+ADMIN_INVITATION_PENDING_STATUSES = {"otp_pending", "pending_approval"}
+ADMIN_INVITATION_STATUSES = {"otp_pending", "pending_approval", "approved", "rejected", "expired"}
 TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
 USER_ACTIVITY_WINDOW = timedelta(hours=1)
+logger = logging.getLogger(__name__)
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:
@@ -1539,6 +1550,605 @@ def _hard_delete_user(db: Session, user_id: int, role_name: str | None = None) -
 
     _delete_user_auth_rows(db, user_id)
     db.execute(text("delete from users where id = :user_id"), {"user_id": user_id})
+
+
+def _normalize_invitation_email(email: str) -> str:
+    normalized_email = email.strip().lower()
+    if not normalized_email or "@" not in normalized_email:
+        raise HTTPException(status_code=400, detail="Valid email is required")
+    return normalized_email
+
+
+def _parse_admin_invitation_date_of_birth(value: date | str | None) -> date | None:
+    if isinstance(value, date):
+        return value
+
+    normalized_value = value.strip() if value else ""
+    if not normalized_value:
+        return None
+
+    try:
+        parsed_value = date.fromisoformat(normalized_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date_of_birth is invalid") from exc
+
+    if parsed_value > utc_now().date():
+        raise HTTPException(status_code=400, detail="date_of_birth cannot be in the future")
+
+    return parsed_value
+
+
+def _normalize_admin_invitation_gender(value: str | None) -> str:
+    normalized_value = value.strip().lower() if value else ""
+    if normalized_value not in {"male", "female", "other"}:
+        raise HTTPException(status_code=400, detail="gender is required")
+    return normalized_value
+
+
+def _hash_admin_invitation_token(token: str) -> str:
+    raw_value = f"{settings.EMAIL_VERIFICATION_SECRET}:admin-invitation:{token}"
+    return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
+
+
+def _generate_admin_invitation_otp() -> str:
+    return "".join(secrets.choice(string.digits) for _ in range(6))
+
+
+def _generate_admin_password(length: int = 10) -> str:
+    special_chars = "!@#$%^&*()-_=+"
+    alphabet = string.ascii_letters + string.digits + special_chars
+    password_chars = [
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.digits),
+        secrets.choice(special_chars),
+    ]
+    password_chars.extend(secrets.choice(alphabet) for _ in range(length - len(password_chars)))
+    secrets.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
+
+
+def _build_admin_invitation_url(token: str, email: str) -> str:
+    query_string = urlencode({"token": token, "email": email})
+    return f"{settings.ADMIN_INVITATION_BASE_URL}{settings.FRONTEND_ADMIN_INVITATION_PATH}?{query_string}"
+
+
+def _is_admin_invitation_expired(invitation: AdminInvitation) -> bool:
+    if invitation.otp_attempt_count < 0:
+        return False
+    expires_at = _normalize_datetime(invitation.otp_expires_at)
+    return bool(expires_at and expires_at <= utc_now())
+
+
+def _expire_admin_invitation_if_needed(invitation: AdminInvitation) -> bool:
+    if invitation.status == "otp_pending" and _is_admin_invitation_expired(invitation):
+        invitation.status = "expired"
+        invitation.updated_at = utc_now()
+        return True
+    return False
+
+
+def _serialize_admin_invitation(
+    invitation: AdminInvitation,
+    users_by_id: dict[int, User] | None = None,
+) -> dict:
+    status_value = invitation.status
+    if status_value == "otp_pending" and _is_admin_invitation_expired(invitation):
+        status_value = "expired"
+
+    invited_by = (
+        users_by_id.get(invitation.invited_by_user_id)
+        if users_by_id and invitation.invited_by_user_id
+        else None
+    )
+
+    return {
+        "id": invitation.id,
+        "email": invitation.email,
+        "full_name": invitation.full_name,
+        "phone": invitation.phone,
+        "date_of_birth": invitation.date_of_birth,
+        "gender": invitation.gender,
+        "status": status_value,
+        "otp_expires_at": invitation.otp_expires_at,
+        "invited_by_user_id": invitation.invited_by_user_id,
+        "invited_by_name": invited_by.full_name if invited_by else None,
+        "invited_by_email": invited_by.email if invited_by else None,
+        "submitted_at": invitation.submitted_at,
+        "approved_by_user_id": invitation.approved_by_user_id,
+        "approved_at": invitation.approved_at,
+        "rejected_by_user_id": invitation.rejected_by_user_id,
+        "rejected_at": invitation.rejected_at,
+        "rejection_reason": invitation.rejection_reason,
+        "generated_user_id": invitation.generated_user_id,
+        "created_at": invitation.created_at,
+        "updated_at": invitation.updated_at,
+    }
+
+
+def _send_admin_invitation_email(invitation: AdminInvitation, token: str) -> None:
+    invitation_url = _build_admin_invitation_url(token, invitation.email)
+    subject = f"Admin invitation for {settings.APP_NAME}"
+    body = (
+        f"You have been invited to request an admin account for {settings.APP_NAME}.\n\n"
+        f"Open this link to complete your information:\n{invitation_url}\n\n"
+        "If you did not expect this invitation, you can ignore this email."
+    )
+    send_plain_email(invitation.email, subject, body)
+
+
+def _send_admin_invitation_otp_email(invitation: AdminInvitation, otp_code: str) -> None:
+    subject = f"Your OTP code for {settings.APP_NAME}"
+    body = (
+        f"Your OTP code is: {otp_code}\n\n"
+        f"This code expires in {settings.ADMIN_INVITATION_OTP_EXPIRE_MINUTES} minute(s).\n"
+        "If you did not request this code, you can ignore this email."
+    )
+    send_plain_email(invitation.email, subject, body)
+
+
+def _send_admin_pending_review_email(db: Session, invitation: AdminInvitation) -> None:
+    inviter = None
+    if invitation.invited_by_user_id:
+        inviter = db.query(User).filter(User.id == invitation.invited_by_user_id).first()
+
+    if not inviter or not inviter.email:
+        return
+
+    subject = f"Admin request waiting for approval - {settings.APP_NAME}"
+    body = (
+        f"{invitation.full_name or invitation.email} has verified the OTP and submitted "
+        f"an admin account request.\n\n"
+        f"Email: {invitation.email}\n"
+        "Please open the Administrator dashboard to approve or reject this request."
+    )
+    send_plain_email(inviter.email, subject, body)
+
+
+def _send_admin_credentials_email(user: User, password: str) -> None:
+    subject = f"Your admin account for {settings.APP_NAME}"
+    body = (
+        f"Hi {user.full_name},\n\n"
+        f"Your admin account for {settings.APP_NAME} has been approved.\n\n"
+        f"Login email: {user.email}\n"
+        f"Temporary password: {password}\n\n"
+        f"Open the app here: {settings.FRONTEND_URL}\n\n"
+        "Please sign in and change your password after your first login."
+    )
+    send_plain_email(user.email, subject, body)
+
+
+def _admin_invitation_users_by_id(db: Session, invitations: list[AdminInvitation]) -> dict[int, User]:
+    user_ids = {
+        invitation.invited_by_user_id
+        for invitation in invitations
+        if invitation.invited_by_user_id
+    }
+    if not user_ids:
+        return {}
+
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    return {user.id: user for user in users}
+
+
+def _apply_admin_invitation_profile(db: Session, user: User, invitation: AdminInvitation) -> None:
+    user.full_name = invitation.full_name or user.full_name or invitation.email
+    user.phone = invitation.phone or user.phone
+
+    if not invitation.date_of_birth or not invitation.gender:
+        return
+
+    profile = user.profile or db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
+    if profile:
+        profile.date_of_birth = invitation.date_of_birth
+        profile.gender = invitation.gender
+        profile.updated_at = utc_now()
+        if not profile.onboarding_completed_at:
+            profile.onboarding_completed_at = utc_now()
+        return
+
+    db.add(
+        UserProfile(
+            user_id=user.id,
+            date_of_birth=invitation.date_of_birth,
+            gender=invitation.gender,
+            school_name=None,
+            onboarding_completed_at=utc_now(),
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+    )
+
+
+def list_admin_invitations(
+    db: Session,
+    current_admin: User,
+    status_filter: str | None = None,
+) -> dict:
+    _require_admin_scope(current_admin, "admins")
+
+    if status_filter and status_filter not in ADMIN_INVITATION_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid invitation status")
+
+    invitations = db.query(AdminInvitation).order_by(AdminInvitation.created_at.desc(), AdminInvitation.id.desc()).all()
+    did_expire = False
+    for invitation in invitations:
+        did_expire = _expire_admin_invitation_if_needed(invitation) or did_expire
+
+    if did_expire:
+        db.commit()
+        invitations = db.query(AdminInvitation).order_by(AdminInvitation.created_at.desc(), AdminInvitation.id.desc()).all()
+
+    users_by_id = _admin_invitation_users_by_id(db, invitations)
+    serialized_items = [
+        _serialize_admin_invitation(invitation, users_by_id)
+        for invitation in invitations
+    ]
+    if status_filter:
+        serialized_items = [item for item in serialized_items if item["status"] == status_filter]
+
+    return {"items": serialized_items}
+
+
+def create_admin_invitation(
+    db: Session,
+    current_administrator: User,
+    email: str,
+) -> dict:
+    _require_admin_scope(current_administrator, "admins")
+    normalized_email = _normalize_invitation_email(email)
+
+    existing_user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.email == normalized_email)
+        .first()
+    )
+    if existing_user and _admin_role_name(existing_user) in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(status_code=409, detail="Email already has admin access")
+
+    token = secrets.token_urlsafe(32)
+    placeholder_otp_hash = hash_password(secrets.token_urlsafe(16))
+    expires_at = utc_now() + timedelta(days=7)
+
+    invitation = (
+        db.query(AdminInvitation)
+        .filter(
+            AdminInvitation.email == normalized_email,
+            AdminInvitation.status.in_(tuple(ADMIN_INVITATION_PENDING_STATUSES)),
+        )
+        .order_by(AdminInvitation.created_at.desc(), AdminInvitation.id.desc())
+        .first()
+    )
+    if invitation:
+        invitation.status = "otp_pending"
+        invitation.full_name = existing_user.full_name if existing_user else None
+        invitation.phone = existing_user.phone if existing_user else None
+        invitation.date_of_birth = existing_user.profile.date_of_birth if existing_user and existing_user.profile else None
+        invitation.gender = existing_user.profile.gender if existing_user and existing_user.profile else None
+        invitation.invite_token_hash = _hash_admin_invitation_token(token)
+        invitation.otp_hash = placeholder_otp_hash
+        invitation.otp_expires_at = expires_at
+        invitation.otp_attempt_count = -1
+        invitation.invited_by_user_id = current_administrator.id
+        invitation.submitted_at = None
+        invitation.rejected_by_user_id = None
+        invitation.rejected_at = None
+        invitation.rejection_reason = None
+        invitation.updated_at = utc_now()
+    else:
+        invitation = AdminInvitation(
+            email=normalized_email,
+            full_name=existing_user.full_name if existing_user else None,
+            phone=existing_user.phone if existing_user else None,
+            date_of_birth=existing_user.profile.date_of_birth if existing_user and existing_user.profile else None,
+            gender=existing_user.profile.gender if existing_user and existing_user.profile else None,
+            status="otp_pending",
+            invite_token_hash=_hash_admin_invitation_token(token),
+            otp_hash=placeholder_otp_hash,
+            otp_expires_at=expires_at,
+            otp_attempt_count=-1,
+            invited_by_user_id=current_administrator.id,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(invitation)
+
+    db.commit()
+    db.refresh(invitation)
+
+    try:
+        _send_admin_invitation_email(invitation, token)
+    except Exception as exc:
+        logger.exception("Failed to send admin invitation email to %s", invitation.email)
+        raise HTTPException(status_code=502, detail="Failed to send admin invitation email") from exc
+
+    return {
+        "message": "Admin invitation sent successfully",
+        "invitation": _serialize_admin_invitation(
+            invitation,
+            {current_administrator.id: current_administrator},
+        ),
+    }
+
+
+def send_admin_invitation_otp(
+    db: Session,
+    token: str,
+    email: str,
+    full_name: str | None,
+    phone: str | None = None,
+    date_of_birth: date | str | None = None,
+    gender: str | None = None,
+) -> dict:
+    normalized_email = _normalize_invitation_email(email)
+    normalized_full_name = full_name.strip() if full_name else ""
+    normalized_phone = phone.strip() if phone else ""
+    normalized_date_of_birth = _parse_admin_invitation_date_of_birth(date_of_birth)
+    normalized_gender = _normalize_admin_invitation_gender(gender)
+
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="phone is required")
+    if not normalized_date_of_birth:
+        raise HTTPException(status_code=400, detail="date_of_birth is required")
+
+    invitation = (
+        db.query(AdminInvitation)
+        .filter(
+            AdminInvitation.email == normalized_email,
+            AdminInvitation.invite_token_hash == _hash_admin_invitation_token(token),
+        )
+        .first()
+    )
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Admin invitation not found")
+
+    if invitation.status != "otp_pending":
+        raise HTTPException(status_code=400, detail="Admin invitation is not waiting for OTP verification")
+
+    existing_user = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.email == normalized_email)
+        .first()
+    )
+    if existing_user and _admin_role_name(existing_user) in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(status_code=409, detail="Email already has admin access")
+
+    if existing_user:
+        normalized_full_name = normalized_full_name or existing_user.full_name
+    elif not normalized_full_name:
+        raise HTTPException(status_code=400, detail="full_name is required")
+
+    otp_code = _generate_admin_invitation_otp()
+    invitation.full_name = normalized_full_name
+    invitation.phone = normalized_phone
+    invitation.date_of_birth = normalized_date_of_birth
+    invitation.gender = normalized_gender
+    invitation.otp_hash = hash_password(otp_code)
+    invitation.otp_expires_at = utc_now() + timedelta(minutes=settings.ADMIN_INVITATION_OTP_EXPIRE_MINUTES)
+    invitation.otp_attempt_count = 0
+    invitation.updated_at = utc_now()
+    db.commit()
+    db.refresh(invitation)
+
+    try:
+        _send_admin_invitation_otp_email(invitation, otp_code)
+    except Exception as exc:
+        logger.exception("Failed to send admin invitation OTP email to %s", invitation.email)
+        raise HTTPException(status_code=502, detail="Failed to send admin invitation OTP email") from exc
+
+    return {
+        "message": "Admin invitation OTP sent successfully",
+        "invitation": _serialize_admin_invitation(invitation),
+    }
+
+
+def submit_admin_invitation_otp(
+    db: Session,
+    token: str,
+    email: str,
+    otp_code: str,
+    full_name: str | None,
+    phone: str | None = None,
+    date_of_birth: date | str | None = None,
+    gender: str | None = None,
+) -> dict:
+    normalized_email = _normalize_invitation_email(email)
+    normalized_full_name = full_name.strip() if full_name else ""
+    normalized_phone = phone.strip() if phone else ""
+    normalized_date_of_birth = _parse_admin_invitation_date_of_birth(date_of_birth)
+    normalized_gender = _normalize_admin_invitation_gender(gender)
+    normalized_otp_code = otp_code.strip()
+
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="phone is required")
+    if not normalized_date_of_birth:
+        raise HTTPException(status_code=400, detail="date_of_birth is required")
+
+    invitation = (
+        db.query(AdminInvitation)
+        .filter(
+            AdminInvitation.email == normalized_email,
+            AdminInvitation.invite_token_hash == _hash_admin_invitation_token(token),
+        )
+        .first()
+    )
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Admin invitation not found")
+
+    if invitation.status != "otp_pending":
+        raise HTTPException(status_code=400, detail="Admin invitation is not waiting for OTP verification")
+
+    if invitation.otp_attempt_count < 0:
+        raise HTTPException(status_code=400, detail="OTP code has not been sent yet")
+
+    if _is_admin_invitation_expired(invitation):
+        invitation.status = "expired"
+        invitation.updated_at = utc_now()
+        db.commit()
+        raise HTTPException(status_code=400, detail="Admin invitation OTP expired")
+
+    if invitation.otp_attempt_count >= settings.ADMIN_INVITATION_OTP_MAX_ATTEMPTS:
+        invitation.status = "expired"
+        invitation.updated_at = utc_now()
+        db.commit()
+        raise HTTPException(status_code=400, detail="Admin invitation OTP attempt limit exceeded")
+
+    if not verify_password(normalized_otp_code, invitation.otp_hash):
+        invitation.otp_attempt_count += 1
+        if invitation.otp_attempt_count >= settings.ADMIN_INVITATION_OTP_MAX_ATTEMPTS:
+            invitation.status = "expired"
+        invitation.updated_at = utc_now()
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid OTP code")
+
+    existing_user = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.email == normalized_email)
+        .first()
+    )
+    if existing_user and _admin_role_name(existing_user) in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(status_code=409, detail="Email already has admin access")
+
+    if existing_user:
+        normalized_full_name = normalized_full_name or existing_user.full_name
+    elif not normalized_full_name:
+        raise HTTPException(status_code=400, detail="full_name is required")
+
+    invitation.full_name = normalized_full_name
+    invitation.phone = normalized_phone
+    invitation.date_of_birth = normalized_date_of_birth
+    invitation.gender = normalized_gender
+    invitation.status = "pending_approval"
+    invitation.submitted_at = utc_now()
+    invitation.updated_at = utc_now()
+    db.commit()
+    db.refresh(invitation)
+
+    try:
+        _send_admin_pending_review_email(db, invitation)
+    except Exception:
+        logger.exception("Failed to send admin invitation pending review email for invitation_id=%s", invitation.id)
+
+    return {
+        "message": "Admin request submitted and waiting for approval",
+        "invitation": _serialize_admin_invitation(invitation),
+    }
+
+
+def approve_admin_invitation(
+    db: Session,
+    current_administrator: User,
+    invitation_id: int,
+    permissions: list[str],
+) -> dict:
+    _require_admin_scope(current_administrator, "admins")
+    invitation = db.query(AdminInvitation).filter(AdminInvitation.id == invitation_id).first()
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Admin invitation not found")
+    if invitation.status != "pending_approval":
+        raise HTTPException(status_code=400, detail="Admin invitation is not waiting for approval")
+
+    generated_password = _generate_admin_password()
+    admin_role = get_or_create_role(db, ADMIN_ROLE_NAME)
+    existing_user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.email == invitation.email)
+        .first()
+    )
+    if existing_user and _admin_role_name(existing_user) in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(status_code=409, detail="Email already has admin access")
+
+    if existing_user:
+        user = existing_user
+        user.role_id = admin_role.id
+        user.password_hash = hash_password(generated_password)
+        if user.auth_type == "oauth":
+            user.auth_type = "mixed"
+        elif not user.auth_type:
+            user.auth_type = "local"
+        user.email_verified = True
+        user.status = "active"
+        user.is_first_login = True
+        user.max_exam_create = max(user.max_exam_create or 0, 50)
+        user.max_document_create = max(user.max_document_create or 0, 50)
+        user.admin_permissions = encode_admin_permissions(permissions)
+        user.updated_at = utc_now()
+        _apply_admin_invitation_profile(db, user, invitation)
+    else:
+        user = User(
+            role_id=admin_role.id,
+            full_name=invitation.full_name or invitation.email,
+            username=build_username_from_email(db, invitation.email),
+            email=invitation.email,
+            phone=invitation.phone,
+            password_hash=hash_password(generated_password),
+            auth_type="local",
+            email_verified=True,
+            status="active",
+            is_first_login=True,
+            max_exam_create=50,
+            max_document_create=50,
+            admin_permissions=encode_admin_permissions(permissions),
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(user)
+    db.flush()
+    if not existing_user:
+        _apply_admin_invitation_profile(db, user, invitation)
+
+    invitation.status = "approved"
+    invitation.approved_by_user_id = current_administrator.id
+    invitation.approved_at = utc_now()
+    invitation.generated_user_id = user.id
+    invitation.updated_at = utc_now()
+    db.commit()
+    db.refresh(user)
+    db.refresh(invitation)
+    user = _get_admin_account(db, user.id)
+
+    message = "Admin invitation approved and credentials sent successfully"
+    try:
+        _send_admin_credentials_email(user, generated_password)
+    except Exception:
+        logger.exception("Failed to send admin credentials email for user_id=%s", user.id)
+        message = "Admin invitation approved, but failed to send credentials email"
+
+    return {
+        "message": message,
+        "invitation": _serialize_admin_invitation(invitation),
+        "admin": _serialize_admin_account(user),
+    }
+
+
+def reject_admin_invitation(
+    db: Session,
+    current_administrator: User,
+    invitation_id: int,
+    reason: str | None,
+) -> dict:
+    _require_admin_scope(current_administrator, "admins")
+    invitation = db.query(AdminInvitation).filter(AdminInvitation.id == invitation_id).first()
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Admin invitation not found")
+    if invitation.status not in {"otp_pending", "pending_approval", "expired"}:
+        raise HTTPException(status_code=400, detail="Admin invitation cannot be rejected")
+
+    invitation.status = "rejected"
+    invitation.rejected_by_user_id = current_administrator.id
+    invitation.rejected_at = utc_now()
+    invitation.rejection_reason = reason.strip() if reason else None
+    invitation.updated_at = utc_now()
+    db.commit()
+    db.refresh(invitation)
+    return {
+        "message": "Admin invitation rejected successfully",
+        "invitation": _serialize_admin_invitation(invitation),
+    }
 
 
 def list_admin_accounts(db: Session, current_admin: User) -> dict:
