@@ -139,6 +139,7 @@ class Settings:
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS: bool = _parse_bool(os.getenv("SMTP_USE_TLS"), True)
     SMTP_USE_SSL: bool = _parse_bool(os.getenv("SMTP_USE_SSL"), False)
+    SMTP_TIMEOUT_SECONDS: int = int(os.getenv("SMTP_TIMEOUT_SECONDS", "15"))
     EMAIL_VERIFICATION_SECRET: str = (
         os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET_KEY).strip() or SESSION_SECRET_KEY
     )

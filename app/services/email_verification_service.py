@@ -70,13 +70,21 @@ def _send_via_smtp(message: EmailMessage) -> None:
         raise RuntimeError("SMTP email delivery is not fully configured")
 
     if settings.SMTP_USE_SSL:
-        with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
+        with smtplib.SMTP_SSL(
+            settings.SMTP_HOST,
+            settings.SMTP_PORT,
+            timeout=settings.SMTP_TIMEOUT_SECONDS,
+        ) as smtp:
             if settings.SMTP_USERNAME:
                 smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
             smtp.send_message(message)
         return
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
+    with smtplib.SMTP(
+        settings.SMTP_HOST,
+        settings.SMTP_PORT,
+        timeout=settings.SMTP_TIMEOUT_SECONDS,
+    ) as smtp:
         if settings.SMTP_USE_TLS:
             smtp.starttls()
         if settings.SMTP_USERNAME:
