@@ -47,6 +47,7 @@ class AdminCrmOverviewResponse(BaseModel):
 
 AdminAccountRole = Literal["administrator", "admin"]
 AdminAccountStatus = Literal["active", "disabled"]
+AdminInvitationStatus = Literal["otp_pending", "pending_approval", "approved", "rejected", "expired"]
 
 
 class AdminAccountSchema(BaseModel):
@@ -78,6 +79,75 @@ class CreateAdminAccountRequest(BaseModel):
 
 class AdminAccountResponse(BaseModel):
     message: str
+    admin: AdminAccountSchema
+
+
+class AdminInvitationSchema(BaseModel):
+    id: int
+    email: str
+    full_name: str | None = None
+    phone: str | None = None
+    date_of_birth: date | None = None
+    gender: str | None = None
+    status: AdminInvitationStatus
+    otp_expires_at: datetime
+    invited_by_user_id: int | None = None
+    invited_by_name: str | None = None
+    invited_by_email: str | None = None
+    submitted_at: datetime | None = None
+    approved_by_user_id: int | None = None
+    approved_at: datetime | None = None
+    rejected_by_user_id: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    generated_user_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminInvitationListResponse(BaseModel):
+    items: list[AdminInvitationSchema]
+
+
+class CreateAdminInvitationRequest(BaseModel):
+    email: str
+
+
+class SendAdminInvitationOtpRequest(BaseModel):
+    token: str
+    email: str
+    full_name: str | None = None
+    phone: str | None = None
+    date_of_birth: date | None = None
+    gender: str | None = None
+
+
+class VerifyAdminInvitationOtpRequest(BaseModel):
+    token: str
+    email: str
+    otp_code: str
+    full_name: str | None = None
+    phone: str | None = None
+    date_of_birth: date | None = None
+    gender: str | None = None
+
+
+class ApproveAdminInvitationRequest(BaseModel):
+    permissions: list[str] = Field(default_factory=list)
+
+
+class RejectAdminInvitationRequest(BaseModel):
+    reason: str | None = None
+
+
+class AdminInvitationResponse(BaseModel):
+    message: str
+    invitation: AdminInvitationSchema
+
+
+class ApproveAdminInvitationResponse(BaseModel):
+    message: str
+    invitation: AdminInvitationSchema
     admin: AdminAccountSchema
 
 

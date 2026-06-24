@@ -39,3 +39,4 @@ docker compose up --build
 - `apps/api` va `apps/admin-web` la layout monorepo moi de tiep tuc phat trien.
 - Cac folder cu o root van con ton tai tam thoi do Windows dang khoa mot so file luc di chuyen. Sau khi ban verify moi thu chay on, co the xoa thu cong cac ban sao cu o root.
 - `packages/` duoc de san cho shared client, shared types hoac ui-kit ve sau.
+- Cau hinh xac thuc email nam tai `docs/email-verification.md`.
