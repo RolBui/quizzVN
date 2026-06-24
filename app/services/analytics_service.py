@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from fastapi import Request
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
@@ -213,6 +214,41 @@ def _upsert_presence(
     ip_address: str | None,
     seen_at: datetime,
 ) -> None:
+    values = {
+        "visitor_id": visitor_id,
+        "session_id": session_id,
+        "user_id": user_id,
+        "path": path,
+        "title": title,
+        "origin": origin,
+        "device_type": _device_type(user_agent),
+        "browser": _browser(user_agent),
+        "os": _os(user_agent),
+        "screen_width": screen_width,
+        "screen_height": screen_height,
+        "user_agent": user_agent,
+        "ip_address": ip_address,
+        "last_seen_at": seen_at,
+    }
+
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        update_values = {
+            key: value
+            for key, value in values.items()
+            if key != "session_id"
+        }
+        statement = (
+            postgresql_insert(WebAnalyticsPresence)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[WebAnalyticsPresence.session_id],
+                set_=update_values,
+            )
+        )
+        db.execute(statement)
+        return
+
     presence = (
         db.query(WebAnalyticsPresence)
         .filter(WebAnalyticsPresence.session_id == session_id)
@@ -222,19 +258,8 @@ def _upsert_presence(
         presence = WebAnalyticsPresence(session_id=session_id)
         db.add(presence)
 
-    presence.visitor_id = visitor_id
-    presence.user_id = user_id
-    presence.path = path
-    presence.title = title
-    presence.origin = origin
-    presence.device_type = _device_type(user_agent)
-    presence.browser = _browser(user_agent)
-    presence.os = _os(user_agent)
-    presence.screen_width = screen_width
-    presence.screen_height = screen_height
-    presence.user_agent = user_agent
-    presence.ip_address = ip_address
-    presence.last_seen_at = seen_at
+    for key, value in values.items():
+        setattr(presence, key, value)
 
 
 def record_page_view(
