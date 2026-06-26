@@ -112,6 +112,15 @@ class RegisterRequest(BaseModel):
     confirm_password: str
 
 
+class VerifyEmailOtpRequest(BaseModel):
+    otp_code: str
+
+
+class EmailVerificationResponse(BaseModel):
+    message: str
+    user: UserSchema
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str

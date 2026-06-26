@@ -1,5 +1,8 @@
 import logging
+import secrets
 import smtplib
+import string
+from datetime import timedelta
 from email.message import EmailMessage
 from urllib.parse import urlencode
 
@@ -8,6 +11,8 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import hash_password, utc_now, verify_password
+from app.models.email_verification_otp import EmailVerificationOtp
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -65,6 +70,23 @@ def _build_email_message(recipient_email: str, recipient_name: str, verify_url: 
     return _build_plain_email_message(recipient_email, subject, text_body)
 
 
+def _generate_email_verification_otp() -> str:
+    return "".join(secrets.choice(string.digits) for _ in range(6))
+
+
+def _build_email_otp_message(recipient_email: str, recipient_name: str, otp_code: str) -> EmailMessage:
+    app_name = settings.APP_NAME
+    subject = f"Your verification code for {app_name}"
+    safe_name = recipient_name.strip() or recipient_email
+    text_body = (
+        f"Hi {safe_name},\n\n"
+        f"Your {app_name} email verification code is: {otp_code}\n\n"
+        f"This code expires in {settings.EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES} minute(s).\n\n"
+        "If you did not create this account, you can ignore this email."
+    )
+    return _build_plain_email_message(recipient_email, subject, text_body)
+
+
 def _send_via_smtp(message: EmailMessage) -> None:
     if not settings.SMTP_HOST or not settings.EMAIL_FROM_ADDRESS:
         raise RuntimeError("SMTP email delivery is not fully configured")
@@ -117,6 +139,106 @@ def send_email_verification_email(user: User) -> str:
     logger.info("EMAIL_DELIVERY_MODE=%s", settings.EMAIL_DELIVERY_MODE)
     logger.info("Email verification link for %s: %s", user.email, verify_url)
     return verify_url
+
+
+def send_email_verification_otp(db: Session, user: User) -> None:
+    if user.email_verified:
+        return
+
+    otp_code = _generate_email_verification_otp()
+    now = utc_now()
+    verification_otp = (
+        db.query(EmailVerificationOtp)
+        .filter(EmailVerificationOtp.user_id == user.id)
+        .first()
+    )
+
+    if verification_otp:
+        verification_otp.otp_hash = hash_password(otp_code)
+        verification_otp.expires_at = now + timedelta(minutes=settings.EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES)
+        verification_otp.attempt_count = 0
+        verification_otp.consumed_at = None
+        verification_otp.updated_at = now
+    else:
+        verification_otp = EmailVerificationOtp(
+            user_id=user.id,
+            otp_hash=hash_password(otp_code),
+            expires_at=now + timedelta(minutes=settings.EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES),
+            attempt_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(verification_otp)
+
+    db.commit()
+
+    message = _build_email_otp_message(user.email, user.full_name, otp_code)
+    if settings.EMAIL_DELIVERY_MODE == "smtp":
+        _send_via_smtp(message)
+        logger.info("Email verification OTP sent to %s", user.email)
+        return
+
+    logger.info("EMAIL_DELIVERY_MODE=%s", settings.EMAIL_DELIVERY_MODE)
+    logger.info("Email verification OTP sent to %s", user.email)
+    logger.info("Email to %s subject=%s\n%s", user.email, message["Subject"], message.get_content())
+
+
+def verify_email_otp(db: Session, user: User, otp_code: str) -> dict:
+    if user.email_verified:
+        return {"message": "Email is already verified", "user": user}
+
+    normalized_otp_code = otp_code.strip()
+    if not normalized_otp_code.isdigit() or len(normalized_otp_code) != 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="verification_otp_invalid",
+        )
+
+    verification_otp = (
+        db.query(EmailVerificationOtp)
+        .filter(EmailVerificationOtp.user_id == user.id)
+        .first()
+    )
+
+    if not verification_otp or verification_otp.consumed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="verification_otp_not_sent",
+        )
+
+    expires_at = verification_otp.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=utc_now().tzinfo)
+
+    if expires_at <= utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="verification_otp_expired",
+        )
+
+    if verification_otp.attempt_count >= settings.EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="verification_otp_attempt_limit_exceeded",
+        )
+
+    if not verify_password(normalized_otp_code, verification_otp.otp_hash):
+        verification_otp.attempt_count += 1
+        verification_otp.updated_at = utc_now()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="verification_otp_invalid",
+        )
+
+    now = utc_now()
+    user.email_verified = True
+    user.updated_at = now
+    verification_otp.consumed_at = now
+    verification_otp.updated_at = now
+    db.commit()
+    db.refresh(user)
+    return {"message": "Email verified successfully", "user": user}
 
 
 def verify_email_token(db: Session, token: str) -> str:

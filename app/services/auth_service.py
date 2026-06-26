@@ -21,10 +21,11 @@ from app.models.role import Role
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.admin_invitation import AdminInvitation
+from app.models.email_verification_otp import EmailVerificationOtp
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
-from app.services.email_verification_service import send_email_verification_email
+from app.services.email_verification_service import send_email_verification_otp
 
 PENDING_ROLE_NAME = "pending"
 ADMINISTRATOR_ROLE_NAME = "administrator"
@@ -64,6 +65,7 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
 def bootstrap_auth_storage() -> None:
     UserProfile.__table__.create(bind=engine, checkfirst=True)
     AdminInvitation.__table__.create(bind=engine, checkfirst=True)
+    EmailVerificationOtp.__table__.create(bind=engine, checkfirst=True)
     _ensure_admin_invitation_columns()
     _ensure_admin_permissions_column()
     _ensure_user_status_constraint()
@@ -561,12 +563,12 @@ def register_local_user(
     db.refresh(session)
 
     try:
-        send_email_verification_email(user)
+        send_email_verification_otp(db, user)
     except Exception:
-        logger.exception("Failed to send email verification for user_id=%s", user.id)
+        logger.exception("Failed to send email verification OTP for user_id=%s", user.id)
 
     return {
-        "message": "Register successful. Please verify your email.",
+        "message": "Register successful. Please verify your email with the OTP code.",
         "user": build_user_payload(db, user),
         "session": serialize_session(session),
         "tokens": serialize_session_tokens(session),
