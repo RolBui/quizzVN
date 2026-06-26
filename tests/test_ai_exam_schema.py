@@ -14,6 +14,9 @@ class GenerateExamRequestTest(unittest.TestCase):
             duration_minutes=45,
             question_count=35,
             question_types=["multiple_choice"],
+            question_type_distribution={
+                "multiple_choice": 35,
+            },
             difficulty_distribution={
                 "easy": 20,
                 "normal": 10,
@@ -21,6 +24,12 @@ class GenerateExamRequestTest(unittest.TestCase):
             },
         )
 
+        self.assertEqual(
+            payload.question_type_distribution,
+            {
+                "multiple_choice": 35,
+            },
+        )
         self.assertEqual(
             payload.difficulty_distribution,
             {
@@ -38,6 +47,9 @@ class GenerateExamRequestTest(unittest.TestCase):
             duration_minutes=15,
             question_count=10,
             question_types=["multiple_choice"],
+            question_type_distribution={
+                "multiple_choice": 10,
+            },
             difficulty_distribution={
                 "easy": 40,
                 "medium": 40,
@@ -46,6 +58,68 @@ class GenerateExamRequestTest(unittest.TestCase):
         )
 
         self.assertEqual(payload.difficulty_distribution["medium"], 40)
+
+    def test_requires_question_type_distribution(self) -> None:
+        with self.assertRaises(ValidationError):
+            GenerateExamRequest(
+                subject="Tin hoc",
+                grade="10",
+                topic="Python",
+                duration_minutes=45,
+                question_count=5,
+                question_types=["multiple_choice", "true_false"],
+            )
+
+    def test_accepts_question_type_distribution(self) -> None:
+        payload = GenerateExamRequest(
+            subject="Tin hoc",
+            grade="10",
+            topic="Python",
+            duration_minutes=45,
+            question_count=30,
+            question_types=["multiple_choice", "true_false"],
+            question_type_distribution={
+                "multiple_choice": 15,
+                "true_false": 15,
+            },
+        )
+
+        self.assertEqual(
+            payload.question_type_distribution,
+            {
+                "multiple_choice": 15,
+                "true_false": 15,
+            },
+        )
+
+    def test_rejects_question_type_distribution_total_mismatch(self) -> None:
+        with self.assertRaises(ValidationError):
+            GenerateExamRequest(
+                subject="Tin hoc",
+                grade="10",
+                topic="Python",
+                duration_minutes=45,
+                question_count=30,
+                question_types=["multiple_choice", "true_false"],
+                question_type_distribution={
+                    "multiple_choice": 10,
+                    "true_false": 10,
+                },
+            )
+
+    def test_rejects_question_type_distribution_missing_selected_type(self) -> None:
+        with self.assertRaises(ValidationError):
+            GenerateExamRequest(
+                subject="Tin hoc",
+                grade="10",
+                topic="Python",
+                duration_minutes=45,
+                question_count=30,
+                question_types=["multiple_choice", "true_false"],
+                question_type_distribution={
+                    "multiple_choice": 30,
+                },
+            )
 
     def test_rejects_distribution_that_is_not_counts_or_percentages(self) -> None:
         with self.assertRaises(ValidationError):
@@ -56,6 +130,9 @@ class GenerateExamRequestTest(unittest.TestCase):
                 duration_minutes=15,
                 question_count=35,
                 question_types=["multiple_choice"],
+                question_type_distribution={
+                    "multiple_choice": 35,
+                },
                 difficulty_distribution={
                     "easy": 20,
                     "medium": 10,
@@ -69,6 +146,9 @@ class GenerateMoreQuestionsRequestTest(unittest.TestCase):
         payload = GenerateMoreQuestionsRequest(
             count=5,
             question_types=["multiple_choice", "multiple_choice"],
+            question_type_distribution={
+                "multiple_choice": 5,
+            },
             difficulty_distribution={
                 "easy": 2,
                 "normal": 2,
@@ -79,6 +159,7 @@ class GenerateMoreQuestionsRequestTest(unittest.TestCase):
 
         self.assertEqual(payload.question_count, 5)
         self.assertEqual(payload.question_types, ["multiple_choice"])
+        self.assertEqual(payload.question_type_distribution, {"multiple_choice": 5})
         self.assertEqual(
             payload.difficulty_distribution,
             {
@@ -93,6 +174,25 @@ class GenerateMoreQuestionsRequestTest(unittest.TestCase):
 
         self.assertEqual(payload.question_count, 3)
         self.assertIsNone(payload.question_types)
+        self.assertEqual(payload.question_type_distribution, {})
+
+    def test_more_questions_accepts_question_type_distribution(self) -> None:
+        payload = GenerateMoreQuestionsRequest(
+            count=6,
+            question_type_distribution={
+                "multiple_choice": 4,
+                "true_false": 2,
+            },
+        )
+
+        self.assertEqual(payload.question_types, ["multiple_choice", "true_false"])
+        self.assertEqual(
+            payload.question_type_distribution,
+            {
+                "multiple_choice": 4,
+                "true_false": 2,
+            },
+        )
 
     def test_rejects_more_distribution_that_is_not_counts_or_percentages(self) -> None:
         with self.assertRaises(ValidationError):

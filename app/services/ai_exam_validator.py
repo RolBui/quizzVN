@@ -42,11 +42,21 @@ def validate_ai_exam_payload(
     if not allowed_request_types:
         allowed_request_types = ALLOWED_QUESTION_TYPES
 
+    expected_type_distribution = request_data.get("question_type_distribution") or {}
+    actual_type_distribution = {
+        question_type: 0
+        for question_type in expected_type_distribution
+    }
+
     seen_content: set[str] = set()
     total_points = 0.0
     for index, question in enumerate(questions, start=1):
         errors.extend(validate_ai_question_payload(question, index, allowed_request_types))
         if isinstance(question, dict):
+            question_type = _normalize_text(question.get("type"))
+            if question_type in actual_type_distribution:
+                actual_type_distribution[question_type] += 1
+
             normalized_content = _normalize_text(question.get("content")).lower()
             if normalized_content:
                 if normalized_content in seen_content:
@@ -56,6 +66,13 @@ def validate_ai_exam_payload(
 
     if total_points <= 0:
         errors.append("total points must be greater than 0")
+
+    for question_type, expected_count in expected_type_distribution.items():
+        actual_count = actual_type_distribution.get(question_type, 0)
+        if actual_count != expected_count:
+            errors.append(
+                f"Expected {expected_count} {question_type} questions, got {actual_count}"
+            )
 
     return not errors, errors
 

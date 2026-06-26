@@ -1,8 +1,9 @@
+import json
 import re
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -53,6 +54,11 @@ class MockAIProviderClient(AIProviderClient):
         topic = _extract_text_from_prompt(prompt, "Topic", "Python co ban")
         duration_minutes = _extract_int_from_prompt(prompt, "Duration", 15)
         question_types = _extract_question_types_from_prompt(prompt)
+        question_type_sequence = _extract_question_type_sequence_from_prompt(
+            prompt,
+            question_types,
+            question_count,
+        )
 
         payload = {
             "title": f"Mock exam draft for {topic}",
@@ -62,7 +68,7 @@ class MockAIProviderClient(AIProviderClient):
             "duration_minutes": duration_minutes,
             "total_points": question_count,
             "questions": [
-                _build_mock_question(index, topic, question_types[index % len(question_types)])
+                _build_mock_question(index, topic, question_type_sequence[index])
                 for index in range(question_count)
             ],
         }
@@ -72,6 +78,29 @@ class MockAIProviderClient(AIProviderClient):
 def bootstrap_ai_exam_storage() -> None:
     AIExamGenerationJob.__table__.create(bind=engine, checkfirst=True)
     AIQuestionDraft.__table__.create(bind=engine, checkfirst=True)
+    _ensure_ai_exam_generation_job_columns()
+
+
+def _ensure_ai_exam_generation_job_columns() -> None:
+    if engine.dialect.name == "postgresql":
+        statement = """
+            ALTER TABLE ai_exam_generation_jobs
+            ADD COLUMN IF NOT EXISTS question_type_distribution JSONB NOT NULL DEFAULT '{}'::jsonb;
+            UPDATE ai_exam_generation_jobs
+            SET question_type_distribution = '{}'::jsonb
+            WHERE question_type_distribution IS NULL;
+        """
+    else:
+        statement = """
+            ALTER TABLE ai_exam_generation_jobs
+            ADD COLUMN IF NOT EXISTS question_type_distribution JSON NOT NULL DEFAULT '{}';
+            UPDATE ai_exam_generation_jobs
+            SET question_type_distribution = '{}'
+            WHERE question_type_distribution IS NULL;
+        """
+
+    with engine.begin() as connection:
+        connection.execute(text(statement))
 
 
 def create_ai_exam_generation_job(
@@ -91,6 +120,7 @@ def create_ai_exam_generation_job(
         duration_minutes=request_data["duration_minutes"],
         question_count=request_data["question_count"],
         question_types=request_data["question_types"],
+        question_type_distribution=request_data["question_type_distribution"],
         difficulty_distribution=request_data["difficulty_distribution"],
         language=request_data["language"],
         additional_instructions=request_data.get("additional_instructions") or "",
@@ -418,6 +448,7 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
         "duration_minutes": job.duration_minutes,
         "question_count": job.question_count,
         "question_types": job.question_types or [],
+        "question_type_distribution": _build_job_question_type_distribution(job),
         "difficulty_distribution": job.difficulty_distribution or {},
         "language": job.language,
         "additional_instructions": job.additional_instructions or "",
@@ -444,6 +475,7 @@ def _build_request_data_from_job(job: AIExamGenerationJob) -> dict[str, Any]:
         "duration_minutes": job.duration_minutes,
         "question_count": job.question_count,
         "question_types": list(job.question_types or []),
+        "question_type_distribution": _build_job_question_type_distribution(job),
         "difficulty_distribution": dict(job.difficulty_distribution or {}),
         "language": job.language,
         "additional_instructions": job.additional_instructions or "",
@@ -461,13 +493,20 @@ def _build_more_request_data(
     else:
         additional_instructions = base_instructions or extra_instructions
 
+    question_types = data.get("question_types") or list(job.question_types or []) or ["multiple_choice"]
+    question_type_distribution = data.get("question_type_distribution") or _build_default_more_question_type_distribution(
+        question_types,
+        data["question_count"],
+    )
+
     return {
         "subject": job.subject,
         "grade": job.grade,
         "topic": job.topic,
         "duration_minutes": job.duration_minutes,
         "question_count": data["question_count"],
-        "question_types": data.get("question_types") or list(job.question_types or []) or ["multiple_choice"],
+        "question_types": question_types,
+        "question_type_distribution": question_type_distribution,
         "difficulty_distribution": data.get("difficulty_distribution")
         or _build_default_more_difficulty_distribution(job),
         "language": job.language,
@@ -501,6 +540,41 @@ def _build_default_more_difficulty_distribution(job: AIExamGenerationJob) -> dic
         "medium": medium,
         "hard": hard,
     }
+
+
+def _build_default_more_question_type_distribution(
+    question_types: list[str],
+    question_count: int,
+) -> dict[str, int]:
+    if not question_types:
+        return {"multiple_choice": question_count}
+
+    if len(question_types) == 1:
+        return {question_types[0]: question_count}
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="question_type_distribution is required when using multiple question types",
+    )
+
+
+def _build_job_question_type_distribution(job: AIExamGenerationJob) -> dict[str, int]:
+    distribution = dict(job.question_type_distribution or {})
+    if distribution:
+        return distribution
+
+    drafts = list(getattr(job, "question_drafts", None) or [])
+    if drafts:
+        actual_distribution: dict[str, int] = {}
+        for draft in drafts:
+            actual_distribution[draft.question_type] = actual_distribution.get(draft.question_type, 0) + 1
+        return actual_distribution
+
+    question_types = list(job.question_types or [])
+    if len(question_types) == 1:
+        return {question_types[0]: job.question_count}
+
+    return {}
 
 
 def _build_existing_question_context(
@@ -733,6 +807,45 @@ def _extract_question_types_from_prompt(prompt: str) -> list[str]:
     raw_value = _extract_text_from_prompt(prompt, "Question types", "multiple_choice")
     values = [item.strip() for item in raw_value.split(",") if item.strip()]
     return values or ["multiple_choice"]
+
+
+def _extract_json_object_from_prompt(prompt: str, label: str) -> dict[str, Any]:
+    match = re.search(
+        rf"{re.escape(label)}(?:\s*\([^)]*\))?:\s*(\{{[^\n]*\}})",
+        prompt,
+    )
+    if not match:
+        return {}
+
+    try:
+        parsed = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _extract_question_type_sequence_from_prompt(
+    prompt: str,
+    question_types: list[str],
+    question_count: int,
+) -> list[str]:
+    distribution = _extract_json_object_from_prompt(prompt, "Question type distribution")
+    sequence: list[str] = []
+    for question_type in question_types:
+        try:
+            count = int(distribution.get(question_type) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        sequence.extend([question_type] * count)
+
+    if len(sequence) == question_count:
+        return sequence
+
+    return [
+        question_types[index % len(question_types)]
+        for index in range(question_count)
+    ]
 
 
 def _build_mock_question(index: int, topic: str, question_type: str) -> dict[str, Any]:
