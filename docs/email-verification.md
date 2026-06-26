@@ -6,19 +6,37 @@ accounts.
 ## Current flow
 
 1. `POST /auth/register` creates the user with `email_verified=false`.
-2. The backend sends a verification link to the registered email.
-3. The link opens `GET /auth/verify-email?token=...`.
-4. The backend marks the user as verified, then redirects to:
-
-```text
-{FRONTEND_URL}{FRONTEND_EMAIL_VERIFICATION_PATH}?status=verified
-```
+2. The backend sends a 6-digit OTP code to the registered email.
+3. The frontend submits that code with `POST /auth/email-verification/verify-otp`.
+4. The backend marks the current authenticated user as verified.
 
 Users can request another email with:
 
 ```http
 POST /auth/email-verification/resend
 ```
+
+or the clearer alias:
+
+```http
+POST /auth/email-verification/send-otp
+```
+
+Submit an OTP with:
+
+```http
+POST /auth/email-verification/verify-otp
+Content-Type: application/json
+
+{
+  "otp_code": "123456"
+}
+```
+
+These endpoints require the auth session created by register/login.
+
+`GET /auth/verify-email?token=...` is still available for old verification
+links, but register now sends OTP instead of link.
 
 ## Recommended free provider
 
@@ -39,6 +57,8 @@ SMTP_USE_TLS=true
 SMTP_USE_SSL=false
 EMAIL_VERIFICATION_SECRET=replace_with_a_long_random_secret
 EMAIL_VERIFICATION_EXPIRE_HOURS=24
+EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES=15
+EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS=5
 BACKEND_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:3001
 FRONTEND_EMAIL_VERIFICATION_PATH=/verify-email
@@ -62,5 +82,5 @@ For local testing without a real email provider:
 EMAIL_DELIVERY_MODE=log
 ```
 
-Then register a user and copy the verification link from the backend terminal
-logs.
+Then register a user and copy the 6-digit verification code from the backend
+terminal logs.

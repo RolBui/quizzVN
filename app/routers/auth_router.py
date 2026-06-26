@@ -20,6 +20,8 @@ from app.schemas.auth import (
     SessionListResponse,
     UpdateProfileRequest,
     UpdateProfileResponse,
+    VerifyEmailOtpRequest,
+    EmailVerificationResponse,
     ProfileResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
@@ -47,7 +49,8 @@ from app.services.auth_service import (
 )
 from app.services.email_verification_service import (
     build_frontend_email_verification_redirect_url,
-    send_email_verification_email,
+    send_email_verification_otp,
+    verify_email_otp,
     verify_email_token,
 )
 from app.services.media_service import (
@@ -338,15 +341,41 @@ def verify_email(
     )
 
 
-@router.post("/email-verification/resend", response_model=MessageResponse)
-def resend_email_verification(
-    current_user=Depends(get_current_user),
-) -> MessageResponse:
+def _send_email_verification_otp_response(db: Session, current_user) -> MessageResponse:
     if current_user.email_verified:
         return {"message": "Email is already verified"}
 
-    send_email_verification_email(current_user)
-    return {"message": "Verification email sent"}
+    send_email_verification_otp(db, current_user)
+    return {"message": "Verification OTP sent"}
+
+
+@router.post("/email-verification/send-otp", response_model=MessageResponse)
+def send_email_verification_code(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> MessageResponse:
+    return _send_email_verification_otp_response(db, current_user)
+
+
+@router.post("/email-verification/resend", response_model=MessageResponse)
+def resend_email_verification(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> MessageResponse:
+    return _send_email_verification_otp_response(db, current_user)
+
+
+@router.post("/email-verification/verify-otp", response_model=EmailVerificationResponse)
+def verify_email_code(
+    payload: VerifyEmailOtpRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> EmailVerificationResponse:
+    result = verify_email_otp(db, current_user, payload.otp_code)
+    return {
+        "message": result["message"],
+        "user": build_user_payload(db, result["user"]),
+    }
 
 
 @router.get("/me", response_model=MeResponse)

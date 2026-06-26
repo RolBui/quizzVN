@@ -1415,6 +1415,7 @@ def _delete_user_auth_rows(db: Session, user_id: int) -> None:
     for table_name in (
         "user_sessions",
         "oauth_accounts",
+        "email_verification_otps",
         "email_verification_tokens",
         "password_reset_tokens",
         "user_profiles",
