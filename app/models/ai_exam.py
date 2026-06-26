@@ -18,6 +18,7 @@ class AIExamGenerationJob(Base):
     duration_minutes = Column(Integer, nullable=False)
     question_count = Column(Integer, nullable=False)
     question_types = Column(JSON, nullable=False, default=list)
+    question_type_distribution = Column(JSON, nullable=False, default=dict)
     difficulty_distribution = Column(JSON, nullable=False, default=dict)
     language = Column(String(50), nullable=False, default="Vietnamese")
     additional_instructions = Column(Text, nullable=False, default="")

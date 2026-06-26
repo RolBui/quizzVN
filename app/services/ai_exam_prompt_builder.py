@@ -26,6 +26,10 @@ EXAM_OUTPUT_SCHEMA = {
 
 def build_exam_generation_prompt(data: dict[str, Any]) -> str:
     question_types = ", ".join(data["question_types"])
+    question_type_distribution = json.dumps(
+        data["question_type_distribution"],
+        ensure_ascii=False,
+    )
     difficulty_distribution = json.dumps(
         data["difficulty_distribution"],
         ensure_ascii=False,
@@ -52,6 +56,7 @@ Exam requirements:
 - Duration: {data["duration_minutes"]} minutes
 - Number of questions: {data["question_count"]}
 - Question types: {question_types}
+- Question type distribution (question counts): {question_type_distribution}
 - Difficulty distribution ({difficulty_distribution_unit}): {difficulty_distribution}
 - Language: {data["language"]}
 - Additional instructions: {additional_instructions}
@@ -68,10 +73,11 @@ Rules:
 9. The number of questions must exactly match the requested question_count.
 10. Do not include unsafe, harmful, or irrelevant content.
 11. Use only these question types: {question_types}.
-12. Follow the requested difficulty distribution exactly when it is given as question counts.
-13. Do not use underscores, markdown, or artificial markers inside answer options.
-14. For pronunciation questions, write full plain words in options. Do not write words like h_o_pe or _o_.
-15. If a question needs an underlined part but the output schema has no rich text, explain the target sound/letter in the explanation instead of marking the option text.
+12. Follow the requested question type distribution exactly.
+13. Follow the requested difficulty distribution exactly when it is given as question counts.
+14. Do not use underscores, markdown, or artificial markers inside answer options.
+15. For pronunciation questions, write full plain words in options. Do not write words like h_o_pe or _o_.
+16. If a question needs an underlined part but the output schema has no rich text, explain the target sound/letter in the explanation instead of marking the option text.
 
 Return JSON in this exact structure:
 {output_schema}

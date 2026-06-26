@@ -6,12 +6,27 @@ from app.services.ai_exam_validator import sanitize_ai_exam_payload, validate_ai
 REQUEST_DATA = {
     "question_count": 2,
     "question_types": ["multiple_choice"],
+    "question_type_distribution": {
+        "multiple_choice": 2,
+    },
 }
 
 
-def _question(content: str = "Question 1") -> dict:
+def _question(content: str = "Question 1", question_type: str = "multiple_choice") -> dict:
+    if question_type == "true_false":
+        return {
+            "type": "true_false",
+            "content": content,
+            "options": [],
+            "correct_answer": True,
+            "explanation": "The statement is true.",
+            "difficulty": "easy",
+            "points": 1,
+            "topic": "Python",
+        }
+
     return {
-        "type": "multiple_choice",
+        "type": question_type,
         "content": content,
         "options": ["A", "B", "C", "D"],
         "correct_answer": "A",
@@ -59,6 +74,29 @@ class AIExamValidatorTest(unittest.TestCase):
 
         self.assertFalse(valid)
         self.assertIn("Expected 2 questions, got 1", errors)
+        self.assertIn("Expected 2 multiple_choice questions, got 1", errors)
+
+    def test_rejects_wrong_question_type_distribution(self) -> None:
+        payload = _payload(
+            [
+                _question("Question 1"),
+                _question("Question 2"),
+            ]
+        )
+        request_data = {
+            "question_count": 2,
+            "question_types": ["multiple_choice", "true_false"],
+            "question_type_distribution": {
+                "multiple_choice": 1,
+                "true_false": 1,
+            },
+        }
+
+        valid, errors = validate_ai_exam_payload(payload, request_data)
+
+        self.assertFalse(valid)
+        self.assertIn("Expected 1 multiple_choice questions, got 2", errors)
+        self.assertIn("Expected 1 true_false questions, got 0", errors)
 
     def test_rejects_multiple_choice_answer_outside_options(self) -> None:
         invalid_question = _question("Question 1")

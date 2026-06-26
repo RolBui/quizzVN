@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+AI_QUESTION_TYPE_VALUES = ("multiple_choice", "true_false", "short_answer", "essay")
 AIQuestionType = Literal["multiple_choice", "true_false", "short_answer", "essay"]
 AIDifficulty = Literal["easy", "medium", "hard"]
 AIExamSaveScope = Literal["system", "class"]
@@ -16,6 +17,47 @@ DIFFICULTY_ALIASES = {
 }
 
 
+def _normalize_question_type_distribution(
+    question_type_distribution: dict[str, int],
+    question_types: list[AIQuestionType],
+    question_count: int,
+) -> dict[str, int]:
+    selected_question_types = list(dict.fromkeys(question_types))
+    if not selected_question_types:
+        raise ValueError("question_types must not be empty")
+
+    if not question_type_distribution:
+        raise ValueError("question_type_distribution is required")
+
+    normalized_distribution = {question_type: 0 for question_type in selected_question_types}
+    provided_question_types: set[str] = set()
+    for raw_question_type, count in question_type_distribution.items():
+        question_type = str(raw_question_type).strip()
+        if question_type not in AI_QUESTION_TYPE_VALUES:
+            raise ValueError("question_type_distribution keys must be valid question types")
+        if question_type not in normalized_distribution:
+            raise ValueError("question_type_distribution keys must match question_types")
+        if count <= 0:
+            raise ValueError("question_type_distribution values must be greater than 0")
+
+        normalized_distribution[question_type] += count
+        provided_question_types.add(question_type)
+
+    missing_question_types = [
+        question_type
+        for question_type in selected_question_types
+        if question_type not in provided_question_types
+    ]
+    if missing_question_types:
+        raise ValueError("question_type_distribution must include every selected question type")
+
+    total = sum(normalized_distribution.values())
+    if total != question_count:
+        raise ValueError("question_type_distribution total must match question_count")
+
+    return normalized_distribution
+
+
 class GenerateExamRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=100)
     grade: str = Field(min_length=1, max_length=50)
@@ -23,6 +65,7 @@ class GenerateExamRequest(BaseModel):
     duration_minutes: int = Field(gt=0, le=300)
     question_count: int = Field(ge=1, le=50)
     question_types: list[AIQuestionType] = Field(min_length=1)
+    question_type_distribution: dict[str, int] = Field(min_length=1)
     difficulty_distribution: dict[str, int] = Field(default_factory=dict)
     language: str = Field(default="Vietnamese", min_length=1, max_length=50)
     additional_instructions: str = Field(default="", max_length=1000)
@@ -39,6 +82,15 @@ class GenerateExamRequest(BaseModel):
         if not unique_values:
             raise ValueError("question_types must not be empty")
         return unique_values
+
+    @model_validator(mode="after")
+    def validate_question_type_distribution(self) -> "GenerateExamRequest":
+        self.question_type_distribution = _normalize_question_type_distribution(
+            self.question_type_distribution,
+            self.question_types,
+            self.question_count,
+        )
+        return self
 
     @model_validator(mode="after")
     def validate_difficulty_distribution(self) -> "GenerateExamRequest":
@@ -81,6 +133,7 @@ class GenerateMoreQuestionsRequest(BaseModel):
 
     question_count: int = Field(alias="count", ge=1, le=50)
     question_types: list[AIQuestionType] | None = None
+    question_type_distribution: dict[str, int] = Field(default_factory=dict)
     difficulty_distribution: dict[str, int] = Field(default_factory=dict)
     additional_instructions: str = Field(default="", max_length=1000)
 
@@ -101,6 +154,24 @@ class GenerateMoreQuestionsRequest(BaseModel):
     @classmethod
     def strip_more_instructions(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def validate_more_question_type_distribution(self) -> "GenerateMoreQuestionsRequest":
+        if not self.question_types and not self.question_type_distribution:
+            return self
+
+        if not self.question_types:
+            self.question_types = [
+                str(question_type).strip()
+                for question_type in self.question_type_distribution
+            ]
+
+        self.question_type_distribution = _normalize_question_type_distribution(
+            self.question_type_distribution,
+            self.question_types,
+            self.question_count,
+        )
+        return self
 
     @model_validator(mode="after")
     def validate_more_difficulty_distribution(self) -> "GenerateMoreQuestionsRequest":
@@ -159,6 +230,7 @@ class AIExamGenerationJobResponse(BaseModel):
     duration_minutes: int
     question_count: int
     question_types: list[AIQuestionType]
+    question_type_distribution: dict[str, int]
     difficulty_distribution: dict[str, int]
     language: str
     additional_instructions: str
