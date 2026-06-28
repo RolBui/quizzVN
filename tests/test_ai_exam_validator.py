@@ -164,6 +164,36 @@ class AIExamValidatorTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIn("Question 1: options must be unique", errors)
 
+    def test_sanitizes_phonetic_country_names(self) -> None:
+        payload = _payload(
+            [
+                {
+                    **_question("Question 1"),
+                    "options": [
+                        "Vi\u1ec7t Nam",
+                        "In-\u0111\u00f4-n\u00ea-xi-a",
+                        "L\u00e0o",
+                        "Phi-l\u00edp-pin",
+                    ],
+                    "correct_answer": "In-\u0111\u00f4-n\u00ea-xi-a",
+                    "explanation": "In-\u0111\u00f4-n\u00ea-xi-a l\u00e0 m\u1ed9t qu\u1ed1c gia \u0110\u00f4ng Nam \u00c1.",
+                },
+                _question("Question 2"),
+            ]
+        )
+
+        sanitized = sanitize_ai_exam_payload(payload)
+        valid, errors = validate_ai_exam_payload(sanitized, REQUEST_DATA)
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            sanitized["questions"][0]["options"],
+            ["Vi\u1ec7t Nam", "Indonesia", "L\u00e0o", "Philippines"],
+        )
+        self.assertEqual(sanitized["questions"][0]["correct_answer"], "Indonesia")
+        self.assertIn("Indonesia", sanitized["questions"][0]["explanation"])
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()

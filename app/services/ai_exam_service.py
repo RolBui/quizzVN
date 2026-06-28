@@ -21,6 +21,7 @@ from app.services.ai_exam_prompt_builder import (
 from app.services.ai_exam_validator import (
     build_question_payload_from_draft,
     sanitize_ai_exam_payload,
+    sanitize_ai_text,
     validate_ai_exam_payload,
     validate_ai_question_payload,
 )
@@ -648,21 +649,25 @@ def _normalize_duplicate_text(value: Any) -> str:
 
 
 def _build_single_choice_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
-    correct_answer = _normalize_answer_text(draft.correct_answer)
+    correct_answer = sanitize_ai_text(_normalize_answer_text(draft.correct_answer))
+    options = []
+    for index, option in enumerate(draft.options or []):
+        option_text = sanitize_ai_text(str(option))
+        options.append(
+            {
+                "option_key": OPTION_KEYS[index] if index < len(OPTION_KEYS) else str(index + 1),
+                "option_text": option_text,
+                "is_correct": option_text == correct_answer,
+            }
+        )
+
     return {
         "question_type": TEACHER_QUESTION_TYPE_SINGLE_CHOICE,
         "prompt": _build_exam_prompt(draft),
-        "explanation": draft.explanation.strip(),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "order_index": order_index,
         "points": float(draft.points or 1),
-        "options": [
-            {
-                "option_key": OPTION_KEYS[index] if index < len(OPTION_KEYS) else str(index + 1),
-                "option_text": str(option).strip(),
-                "is_correct": str(option).strip() == correct_answer,
-            }
-            for index, option in enumerate(draft.options or [])
-        ],
+        "options": options,
         "accepted_answers": [],
     }
 
@@ -672,7 +677,7 @@ def _build_true_false_question(draft: AIQuestionDraft, order_index: int) -> dict
     return {
         "question_type": TEACHER_QUESTION_TYPE_TRUE_FALSE,
         "prompt": _build_exam_prompt(draft),
-        "explanation": draft.explanation.strip(),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [
@@ -694,12 +699,12 @@ def _build_true_false_question(draft: AIQuestionDraft, order_index: int) -> dict
 def _build_short_answer_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
     accepted_answers = _extract_text_answers(draft.correct_answer)
     if not accepted_answers:
-        accepted_answers = [draft.explanation.strip()]
+        accepted_answers = [sanitize_ai_text(draft.explanation or "")]
 
     return {
         "question_type": TEACHER_QUESTION_TYPE_SHORT_ANSWER,
         "prompt": _build_exam_prompt(draft),
-        "explanation": draft.explanation.strip(),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [],
@@ -710,12 +715,12 @@ def _build_short_answer_question(draft: AIQuestionDraft, order_index: int) -> di
 def _build_text_question(draft: AIQuestionDraft, order_index: int) -> dict[str, Any]:
     accepted_answers = _extract_text_answers(draft.correct_answer)
     if not accepted_answers:
-        accepted_answers = [draft.explanation.strip()]
+        accepted_answers = [sanitize_ai_text(draft.explanation or "")]
 
     return {
         "question_type": TEACHER_QUESTION_TYPE_TEXT,
         "prompt": _build_exam_prompt(draft, include_explanation=draft.question_type == "essay"),
-        "explanation": draft.explanation.strip(),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "order_index": order_index,
         "points": float(draft.points or 1),
         "options": [],
@@ -724,9 +729,10 @@ def _build_text_question(draft: AIQuestionDraft, order_index: int) -> dict[str, 
 
 
 def _build_exam_prompt(draft: AIQuestionDraft, include_explanation: bool = False) -> str:
-    content = draft.content.strip()
-    if include_explanation and draft.explanation.strip():
-        return f"{content}\n\nHướng dẫn chấm: {draft.explanation.strip()}"
+    content = sanitize_ai_text(draft.content or "")
+    explanation = sanitize_ai_text(draft.explanation or "")
+    if include_explanation and explanation:
+        return f"{content}\n\nHướng dẫn chấm: {explanation}"
     return content
 
 
@@ -746,15 +752,15 @@ def _to_bool_answer(value: Any) -> bool:
 def _extract_text_answers(value: Any) -> list[str]:
     if isinstance(value, list):
         return [
-            str(answer).strip()
+            sanitize_ai_text(str(answer))
             for answer in value
-            if str(answer).strip()
+            if sanitize_ai_text(str(answer))
         ]
 
     if value is None:
         return []
 
-    answer = str(value).strip()
+    answer = sanitize_ai_text(str(value))
     return [answer] if answer else []
 
 
@@ -762,18 +768,32 @@ def serialize_question_draft(draft: AIQuestionDraft) -> dict[str, Any]:
     return {
         "id": draft.id,
         "question_type": draft.question_type,
-        "content": draft.content,
-        "options": draft.options or [],
-        "correct_answer": draft.correct_answer,
-        "explanation": draft.explanation or "",
+        "content": sanitize_ai_text(draft.content or ""),
+        "options": [
+            sanitize_ai_text(option) if isinstance(option, str) else option
+            for option in draft.options or []
+        ],
+        "correct_answer": _sanitize_serialized_answer(draft.correct_answer),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "difficulty": draft.difficulty,
         "points": float(draft.points or 0),
-        "topic": draft.topic or "",
+        "topic": sanitize_ai_text(draft.topic or ""),
         "order": draft.order,
         "is_approved": draft.is_approved,
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
     }
+
+
+def _sanitize_serialized_answer(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_ai_text(value)
+    if isinstance(value, list):
+        return [
+            sanitize_ai_text(answer) if isinstance(answer, str) else answer
+            for answer in value
+        ]
+    return value
 
 
 def _get_ai_provider_client() -> AIProviderClient:

@@ -12,8 +12,10 @@ from app.schemas.teacher import (
     TeacherClassResponse,
     TeacherDocumentListResponse,
     TeacherDocumentResponse,
+    TeacherExamAttemptResultResponse,
     TeacherExamDetailSchema,
     TeacherExamListResponse,
+    TeacherExamResultListResponse,
     TeacherExamResponse,
     TeacherImageListResponse,
     TeacherImageUploadResponse,
@@ -34,6 +36,8 @@ from app.services.teacher_service import (
     delete_teacher_document,
     delete_teacher_exam,
     get_teacher_class_exam_detail,
+    get_teacher_class_exam_attempt_result,
+    list_teacher_class_exam_results,
     get_teacher_exam_detail,
     list_teacher_all_documents,
     list_teacher_class_students,
@@ -290,6 +294,36 @@ def get_teacher_class_exam(
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamDetailSchema:
     return get_teacher_class_exam_detail(db, current_teacher, class_id, exam_id)
+
+
+@router.get("/classes/{class_id}/exams/{exam_id}/results", response_model=TeacherExamResultListResponse)
+def get_teacher_class_exam_results(
+    class_id: int,
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamResultListResponse:
+    return list_teacher_class_exam_results(db, current_teacher, class_id, exam_id)
+
+
+@router.get(
+    "/classes/{class_id}/exams/{exam_id}/attempts/{attempt_id}",
+    response_model=TeacherExamAttemptResultResponse,
+)
+def get_teacher_class_exam_attempt(
+    class_id: int,
+    exam_id: int,
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamAttemptResultResponse:
+    return get_teacher_class_exam_attempt_result(
+        db,
+        current_teacher,
+        class_id,
+        exam_id,
+        attempt_id,
+    )
 
 
 @router.get("/exams/{exam_id}", response_model=TeacherExamDetailSchema)

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 TeacherScope = Literal["system", "class"]
 TeacherQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
+TeacherAttemptStatus = Literal["in_progress", "submitted"]
 
 
 class TeacherClassSchema(BaseModel):
@@ -135,6 +136,74 @@ class TeacherExamListResponse(BaseModel):
 
 class TeacherExamDetailSchema(TeacherExamSummarySchema):
     questions: list[TeacherExamQuestionSchema]
+
+
+class TeacherExamResultSummarySchema(BaseModel):
+    submitted_count: int
+    average_score_percent: float
+
+
+class TeacherExamResultListItemSchema(BaseModel):
+    attempt_id: int
+    student_id: int
+    student_name: str
+    student_email: str
+    student_avatar_url: str | None = None
+    score: float
+    total_points: float
+    score_percent: float
+    correct_answers_count: int
+    total_questions: int
+    is_passed: bool
+    started_at: datetime
+    submitted_at: datetime
+
+
+class TeacherExamResultListResponse(BaseModel):
+    summary: TeacherExamResultSummarySchema
+    items: list[TeacherExamResultListItemSchema]
+
+
+class TeacherExamAttemptAnswerSchema(BaseModel):
+    question_id: int
+    question_type: TeacherQuestionType
+    prompt: str
+    explanation: str | None = None
+    question_image_url: str | None = None
+    selected_option_id: int | None = None
+    selected_option_text: str | None = None
+    selected_option_image_url: str | None = None
+    submitted_answer_text: str | None = None
+    correct_option_id: int | None = None
+    correct_option_text: str | None = None
+    correct_option_image_url: str | None = None
+    accepted_answers: list[str]
+    is_correct: bool
+    points_earned: float
+    max_points: float
+
+
+class TeacherExamAttemptResultSchema(BaseModel):
+    attempt_id: int
+    exam_id: int
+    exam_title: str
+    status: TeacherAttemptStatus
+    student_id: int
+    student_name: str
+    student_email: str
+    student_avatar_url: str | None = None
+    score: float
+    total_points: float
+    score_percent: float
+    correct_answers_count: int
+    total_questions: int
+    started_at: datetime
+    submitted_at: datetime
+    answers: list[TeacherExamAttemptAnswerSchema]
+
+
+class TeacherExamAttemptResultResponse(BaseModel):
+    result: TeacherExamAttemptResultSchema
 
 
 class TeacherExamOptionInput(BaseModel):

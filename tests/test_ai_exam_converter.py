@@ -31,6 +31,28 @@ class AIExamConverterTest(unittest.TestCase):
         self.assertTrue(questions[0]["options"][0]["is_correct"])
         self.assertEqual(questions[0]["explanation"], "Python is a programming language.")
 
+    def test_normalizes_phonetic_country_names_when_converting(self) -> None:
+        questions = build_teacher_exam_questions_from_drafts(
+            [
+                _draft(
+                    content="Qu\u1ed1c gia n\u00e0o \u1edf \u0110\u00f4ng Nam \u00c1?",
+                    options=[
+                        "Vi\u1ec7t Nam",
+                        "In-\u0111\u00f4-n\u00ea-xi-a",
+                        "L\u00e0o",
+                        "Phi-l\u00edp-pin",
+                    ],
+                    correct_answer="In-\u0111\u00f4-n\u00ea-xi-a",
+                    explanation="In-\u0111\u00f4-n\u00ea-xi-a l\u00e0 m\u1ed9t qu\u1ed1c gia \u0110\u00f4ng Nam \u00c1.",
+                )
+            ]
+        )
+
+        self.assertEqual(questions[0]["options"][1]["option_text"], "Indonesia")
+        self.assertTrue(questions[0]["options"][1]["is_correct"])
+        self.assertEqual(questions[0]["options"][3]["option_text"], "Philippines")
+        self.assertIn("Indonesia", questions[0]["explanation"])
+
     def test_maps_true_false_to_true_false(self) -> None:
         questions = build_teacher_exam_questions_from_drafts(
             [
