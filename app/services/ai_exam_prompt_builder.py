@@ -78,6 +78,9 @@ Rules:
 14. Do not use underscores, markdown, or artificial markers inside answer options.
 15. For pronunciation questions, write full plain words in options. Do not write words like h_o_pe or _o_.
 16. If a question needs an underlined part but the output schema has no rich text, explain the target sound/letter in the explanation instead of marking the option text.
+17. Write question text and explanations in Vietnamese, but keep modern international proper nouns in their common form.
+18. Do not phonetically transliterate country, person, place, or organization names. Use names such as Indonesia, Philippines, Malaysia, Singapore, ASEAN, WTO, and United Nations instead of hyphenated Vietnamese phonetic spellings.
+19. Keep established Vietnamese textbook terms when they are the common form, such as Vi\u1ec7t Nam, L\u00e0o, Th\u00e1i Lan, Li\u00ean X\u00f4, M\u1ef9, and Li\u00ean h\u1ee3p qu\u1ed1c.
 
 Return JSON in this exact structure:
 {output_schema}
@@ -104,6 +107,7 @@ Previous JSON:
 
 Please fix the JSON. Return only valid JSON. Do not add markdown.
 Do not use underscores or artificial underline markers in option text.
+Keep modern international proper nouns in their common form. Do not use hyphenated Vietnamese phonetic spellings such as In-do-ne-xi-a or Phi-lip-pin.
 """
 
 

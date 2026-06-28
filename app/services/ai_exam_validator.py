@@ -5,6 +5,30 @@ from typing import Any
 
 ALLOWED_QUESTION_TYPES = {"multiple_choice", "true_false", "short_answer", "essay"}
 ALLOWED_DIFFICULTIES = {"easy", "medium", "hard"}
+PHONETIC_PROPER_NOUN_REPLACEMENTS = (
+    (
+        re.compile(
+            "(?<!\\w)In[-\\s](?:\\u0111\\u00f4|d\\u00f4|do)[-\\s]n(?:\\u00ea|e)[-\\s]xi[-\\s]a(?!\\w)",
+            re.IGNORECASE,
+        ),
+        "Indonesia",
+    ),
+    (
+        re.compile(
+            "(?<!\\w)Phi[-\\s]l(?:\\u00ed|i)p[-\\s]pin(?!\\w)",
+            re.IGNORECASE,
+        ),
+        "Philippines",
+    ),
+    (
+        re.compile("(?<!\\w)Ma[-\\s]lai[-\\s]xi[-\\s]a(?!\\w)", re.IGNORECASE),
+        "Malaysia",
+    ),
+    (
+        re.compile("(?<!\\w)Xin[-\\s]ga[-\\s]po(?!\\w)", re.IGNORECASE),
+        "Singapore",
+    ),
+)
 
 
 def validate_ai_exam_payload(
@@ -122,6 +146,7 @@ def sanitize_ai_text(value: str) -> str:
     normalized = re.sub(r"\s+", " ", normalized)
     normalized = _strip_markdown_emphasis(normalized)
     normalized = _strip_artificial_underline_markers(normalized)
+    normalized = _normalize_phonetic_proper_nouns(normalized)
     return normalized.strip()
 
 
@@ -177,14 +202,28 @@ def validate_ai_question_payload(
 def build_question_payload_from_draft(draft) -> dict[str, Any]:
     return {
         "type": draft.question_type,
-        "content": draft.content,
-        "options": draft.options or [],
-        "correct_answer": draft.correct_answer,
-        "explanation": draft.explanation,
+        "content": sanitize_ai_text(draft.content or ""),
+        "options": [
+            sanitize_ai_text(option) if isinstance(option, str) else option
+            for option in draft.options or []
+        ],
+        "correct_answer": _sanitize_answer_value(draft.correct_answer),
+        "explanation": sanitize_ai_text(draft.explanation or ""),
         "difficulty": draft.difficulty,
         "points": float(draft.points or 0),
-        "topic": draft.topic,
+        "topic": sanitize_ai_text(draft.topic or ""),
     }
+
+
+def _sanitize_answer_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_ai_text(value)
+    if isinstance(value, list):
+        return [
+            sanitize_ai_text(answer) if isinstance(answer, str) else answer
+            for answer in value
+        ]
+    return value
 
 
 def _validate_multiple_choice(question: dict[str, Any], index: int) -> list[str]:
@@ -269,6 +308,13 @@ def _strip_artificial_underline_markers(value: str) -> str:
         return match.group(0).replace("_", "")
 
     return re.sub(r"\b[A-Za-z]+(?:_[A-Za-z]+){2,}\b", remove_internal_underscores, value)
+
+
+def _normalize_phonetic_proper_nouns(value: str) -> str:
+    normalized = value
+    for pattern, replacement in PHONETIC_PROPER_NOUN_REPLACEMENTS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized
 
 
 def _contains_artificial_underline_marker(value: str) -> bool:

@@ -13,6 +13,7 @@ from app.models.classroom_membership import ClassroomMembership
 from app.models.ai_exam import AIExamGenerationJob
 from app.models.exam import Exam
 from app.models.exam_attempt import ExamAttempt
+from app.models.exam_attempt_answer import ExamAttemptAnswer
 from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
@@ -29,6 +30,8 @@ QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 QUESTION_TYPE_TEXT = "text"
 SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
 TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
+ATTEMPT_STATUS_SUBMITTED = "submitted"
+PASSING_SCORE_PERCENT = 50.0
 
 
 def require_teacher_user(db: Session, user_id: int) -> User:
@@ -742,6 +745,173 @@ def get_teacher_class_exam_detail(
 ) -> dict:
     exam = _get_teacher_class_exam(db, teacher, class_id, exam_id)
     return _serialize_exam_detail(exam)
+
+
+def list_teacher_class_exam_results(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    exam_id: int,
+) -> dict:
+    exam = _get_teacher_class_exam(db, teacher, class_id, exam_id)
+    attempts = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.user))
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions))
+        .filter(
+            ExamAttempt.exam_id == exam.id,
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+        )
+        .order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.id.desc())
+        .all()
+    )
+    items = [_serialize_teacher_attempt_list_item(attempt) for attempt in attempts]
+    submitted_count = len(items)
+    average_score_percent = round(
+        sum(item["score_percent"] for item in items) / submitted_count,
+        2,
+    ) if submitted_count else 0.0
+
+    return {
+        "summary": {
+            "submitted_count": submitted_count,
+            "average_score_percent": average_score_percent,
+        },
+        "items": items,
+    }
+
+
+def get_teacher_class_exam_attempt_result(
+    db: Session,
+    teacher: User,
+    class_id: int,
+    exam_id: int,
+    attempt_id: int,
+) -> dict:
+    exam = _get_teacher_class_exam(db, teacher, class_id, exam_id)
+    attempt = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.user))
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.selected_option))
+        .filter(
+            ExamAttempt.id == attempt_id,
+            ExamAttempt.exam_id == exam.id,
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+        )
+        .first()
+    )
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+
+    return {"result": _serialize_teacher_attempt_result(attempt)}
+
+
+def _score_percent(score: float | None, total_points: float | None) -> float:
+    total = float(total_points or 0)
+    if total <= 0:
+        return 0.0
+    return round((float(score or 0) / total) * 100, 2)
+
+
+def _get_attempt_total_points(attempt: ExamAttempt) -> float:
+    return float(attempt.total_points or _get_exam_total_points(attempt.exam) or 0)
+
+
+def _serialize_attempt_student(attempt: ExamAttempt) -> dict:
+    student = attempt.user
+    return {
+        "student_id": student.id if student else attempt.user_id,
+        "student_name": student.full_name if student else "Unknown student",
+        "student_email": student.email if student else "",
+        "student_avatar_url": student.avatar_url if student else None,
+    }
+
+
+def _serialize_teacher_attempt_list_item(attempt: ExamAttempt) -> dict:
+    total_points = _get_attempt_total_points(attempt)
+    score = float(attempt.score or 0)
+    score_percent = _score_percent(score, total_points)
+    submitted_at = attempt.submitted_at or attempt.updated_at or attempt.started_at
+    return {
+        "attempt_id": attempt.id,
+        **_serialize_attempt_student(attempt),
+        "score": score,
+        "total_points": total_points,
+        "score_percent": score_percent,
+        "correct_answers_count": attempt.correct_answers_count or 0,
+        "total_questions": len(attempt.exam.questions),
+        "is_passed": score_percent >= PASSING_SCORE_PERCENT,
+        "started_at": attempt.started_at,
+        "submitted_at": submitted_at,
+    }
+
+
+def _serialize_teacher_attempt_result(attempt: ExamAttempt) -> dict:
+    answer_map = {answer.question_id: answer for answer in attempt.answers}
+    result_answers = []
+
+    for question in sorted(attempt.exam.questions, key=lambda item: item.order_index):
+        question_type = _normalize_question_type(question.question_type)
+        correct_options = [option for option in question.options if option.is_correct]
+        correct_option = correct_options[0] if correct_options else None
+        selected_answer = answer_map.get(question.id)
+        selected_option = selected_answer.selected_option if selected_answer else None
+        normalized_submitted_text = _normalize_text_answer(selected_answer.answer_text if selected_answer else None)
+
+        if _is_selection_question_type(question_type):
+            is_correct = bool(
+                selected_option
+                and correct_option
+                and selected_option.id == correct_option.id
+            )
+        elif _is_text_answer_question_type(question_type):
+            accepted_answers = {_normalize_text_answer(option.option_text) for option in correct_options}
+            is_correct = bool(normalized_submitted_text and normalized_submitted_text in accepted_answers)
+        else:
+            is_correct = False
+
+        result_answers.append(
+            {
+                "question_id": question.id,
+                "question_type": question_type,
+                "prompt": question.prompt,
+                "explanation": question.explanation or "",
+                "question_image_url": question.image_url,
+                "selected_option_id": selected_option.id if selected_option else None,
+                "selected_option_text": selected_option.option_text if selected_option else None,
+                "selected_option_image_url": selected_option.image_url if selected_option else None,
+                "submitted_answer_text": selected_answer.answer_text if selected_answer else None,
+                "correct_option_id": correct_option.id if correct_option else None,
+                "correct_option_text": correct_option.option_text if correct_option else None,
+                "correct_option_image_url": correct_option.image_url if correct_option else None,
+                "accepted_answers": [option.option_text for option in correct_options]
+                if _is_text_answer_question_type(question_type)
+                else [],
+                "is_correct": is_correct,
+                "points_earned": float(question.points or 0) if is_correct else 0.0,
+                "max_points": float(question.points or 0),
+            }
+        )
+
+    total_points = _get_attempt_total_points(attempt)
+    score = float(attempt.score or 0)
+    submitted_at = attempt.submitted_at or attempt.updated_at or attempt.started_at
+    return {
+        "attempt_id": attempt.id,
+        "exam_id": attempt.exam.id,
+        "exam_title": attempt.exam.title,
+        "status": attempt.status,
+        **_serialize_attempt_student(attempt),
+        "score": score,
+        "total_points": total_points,
+        "score_percent": _score_percent(score, total_points),
+        "correct_answers_count": attempt.correct_answers_count or 0,
+        "total_questions": len(attempt.exam.questions),
+        "started_at": attempt.started_at,
+        "submitted_at": submitted_at,
+        "answers": result_answers,
+    }
 
 
 def _validate_exam_questions(questions: list[dict]) -> list[dict]:
