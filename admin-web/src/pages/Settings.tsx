@@ -197,15 +197,6 @@ function getRoleLabel(role: string | null | undefined) {
   return role || "Chưa cập nhật";
 }
 
-function getLocaleForLanguage(language: AppLanguage) {
-  const locales: Record<AppLanguage, string> = {
-    vi: "vi-VN",
-    en: "en-US",
-    ja: "ja-JP",
-    "zh-CN": "zh-CN",
-  };
-  return locales[language];
-}
 
 function getAccountDraft(user: AuthUser | null | undefined): AccountDraft {
   return {
@@ -439,37 +430,11 @@ export function Settings() {
     setActiveTab(tab);
     setSearchParams({ tab });
   };
-
-  const formatAccountDate = (value: string | null | undefined) => {
-    if (!value) {
-      return "Chưa có";
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return "Chưa có";
-    }
-    return new Intl.DateTimeFormat(
-      getLocaleForLanguage(draftGeneralSettings.language),
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      },
-    ).format(date);
-  };
-
   const accountDetails = [
     { label: "Vai trò", value: getRoleLabel(user?.role_name) },
     { label: "Tên đăng nhập", value: user?.username || "Chưa cập nhật" },
     { label: "Email", value: user?.email || "Chưa cập nhật" },
     { label: "Số điện thoại", value: user?.phone || "Chưa cập nhật" },
-    {
-      label: "Đăng nhập gần nhất",
-      value: formatAccountDate(user?.last_login_at),
-    },
-    { label: "Ngày tạo", value: formatAccountDate(user?.created_at) },
   ];
 
   return (
@@ -676,7 +641,7 @@ export function Settings() {
 
               <form
                 onSubmit={handlePasswordSubmit}
-                className="flex flex-col gap-4 border-t border-surface-variant pt-5"
+                className="flex flex-col gap-4 rounded-lg border border-surface-variant bg-surface-container-lowest p-5"
               >
                 <div>
                   <div className="flex items-center gap-2">
