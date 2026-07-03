@@ -72,6 +72,7 @@ class StudentExamSummarySchema(BaseModel):
     id: int
     title: str
     description: str | None = None
+    grade: str
     image_url: str | None = None
     scope: StudentScope
     classroom_id: int | None = None
@@ -102,6 +103,7 @@ class StudentExamResultListItemSchema(BaseModel):
     exam_id: int
     exam_title: str
     exam_description: str | None = None
+    exam_grade: str
     exam_image_url: str | None = None
     scope: StudentScope
     classroom_id: int | None = None
@@ -177,6 +179,7 @@ class AttemptResultSchema(BaseModel):
     attempt_id: int
     exam_id: int
     exam_title: str
+    exam_grade: str
     exam_image_url: str | None = None
     status: AttemptStatus
     score: float

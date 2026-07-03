@@ -1,4 +1,11 @@
-import { Bell, ChevronDown, Globe, KeyRound, Loader2, User } from "lucide-react";
+import {
+  Bell,
+  ChevronDown,
+  Globe,
+  KeyRound,
+  Loader2,
+  User,
+} from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -17,6 +24,7 @@ import {
 } from "../lib/language";
 
 type SettingsTab = "general" | "account" | "notifications";
+type AccountSettingsTab = "profile" | "password";
 
 interface GeneralSettings {
   language: AppLanguage;
@@ -88,6 +96,11 @@ const tabs: Array<{ id: SettingsTab; name: string; icon: typeof Globe }> = [
   { id: "general", name: "Cài đặt chung", icon: Globe },
   { id: "account", name: "Tài khoản", icon: User },
   { id: "notifications", name: "Thông báo", icon: Bell },
+];
+
+const accountTabs: Array<{ id: AccountSettingsTab; name: string }> = [
+  { id: "profile", name: "Tài khoản" },
+  { id: "password", name: "Mật khẩu" },
 ];
 
 const languageOptions: Array<{ value: AppLanguage; label: string }> = [
@@ -197,7 +210,6 @@ function getRoleLabel(role: string | null | undefined) {
   return role || "Chưa cập nhật";
 }
 
-
 function getAccountDraft(user: AuthUser | null | undefined): AccountDraft {
   return {
     fullName: user?.full_name || "",
@@ -245,6 +257,8 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
     readTabFromSearch(tabParam),
   );
+  const [activeAccountTab, setActiveAccountTab] =
+    useState<AccountSettingsTab>("profile");
   const [savedGeneralSettings, setSavedGeneralSettings] =
     useState<GeneralSettings>(readGeneralSettings);
   const [draftGeneralSettings, setDraftGeneralSettings] =
@@ -541,10 +555,6 @@ export function Settings() {
 
           {activeTab === "account" && (
             <div className="flex flex-col gap-4">
-              <form
-                onSubmit={handleAccountSubmit}
-                className="flex flex-col gap-4"
-              >
               <div>
                 <h2 className="text-lg font-bold text-on-surface">
                   Thông tin tài khoản
@@ -554,168 +564,205 @@ export function Settings() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-4 rounded-lg border border-surface-variant p-5 md:flex-row md:items-center">
-                <div className="relative h-20 w-20 shrink-0">
-                  <div className="h-full w-full overflow-hidden rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center text-2xl font-bold border border-outline-variant">
-                    {user?.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt={user.full_name}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      getInitials(user?.full_name || user?.email)
-                    )}
-                  </div>
-                  {user?.status === "active" && (
-                    <span className="absolute bottom-2 right-1 h-4 w-4 rounded-full border-2 border-surface-container-lowest bg-[#10B981]" />
-                  )}
+              <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm overflow-hidden">
+                <div className="flex border-b border-outline-variant/30 overflow-x-auto">
+                  {accountTabs.map((tab) => {
+                    const isActive = activeAccountTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveAccountTab(tab.id)}
+                        className={`px-6 py-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                          isActive
+                            ? "border-indigo-600 text-indigo-600"
+                            : "border-transparent text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        {tab.name}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="min-w-0">
-                  {isEditingAccount ? (
-                    <label className="block">
-                      <span className="sr-only">Họ tên</span>
-                      <input
-                        value={accountDraft.fullName}
-                        onChange={(event) =>
-                          updateAccountDraft("fullName", event.target.value)
-                        }
-                        className="w-full max-w-md rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-xl font-bold text-on-surface outline-none focus:border-primary"
-                        placeholder="Họ tên"
-                      />
-                    </label>
+
+                <div className="p-5">
+                  {activeAccountTab === "profile" ? (
+                    <form
+                      onSubmit={handleAccountSubmit}
+                      className="flex flex-col gap-4"
+                    >
+                      <div className="flex flex-col gap-4 rounded-lg border border-surface-variant p-5 md:flex-row md:items-center">
+                        <div className="relative h-20 w-20 shrink-0">
+                          <div className="h-full w-full overflow-hidden rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center text-2xl font-bold border border-outline-variant">
+                            {user?.avatar_url ? (
+                              <img
+                                src={user.avatar_url}
+                                alt={user.full_name}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              getInitials(user?.full_name || user?.email)
+                            )}
+                          </div>
+                          {user?.status === "active" && (
+                            <span className="absolute bottom-2 right-1 h-4 w-4 rounded-full border-2 border-surface-container-lowest bg-[#10B981]" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          {isEditingAccount ? (
+                            <label className="block max-w-md">
+                              <span className="sr-only">Họ tên</span>
+                              <input
+                                value={accountDraft.fullName}
+                                onChange={(event) =>
+                                  updateAccountDraft("fullName", event.target.value)
+                                }
+                                className="w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-xl font-bold text-on-surface outline-none focus:border-primary"
+                                placeholder="Họ tên"
+                              />
+                            </label>
+                          ) : (
+                            <h3 className="text-xl font-bold text-on-surface truncate">
+                              {user?.full_name || "Administrator"}
+                            </h3>
+                          )}
+                          <p className="mt-1 text-sm text-outline truncate">
+                            {user?.email || "Chưa cập nhật"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {accountDetails.map((item) => (
+                          <div
+                            key={item.label}
+                            className="rounded-lg border border-surface-variant bg-surface-container-lowest px-4 py-3"
+                          >
+                            <p className="text-xs font-semibold uppercase text-outline">
+                              {item.label}
+                            </p>
+                            {isEditingAccount && item.label === "Số điện thoại" ? (
+                              <input
+                                value={accountDraft.phone}
+                                onChange={(event) =>
+                                  updateAccountDraft("phone", event.target.value)
+                                }
+                                className="mt-1 w-full rounded-md border border-outline-variant bg-surface-container-low px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:border-primary"
+                                placeholder="Số điện thoại"
+                              />
+                            ) : (
+                              <p className="mt-1 text-sm font-semibold text-on-surface break-words">
+                                {item.value}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={
+                            isSavingAccount ||
+                            (isEditingAccount && !hasAccountChanges)
+                          }
+                          className="h-10 px-5 bg-primary text-on-primary rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isEditingAccount
+                            ? isSavingAccount
+                              ? "Đang lưu..."
+                              : "Lưu thông tin"
+                            : "Sửa thông tin"}
+                        </button>
+                      </div>
+                    </form>
                   ) : (
-                    <h3 className="text-xl font-bold text-on-surface truncate">
-                      {user?.full_name || "Administrator"}
-                    </h3>
+                    <form
+                      onSubmit={handlePasswordSubmit}
+                      className="flex flex-col gap-4"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <KeyRound className="h-5 w-5 text-primary" />
+                          <h3 className="text-base font-bold text-on-surface">
+                            Đổi mật khẩu
+                          </h3>
+                        </div>
+                        <p className="mt-1 text-sm text-outline">
+                          Dùng mật khẩu tạm hoặc mật khẩu hiện tại để đặt mật khẩu mới dễ đăng nhập hơn.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                        <label className="flex flex-col gap-2">
+                          <span className="text-sm font-semibold text-on-surface">
+                            Mật khẩu hiện tại
+                          </span>
+                          <input
+                            type="password"
+                            value={passwordDraft.currentPassword}
+                            onChange={(event) =>
+                              updatePasswordDraft(
+                                "currentPassword",
+                                event.target.value,
+                              )
+                            }
+                            autoComplete="current-password"
+                            className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                            placeholder="Nhập mật khẩu hiện tại"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-2">
+                          <span className="text-sm font-semibold text-on-surface">
+                            Mật khẩu mới
+                          </span>
+                          <input
+                            type="password"
+                            value={passwordDraft.newPassword}
+                            onChange={(event) =>
+                              updatePasswordDraft("newPassword", event.target.value)
+                            }
+                            autoComplete="new-password"
+                            className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                            placeholder="Tối thiểu 6 ký tự"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-2">
+                          <span className="text-sm font-semibold text-on-surface">
+                            Nhập lại mật khẩu mới
+                          </span>
+                          <input
+                            type="password"
+                            value={passwordDraft.confirmPassword}
+                            onChange={(event) =>
+                              updatePasswordDraft(
+                                "confirmPassword",
+                                event.target.value,
+                              )
+                            }
+                            autoComplete="new-password"
+                            className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                            placeholder="Nhập lại mật khẩu mới"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={isChangingPassword || !isPasswordFormReady}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isChangingPassword && (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          )}
+                          {isChangingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
+                        </button>
+                      </div>
+                    </form>
                   )}
-                  <p className="mt-1 text-sm text-outline truncate">
-                    {user?.email || "Chưa cập nhật"}
-                  </p>
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {accountDetails.map((item) => (
-                  <div
-                    key={item.label}
-                    className="rounded-lg border border-surface-variant bg-surface-container-lowest px-4 py-3"
-                  >
-                    <p className="text-xs font-semibold uppercase text-outline">
-                      {item.label}
-                    </p>
-                    {isEditingAccount && item.label === "Số điện thoại" ? (
-                      <input
-                        value={accountDraft.phone}
-                        onChange={(event) =>
-                          updateAccountDraft("phone", event.target.value)
-                        }
-                        className="mt-1 w-full rounded-md border border-outline-variant bg-surface-container-low px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:border-primary"
-                        placeholder="Số điện thoại"
-                      />
-                    ) : (
-                      <p className="mt-1 text-sm font-semibold text-on-surface break-words">
-                        {item.value}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={
-                    isSavingAccount || (isEditingAccount && !hasAccountChanges)
-                  }
-                  className="h-10 px-5 bg-primary text-on-primary rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isEditingAccount
-                    ? isSavingAccount
-                      ? "Đang lưu..."
-                      : "Lưu thông tin"
-                    : "Sửa thông tin"}
-                </button>
-              </div>
-              </form>
-
-              <form
-                onSubmit={handlePasswordSubmit}
-                className="flex flex-col gap-4 rounded-lg border border-surface-variant bg-surface-container-lowest p-5"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="h-5 w-5 text-primary" />
-                    <h3 className="text-base font-bold text-on-surface">
-                      Đổi mật khẩu
-                    </h3>
-                  </div>
-                  <p className="mt-1 text-sm text-outline">
-                    Dùng mật khẩu tạm hoặc mật khẩu hiện tại để đặt mật khẩu mới dễ đăng nhập hơn.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <label className="flex flex-col gap-2">
-                    <span className="text-sm font-semibold text-on-surface">
-                      Mật khẩu hiện tại
-                    </span>
-                    <input
-                      type="password"
-                      value={passwordDraft.currentPassword}
-                      onChange={(event) =>
-                        updatePasswordDraft("currentPassword", event.target.value)
-                      }
-                      autoComplete="current-password"
-                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      placeholder="Nhập mật khẩu hiện tại"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2">
-                    <span className="text-sm font-semibold text-on-surface">
-                      Mật khẩu mới
-                    </span>
-                    <input
-                      type="password"
-                      value={passwordDraft.newPassword}
-                      onChange={(event) =>
-                        updatePasswordDraft("newPassword", event.target.value)
-                      }
-                      autoComplete="new-password"
-                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      placeholder="Tối thiểu 6 ký tự"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2">
-                    <span className="text-sm font-semibold text-on-surface">
-                      Nhập lại mật khẩu mới
-                    </span>
-                    <input
-                      type="password"
-                      value={passwordDraft.confirmPassword}
-                      onChange={(event) =>
-                        updatePasswordDraft("confirmPassword", event.target.value)
-                      }
-                      autoComplete="new-password"
-                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      placeholder="Nhập lại mật khẩu mới"
-                    />
-                  </label>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={isChangingPassword || !isPasswordFormReady}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isChangingPassword && (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    )}
-                    {isChangingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
-                  </button>
-                </div>
-              </form>
             </div>
           )}
 

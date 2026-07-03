@@ -27,6 +27,7 @@ QUESTION_TYPE_TEXT = "text"
 SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
 TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 PASSING_SCORE_PERCENT = 50.0
+DEFAULT_EXAM_GRADE = "Chưa phân loại"
 
 
 def bootstrap_student_learning_storage() -> None:
@@ -52,6 +53,7 @@ def _ensure_student_learning_columns() -> None:
         "UPDATE learning_documents SET content = COALESCE(content, '')",
         "ALTER TABLE learning_documents ALTER COLUMN content SET DEFAULT ''",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'Chưa phân loại'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",
@@ -62,6 +64,7 @@ def _ensure_student_learning_columns() -> None:
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "UPDATE exams SET scope = COALESCE(scope, 'system')",
+        "UPDATE exams SET grade = COALESCE(NULLIF(BTRIM(grade), ''), 'Chưa phân loại')",
         "UPDATE exams SET duration_minutes = COALESCE(duration_minutes, 30)",
         "UPDATE exams SET total_points = COALESCE(total_points, 0)",
         "UPDATE exams SET is_published = COALESCE(is_published, FALSE)",
@@ -328,6 +331,11 @@ def _get_exam_total_points(exam: Exam) -> float:
     return exam.total_points
 
 
+def _serialize_exam_grade(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized or DEFAULT_EXAM_GRADE
+
+
 def list_student_documents(db: Session, student: User, scope: str, classroom_id: int | None) -> dict:
     _validate_scope(scope, classroom_id)
 
@@ -357,6 +365,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "id": exam.id,
         "title": exam.title,
         "description": exam.description,
+        "grade": _serialize_exam_grade(exam.grade),
         "image_url": exam.image_url or _get_exam_preview_image_url(exam),
         "scope": exam.scope,
         "classroom_id": exam.classroom_id,
@@ -396,6 +405,7 @@ def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
         "exam_description": attempt.exam.description,
+        "exam_grade": _serialize_exam_grade(attempt.exam.grade),
         "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "scope": attempt.exam.scope,
         "classroom_id": attempt.exam.classroom_id,
@@ -772,6 +782,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
         "attempt_id": attempt.id,
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
+        "exam_grade": _serialize_exam_grade(attempt.exam.grade),
         "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "status": attempt.status,
         "score": attempt.score or 0.0,

@@ -385,6 +385,7 @@ export interface AdminExam {
   id: number;
   title: string;
   description: string | null;
+  grade: string;
   scope: string;
   classroom_id: number | null;
   classroom_name: string | null;

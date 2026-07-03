@@ -389,6 +389,7 @@ def save_ai_exam_job_to_quiz(
         teacher=teacher,
         title=title,
         description=description,
+        grade=job.grade,
         image_url=None,
         scope=data.get("scope") or "system",
         classroom_id=data.get("classroom_id"),
