@@ -7,12 +7,10 @@ import {
   Forward,
   MoreHorizontal,
   Paperclip,
-  Phone,
   Pin,
   Search,
   Send,
   Trash2,
-  Video,
   X,
 } from "lucide-react";
 import {
@@ -1541,12 +1539,6 @@ export function Chat() {
             </div>
           )}
           <div className="flex items-center gap-3 sm:gap-4">
-            <button className="hidden sm:block text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
-              <Phone className="w-5 h-5" />
-            </button>
-            <button className="hidden sm:block text-outline hover:text-on-surface disabled:opacity-40" disabled={!selectedPeer}>
-              <Video className="w-5 h-5" />
-            </button>
             <button
               type="button"
               onClick={() => setIsProfileOpen((current) => !current)}

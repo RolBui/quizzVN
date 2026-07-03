@@ -1,4 +1,4 @@
-import { Bell, ChevronDown, Globe, User } from "lucide-react";
+import { Bell, ChevronDown, Globe, KeyRound, Loader2, User } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -34,9 +34,21 @@ interface AccountDraft {
   phone: string;
 }
 
+interface PasswordDraft {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 const defaultGeneralSettings: GeneralSettings = {
   language: "vi",
   timezone: "Asia/Ho_Chi_Minh",
+};
+
+const emptyPasswordDraft: PasswordDraft = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
 };
 
 const notificationOptions: NotificationOption[] = [
@@ -258,6 +270,9 @@ export function Settings() {
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(() =>
     getAccountDraft(user),
   );
+  const [passwordDraft, setPasswordDraft] =
+    useState<PasswordDraft>(emptyPasswordDraft);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const hasChanges = useMemo(
     () =>
@@ -279,6 +294,11 @@ export function Settings() {
     );
   }, [accountDraft, user]);
 
+  const isPasswordFormReady =
+    passwordDraft.currentPassword.length > 0 &&
+    passwordDraft.newPassword.length > 0 &&
+    passwordDraft.confirmPassword.length > 0;
+
   const updateGeneralSetting = (key: keyof GeneralSettings, value: string) => {
     setDraftGeneralSettings((current) => ({
       ...current,
@@ -298,6 +318,13 @@ export function Settings() {
 
   const updateAccountDraft = (key: keyof AccountDraft, value: string) => {
     setAccountDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+
+  const updatePasswordDraft = (key: keyof PasswordDraft, value: string) => {
+    setPasswordDraft((current) => ({
       ...current,
       [key]: value,
     }));
@@ -368,6 +395,37 @@ export function Settings() {
       // apiRequest already shows a failure toast for API errors.
     } finally {
       setIsSavingAccount(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isPasswordFormReady) {
+      toast.error("Vui lòng nhập đầy đủ thông tin đổi mật khẩu.");
+      return;
+    }
+    if (passwordDraft.newPassword.length < 6) {
+      toast.error("Mật khẩu mới phải có ít nhất 6 ký tự.");
+      return;
+    }
+    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+      toast.error("Mật khẩu mới không khớp.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const response = await authApi.changePassword({
+        current_password: passwordDraft.currentPassword,
+        new_password: passwordDraft.newPassword,
+        confirm_password: passwordDraft.confirmPassword,
+      });
+      setPasswordDraft(emptyPasswordDraft);
+      toast.success(response.message || "Đã đổi mật khẩu.");
+    } catch {
+      // apiRequest already shows a failure toast for API errors.
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -517,10 +575,11 @@ export function Settings() {
           )}
 
           {activeTab === "account" && (
-            <form
-              onSubmit={handleAccountSubmit}
-              className="flex flex-col gap-4"
-            >
+            <div className="flex flex-col gap-4">
+              <form
+                onSubmit={handleAccountSubmit}
+                className="flex flex-col gap-4"
+              >
               <div>
                 <h2 className="text-lg font-bold text-on-surface">
                   Thông tin tài khoản
@@ -613,7 +672,86 @@ export function Settings() {
                     : "Sửa thông tin"}
                 </button>
               </div>
-            </form>
+              </form>
+
+              <form
+                onSubmit={handlePasswordSubmit}
+                className="flex flex-col gap-4 border-t border-surface-variant pt-5"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="h-5 w-5 text-primary" />
+                    <h3 className="text-base font-bold text-on-surface">
+                      Đổi mật khẩu
+                    </h3>
+                  </div>
+                  <p className="mt-1 text-sm text-outline">
+                    Dùng mật khẩu tạm hoặc mật khẩu hiện tại để đặt mật khẩu mới dễ đăng nhập hơn.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-semibold text-on-surface">
+                      Mật khẩu hiện tại
+                    </span>
+                    <input
+                      type="password"
+                      value={passwordDraft.currentPassword}
+                      onChange={(event) =>
+                        updatePasswordDraft("currentPassword", event.target.value)
+                      }
+                      autoComplete="current-password"
+                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      placeholder="Nhập mật khẩu hiện tại"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-semibold text-on-surface">
+                      Mật khẩu mới
+                    </span>
+                    <input
+                      type="password"
+                      value={passwordDraft.newPassword}
+                      onChange={(event) =>
+                        updatePasswordDraft("newPassword", event.target.value)
+                      }
+                      autoComplete="new-password"
+                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      placeholder="Tối thiểu 6 ký tự"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-semibold text-on-surface">
+                      Nhập lại mật khẩu mới
+                    </span>
+                    <input
+                      type="password"
+                      value={passwordDraft.confirmPassword}
+                      onChange={(event) =>
+                        updatePasswordDraft("confirmPassword", event.target.value)
+                      }
+                      autoComplete="new-password"
+                      className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      placeholder="Nhập lại mật khẩu mới"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword || !isPasswordFormReady}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isChangingPassword && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {isChangingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
+                  </button>
+                </div>
+              </form>
+            </div>
           )}
 
           {activeTab === "notifications" && (

@@ -53,8 +53,14 @@ def _build_allowed_origins(
     frontend_url: str,
     raw_origins: str,
     include_local_dev_origins: bool,
+    extra_origins: tuple[str, ...] = (),
 ) -> list[str]:
     origins = [frontend_url]
+
+    for origin in extra_origins:
+        normalized = _normalize_origin(origin)
+        if normalized and normalized not in origins:
+            origins.append(normalized)
 
     for origin in _split_origins(raw_origins):
         if origin not in origins:
@@ -95,6 +101,7 @@ class Settings:
             ),
         )
     )
+    ADMIN_WEB_URL: str = _normalize_origin(os.getenv("ADMIN_WEB_URL", FRONTEND_URL))
     FRONTEND_AUTH_CALLBACK_PATH: str = os.getenv("FRONTEND_AUTH_CALLBACK_PATH", "/auth/callback").strip() or "/auth/callback"
     FRONTEND_EMAIL_VERIFICATION_PATH: str = (
         os.getenv("FRONTEND_EMAIL_VERIFICATION_PATH", "/verify-email").strip() or "/verify-email"
@@ -114,6 +121,7 @@ class Settings:
         FRONTEND_URL,
         os.getenv("ALLOWED_ORIGINS", ""),
         INCLUDE_LOCAL_DEV_CORS_ORIGINS,
+        extra_origins=(ADMIN_WEB_URL,),
     )
     ALLOWED_ORIGIN_REGEX: str | None = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip() or None
     SESSION_SECRET_KEY: str = os.getenv("SESSION_SECRET_KEY", "change_me")

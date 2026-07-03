@@ -1,13 +1,17 @@
 import re
 import logging
 import json
+import hashlib
+import secrets
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal, engine
+from app.core.config import settings
 from app.core.security import (
     generate_session_token,
     get_expiry,
@@ -25,7 +29,10 @@ from app.models.email_verification_otp import EmailVerificationOtp
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
-from app.services.email_verification_service import send_email_verification_otp
+from app.services.email_verification_service import (
+    send_email_verification_otp,
+    send_plain_email,
+)
 
 PENDING_ROLE_NAME = "pending"
 ADMINISTRATOR_ROLE_NAME = "administrator"
@@ -676,6 +683,174 @@ def complete_user_onboarding(
         "message": "Onboarding completed successfully",
         "user": serialize_user(user, profile),
     }
+
+
+
+def _admin_role_name(user: User) -> str | None:
+    return user.role.name if user.role else None
+
+
+def _has_active_admin_access(user: User) -> bool:
+    return user.status == "active" and _admin_role_name(user) in ADMIN_ACCESS_ROLE_NAMES
+
+
+def _hash_admin_invitation_token(token: str) -> str:
+    raw_value = f"{settings.EMAIL_VERIFICATION_SECRET}:admin-invitation:{token}"
+    return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
+
+
+def _build_admin_invitation_url(token: str, email: str) -> str:
+    query_string = urlencode({"token": token, "email": email})
+    return f"{settings.ADMIN_INVITATION_BASE_URL}{settings.FRONTEND_ADMIN_INVITATION_PATH}?{query_string}"
+
+
+def _send_admin_oauth_invitation_email(invitation: AdminInvitation, token: str) -> None:
+    invitation_url = _build_admin_invitation_url(token, invitation.email)
+    subject = f"Admin access verification for {settings.APP_NAME}"
+    body = (
+        f"You requested admin access for {settings.APP_NAME} using Google login.\n\n"
+        f"Open this link to verify your email with OTP and submit the admin access request:\n{invitation_url}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+    send_plain_email(invitation.email, subject, body)
+
+
+def _create_or_refresh_admin_oauth_invitation(db: Session, user: User) -> tuple[AdminInvitation, str]:
+    normalized_email = user.email.strip().lower()
+    invitation = (
+        db.query(AdminInvitation)
+        .filter(
+            AdminInvitation.email == normalized_email,
+            AdminInvitation.status.in_(("otp_pending", "pending_approval")),
+        )
+        .order_by(AdminInvitation.created_at.desc(), AdminInvitation.id.desc())
+        .first()
+    )
+
+    if invitation and invitation.status == "pending_approval":
+        db.commit()
+        db.refresh(invitation)
+        return invitation, "pending_approval"
+
+    token = secrets.token_urlsafe(32)
+    placeholder_otp_hash = hash_password(secrets.token_urlsafe(16))
+    expires_at = utc_now() + timedelta(days=7)
+    profile = user.profile or get_user_profile(db, user.id)
+
+    if invitation:
+        invitation.status = "otp_pending"
+        invitation.full_name = user.full_name or invitation.full_name
+        invitation.phone = user.phone or invitation.phone
+        invitation.date_of_birth = profile.date_of_birth if profile else invitation.date_of_birth
+        invitation.gender = profile.gender if profile else invitation.gender
+        invitation.invite_token_hash = _hash_admin_invitation_token(token)
+        invitation.otp_hash = placeholder_otp_hash
+        invitation.otp_expires_at = expires_at
+        invitation.otp_attempt_count = -1
+        invitation.submitted_at = None
+        invitation.rejected_by_user_id = None
+        invitation.rejected_at = None
+        invitation.rejection_reason = None
+        invitation.updated_at = utc_now()
+    else:
+        invitation = AdminInvitation(
+            email=normalized_email,
+            full_name=user.full_name,
+            phone=user.phone,
+            date_of_birth=profile.date_of_birth if profile else None,
+            gender=profile.gender if profile else None,
+            status="otp_pending",
+            invite_token_hash=_hash_admin_invitation_token(token),
+            otp_hash=placeholder_otp_hash,
+            otp_expires_at=expires_at,
+            otp_attempt_count=-1,
+            invited_by_user_id=None,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(invitation)
+
+    db.commit()
+    db.refresh(invitation)
+
+    try:
+        _send_admin_oauth_invitation_email(invitation, token)
+    except Exception as exc:
+        logger.exception("Failed to send admin OAuth verification email to %s", invitation.email)
+        raise HTTPException(status_code=502, detail="Failed to send admin verification email") from exc
+
+    return invitation, "verification_email_sent"
+
+
+def handle_google_admin_callback(
+    db: Session,
+    token: dict,
+    user_info: dict,
+    ip_address: str | None,
+    user_agent: str | None,
+):
+    try:
+        provider = (
+            db.query(OAuthProvider)
+            .filter(OAuthProvider.provider_name == "google")
+            .first()
+        )
+
+        if not provider:
+            provider = OAuthProvider(
+                provider_name="google",
+                is_active=True,
+                created_at=utc_now(),
+            )
+            db.add(provider)
+            db.flush()
+
+        if not provider.is_active:
+            raise HTTPException(status_code=400, detail="Google login is disabled")
+
+        user, is_new_user = find_or_create_user_from_google(db, user_info)
+        upsert_google_oauth_account(db, user, provider, token, user_info)
+        db.flush()
+        db.refresh(user)
+
+        if _admin_role_name(user) in ADMIN_ACCESS_ROLE_NAMES and user.status != "active":
+            disabled_email = user.email
+            db.rollback()
+            return {
+                "status": "admin_disabled",
+                "email": disabled_email,
+            }
+
+        if _has_active_admin_access(user):
+            session = create_user_session(db, user, "google", ip_address, user_agent)
+            user.last_login_at = utc_now()
+            if not is_new_user:
+                user.is_first_login = False
+            db.commit()
+            db.refresh(user)
+            db.refresh(session)
+            return {
+                "status": "authenticated",
+                "email": user.email,
+                "message": "Google admin login success",
+                "is_new_user": is_new_user,
+                "user": build_user_payload(db, user),
+                "session": serialize_session(session),
+                "tokens": serialize_session_tokens(session),
+            }
+
+        invitation, invitation_status = _create_or_refresh_admin_oauth_invitation(db, user)
+        return {
+            "status": invitation_status,
+            "email": invitation.email,
+            "invitation_id": invitation.id,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Google admin login failed") from exc
 
 
 def handle_google_callback(

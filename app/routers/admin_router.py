@@ -123,7 +123,7 @@ def _admin_invitation_accept_html(
               <span>Email</span>
               <strong>{safe_email}</strong>
             </div>
-            <button class="send-code-button" type="submit" formaction="/admin/invitations/accept/send-code" formnovalidate>Gửi mã</button>
+            <button class="send-code-button" type="submit" formaction="/admin/invitations/accept/send-code" formnovalidate data-send-code-button data-cooldown-seconds="60">Gửi mã</button>
           </div>
           <div class="otp-row" aria-label="Nhập mã OTP gồm 6 số">
             <input name="otp_digit_1" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code" required data-otp-input />
@@ -279,6 +279,11 @@ def _admin_invitation_accept_html(
       box-shadow: none;
       flex: 0 0 auto;
     }}
+    .send-code-button:disabled {{
+      cursor: not-allowed;
+      opacity: 0.72;
+      transform: none;
+    }}
     .otp-row {{
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -392,6 +397,57 @@ def _admin_invitation_accept_html(
       }});
     }});
     otpInputs[0]?.focus();
+
+    const sendCodeButton = document.querySelector("[data-send-code-button]");
+    if (sendCodeButton) {{
+      const tokenValue = document.querySelector('input[name="token"]')?.value || "";
+      const emailValue = document.querySelector('input[name="email"]')?.value || "";
+      const cooldownKey = `admin-invitation-otp-cooldown:${{tokenValue}}:${{emailValue}}`;
+      const cooldownSeconds = Number(sendCodeButton.dataset.cooldownSeconds || "60");
+      const defaultLabel = sendCodeButton.textContent || "Gửi mã";
+      let cooldownTimer = null;
+
+      const getRemainingSeconds = () => {{
+        const expiresAt = Number(sessionStorage.getItem(cooldownKey) || "0");
+        return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      }};
+
+      const formatRemaining = (seconds) => {{
+        const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
+        const rest = String(seconds % 60).padStart(2, "0");
+        return `${{minutes}}:${{rest}}`;
+      }};
+
+      const renderCooldown = () => {{
+        const remainingSeconds = getRemainingSeconds();
+        if (cooldownTimer) {{
+          window.clearTimeout(cooldownTimer);
+        }}
+
+        if (remainingSeconds <= 0) {{
+          sessionStorage.removeItem(cooldownKey);
+          sendCodeButton.disabled = false;
+          sendCodeButton.textContent = defaultLabel;
+          return;
+        }}
+
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = `Gửi lại sau ${{formatRemaining(remainingSeconds)}}`;
+        cooldownTimer = window.setTimeout(renderCooldown, 1000);
+      }};
+
+      sendCodeButton.addEventListener("click", (event) => {{
+        if (getRemainingSeconds() > 0) {{
+          event.preventDefault();
+          renderCooldown();
+          return;
+        }}
+        sessionStorage.setItem(cooldownKey, String(Date.now() + cooldownSeconds * 1000));
+        window.setTimeout(renderCooldown, 0);
+      }});
+
+      renderCooldown();
+    }}
   </script>
 </body>
 </html>"""

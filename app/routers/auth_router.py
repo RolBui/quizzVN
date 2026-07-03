@@ -1,5 +1,7 @@
+import secrets
 from fastapi import APIRouter, Request, Depends, Response, status, HTTPException
 from fastapi.responses import RedirectResponse
+from authlib.integrations.base_client import MismatchingStateError
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy.orm import Session
 from urllib.parse import urlencode
@@ -33,6 +35,7 @@ from app.services.auth_service import (
     build_user_payload,
     complete_user_onboarding,
     handle_google_callback,
+    handle_google_admin_callback,
     get_selectable_roles,
     list_user_sessions,
     login_local_user,
@@ -221,6 +224,19 @@ def build_frontend_auth_redirect_url(**params: str | bool) -> str:
     return f"{base_url}?{urlencode(query_params)}"
 
 
+
+def build_admin_web_redirect_url(path: str = "/", **params: str | bool) -> str:
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    base_url = f"{settings.ADMIN_WEB_URL}{normalized_path}"
+    query_params = {
+        key: str(value).lower() if isinstance(value, bool) else value
+        for key, value in params.items()
+        if value is not None
+    }
+    if not query_params:
+        return base_url
+    return f"{base_url}?{urlencode(query_params)}"
+
 @router.post("/register", response_model=AuthSessionResponse)
 def register(
     payload: RegisterRequest,
@@ -272,15 +288,22 @@ def login(
     responses=_google_login_responses(),
 )
 async def google_login(request: Request) -> RedirectResponse:
+    oauth_flow = request.query_params.get("flow")
+    authorize_params = {"prompt": settings.GOOGLE_OAUTH_PROMPT}
+    if oauth_flow == "admin":
+        request.session["oauth_flow"] = "admin"
+        authorize_params["state"] = f"admin:{secrets.token_urlsafe(32)}"
+    else:
+        request.session.pop("oauth_flow", None)
+
     redirect_uri = settings.GOOGLE_REDIRECT_URI
     redirect_response = await oauth.google.authorize_redirect(
         request,
         redirect_uri,
-        prompt=settings.GOOGLE_OAUTH_PROMPT,
+        **authorize_params,
     )
     redirect_response.status_code = status.HTTP_302_FOUND
     return redirect_response
-
 
 @router.get(
     "/google/callback",
@@ -292,20 +315,62 @@ async def google_callback(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    token = await oauth.google.authorize_access_token(request)
+    oauth_flow = request.session.get("oauth_flow")
+    callback_state = request.query_params.get("state", "")
+    is_admin_oauth_flow = oauth_flow == "admin" or callback_state.startswith("admin:")
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except MismatchingStateError:
+        request.session.clear()
+        target_url = (
+            build_admin_web_redirect_url("/login", admin_oauth="google_state_mismatch")
+            if is_admin_oauth_flow
+            else build_frontend_auth_redirect_url(error="google_state_mismatch")
+        )
+        return RedirectResponse(
+            url=target_url,
+            status_code=status.HTTP_302_FOUND,
+        )
+
     user_info = token.get("userinfo")
 
     if not user_info:
         user_info = await oauth.google.userinfo(token=token)
 
     if not user_info:
+        target_url = (
+            build_admin_web_redirect_url("/login", admin_oauth="google_user_info_not_found")
+            if is_admin_oauth_flow
+            else build_frontend_auth_redirect_url(error="google_user_info_not_found")
+        )
+        request.session.clear()
         return RedirectResponse(
-            url=build_frontend_auth_redirect_url(error="google_user_info_not_found"),
+            url=target_url,
             status_code=status.HTTP_302_FOUND,
         )
 
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
+
+    if is_admin_oauth_flow:
+        result = handle_google_admin_callback(db, token, user_info, ip_address, user_agent)
+        request.session.clear()
+        if result["status"] == "authenticated":
+            redirect_response = RedirectResponse(
+                url=build_admin_web_redirect_url("/"),
+                status_code=status.HTTP_302_FOUND,
+            )
+            set_auth_cookies(redirect_response, result["tokens"])
+            return redirect_response
+
+        return RedirectResponse(
+            url=build_admin_web_redirect_url(
+                "/login",
+                admin_oauth=result["status"],
+                email=result.get("email"),
+            ),
+            status_code=status.HTTP_302_FOUND,
+        )
 
     result = handle_google_callback(db, token, user_info, ip_address, user_agent)
     redirect_response = RedirectResponse(
@@ -318,7 +383,6 @@ async def google_callback(
     request.session.clear()
     set_auth_cookies(redirect_response, result["tokens"])
     return redirect_response
-
 
 @router.get(
     "/verify-email",
