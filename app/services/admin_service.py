@@ -48,6 +48,7 @@ TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
 USER_ACTIVITY_WINDOW = timedelta(hours=1)
 ADMIN_INVITATION_OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+DEFAULT_EXAM_GRADE = "Chưa phân loại"
 logger = logging.getLogger(__name__)
 
 
@@ -299,6 +300,11 @@ def _metric(
 
 def _count_by(rows: list[tuple[int | None, int]]) -> dict[int, int]:
     return {key: int(value or 0) for key, value in rows if key is not None}
+
+
+def _serialize_exam_grade(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized or DEFAULT_EXAM_GRADE
 
 
 def _format_percent_trend(current: int, previous: int) -> str:
@@ -947,6 +953,7 @@ def get_admin_exams_overview(db: Session) -> dict:
             Exam.created_by_user_id,
             Exam.title,
             Exam.description,
+            Exam.grade,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -988,6 +995,7 @@ def get_admin_exams_overview(db: Session) -> dict:
                 "id": row.id,
                 "title": row.title,
                 "description": row.description,
+                "grade": _serialize_exam_grade(row.grade),
                 "scope": row.scope,
                 "classroom_id": row.classroom_id,
                 "classroom_name": row.classroom_name,
@@ -2532,6 +2540,7 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
             Exam.created_by_user_id,
             Exam.title,
             Exam.description,
+            Exam.grade,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -2612,6 +2621,7 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
                 "id": exam.id,
                 "title": exam.title,
                 "description": exam.description,
+                "grade": _serialize_exam_grade(exam.grade),
                 "scope": exam.scope,
                 "classroom_id": exam.classroom_id,
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
@@ -2716,6 +2726,7 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
             Exam.created_by_user_id,
             Exam.title,
             Exam.description,
+            Exam.grade,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -2843,6 +2854,7 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
                 "id": exam.id,
                 "title": exam.title,
                 "description": exam.description,
+                "grade": _serialize_exam_grade(exam.grade),
                 "scope": exam.scope,
                 "classroom_id": exam.classroom_id,
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,

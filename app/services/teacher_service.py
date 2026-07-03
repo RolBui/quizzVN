@@ -32,6 +32,7 @@ SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALS
 TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 PASSING_SCORE_PERCENT = 50.0
+DEFAULT_EXAM_GRADE = "Chưa phân loại"
 
 
 def require_teacher_user(db: Session, user_id: int) -> User:
@@ -610,6 +611,20 @@ def _get_exam_total_points(exam: Exam) -> float:
     return computed_total if computed_total > 0 else exam.total_points
 
 
+def _serialize_exam_grade(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized or DEFAULT_EXAM_GRADE
+
+
+def _normalize_exam_grade(value: str | None) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="grade is required")
+    if len(normalized) > 50:
+        raise HTTPException(status_code=400, detail="grade must be at most 50 characters")
+    return normalized
+
+
 def _get_exam_preview_image_url(exam: Exam) -> str | None:
     if exam.image_url:
         return exam.image_url
@@ -625,6 +640,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "id": exam.id,
         "title": exam.title,
         "description": exam.description,
+        "grade": _serialize_exam_grade(exam.grade),
         "image_url": exam.image_url or _get_exam_preview_image_url(exam),
         "scope": exam.scope,
         "classroom_id": exam.classroom_id,
@@ -1134,6 +1150,7 @@ def create_teacher_exam(
     teacher: User,
     title: str,
     description: str | None,
+    grade: str | None,
     image_url: str | None,
     scope: str,
     classroom_id: int | None,
@@ -1144,6 +1161,7 @@ def create_teacher_exam(
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
     normalized_title = title.strip()
+    normalized_grade = _normalize_exam_grade(grade)
     normalized_image_url = image_url.strip() if image_url else None
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
@@ -1154,6 +1172,7 @@ def create_teacher_exam(
         created_by_user_id=teacher.id,
         title=normalized_title,
         description=description.strip() if description else None,
+        grade=normalized_grade,
         image_url=normalized_image_url or None,
         scope=scope,
         classroom_id=classroom.id if classroom else None,
@@ -1181,6 +1200,7 @@ def update_teacher_exam(
     exam_id: int,
     title: str | None,
     description: str | None,
+    grade: str | None,
     image_url: str | None,
     scope: str | None,
     classroom_id: int | None,
@@ -1207,6 +1227,9 @@ def update_teacher_exam(
 
     if description is not None:
         exam.description = description.strip() if description else None
+
+    if grade is not None:
+        exam.grade = _normalize_exam_grade(grade)
 
     if image_url is not None:
         exam.image_url = image_url.strip() or None
@@ -1249,6 +1272,7 @@ def update_teacher_class_exam(
     exam_id: int,
     title: str | None,
     description: str | None,
+    grade: str | None,
     image_url: str | None,
     duration_minutes: int | None,
     is_published: bool | None,
@@ -1262,6 +1286,7 @@ def update_teacher_class_exam(
         exam_id,
         title,
         description,
+        grade,
         image_url,
         SCOPE_CLASS,
         class_id,
