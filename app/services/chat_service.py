@@ -8,8 +8,14 @@ from fastapi import HTTPException, UploadFile, status
 from app.core.security import utc_now
 from app.database import engine
 from app.models.chat import ChatConversation, ChatMessage, ChatParticipant
+from app.models.role import Role
 from app.models.user import User
 from app.models.user_session import UserSession
+from app.services.auth_service import (
+    ADMINISTRATOR_ROLE_NAME,
+    ADMIN_ROLE_NAME,
+    normalize_admin_permissions,
+)
 from app.services.media_service import upload_chat_file
 
 
@@ -77,6 +83,43 @@ def _serialize_user(user: User, online_user_ids: set[int] | None = None) -> dict
     }
 
 
+
+def _role_name(user: User) -> str | None:
+    return user.role.name if user.role else None
+
+
+def _admin_visible_contact_role_names(current_user: User) -> set[str] | None:
+    role_name = _role_name(current_user)
+    if role_name == ADMINISTRATOR_ROLE_NAME:
+        return None
+    if role_name != ADMIN_ROLE_NAME:
+        return None
+
+    permissions = set(normalize_admin_permissions(current_user.admin_permissions))
+    visible_role_names = {ADMINISTRATOR_ROLE_NAME}
+    if "admins" in permissions:
+        visible_role_names.add(ADMIN_ROLE_NAME)
+    if "teachers" in permissions:
+        visible_role_names.add("teacher")
+    if "students" in permissions:
+        visible_role_names.add("student")
+    return visible_role_names
+
+
+def _apply_contact_scope(users_query, current_user: User):
+    visible_role_names = _admin_visible_contact_role_names(current_user)
+    if visible_role_names is None:
+        return users_query
+    return users_query.filter(User.role.has(Role.name.in_(visible_role_names)))
+
+
+def _can_start_direct_conversation(current_user: User, participant_user: User) -> bool:
+    visible_role_names = _admin_visible_contact_role_names(current_user)
+    if visible_role_names is None:
+        return True
+    return _role_name(participant_user) in visible_role_names
+
+
 def _serialize_message(message: ChatMessage, current_user_id: int) -> dict:
     sender = message.sender
     return {
@@ -133,6 +176,33 @@ def _conversation_participant_ids(db: Session, conversation_id: int) -> list[int
     ]
 
 
+def _conversation_visible_to_user(db: Session, conversation_id: int, current_user: User) -> bool:
+    visible_role_names = _admin_visible_contact_role_names(current_user)
+    if visible_role_names is None:
+        return True
+
+    participants = (
+        db.query(ChatParticipant)
+        .options(joinedload(ChatParticipant.user).joinedload(User.role))
+        .filter(
+            ChatParticipant.conversation_id == conversation_id,
+            ChatParticipant.user_id != current_user.id,
+        )
+        .all()
+    )
+    return all(
+        participant.user and _role_name(participant.user) in visible_role_names
+        for participant in participants
+    )
+
+
+def _require_visible_conversation(db: Session, conversation_id: int, current_user: User) -> None:
+    if not _conversation_visible_to_user(db, conversation_id, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
 def _serialize_conversation(
     db: Session,
     conversation: ChatConversation,
@@ -188,6 +258,8 @@ def list_chat_contacts(db: Session, current_user: User, query: str = "", limit: 
         .options(joinedload(User.role), joinedload(User.profile))
         .filter(User.id != current_user.id, User.status == "active")
     )
+    users_query = _apply_contact_scope(users_query, current_user)
+
     if normalized_query:
         pattern = f"%{normalized_query}%"
         users_query = users_query.filter(
@@ -207,11 +279,16 @@ def list_chat_conversations(db: Session, current_user: User) -> dict:
         .order_by(ChatConversation.updated_at.desc(), ChatConversation.id.desc())
         .all()
     )
+    visible_conversations = [
+        conversation
+        for conversation in conversations
+        if _conversation_visible_to_user(db, conversation.id, current_user)
+    ]
     online_user_ids = _active_session_user_ids(db)
     return {
         "items": [
             _serialize_conversation(db, conversation, current_user.id, online_user_ids)
-            for conversation in conversations
+            for conversation in visible_conversations
         ]
     }
 
@@ -254,6 +331,9 @@ def create_or_get_direct_conversation(
     if not participant_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    if not _can_start_direct_conversation(current_user, participant_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     conversation = _find_direct_conversation(db, current_user.id, participant_id)
     if not conversation:
         now = utc_now()
@@ -288,6 +368,7 @@ def list_chat_messages(
     before_id: int | None = None,
 ) -> dict:
     participant = _require_participant(db, conversation_id, current_user.id)
+    _require_visible_conversation(db, conversation_id, current_user)
     query = (
         db.query(ChatMessage)
         .options(joinedload(ChatMessage.sender))
@@ -316,6 +397,7 @@ def create_chat_message(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be empty")
 
     participant = _require_participant(db, conversation_id, current_user.id)
+    _require_visible_conversation(db, conversation_id, current_user)
     now = utc_now()
     message = ChatMessage(
         conversation_id=conversation_id,
@@ -350,6 +432,7 @@ def create_chat_attachment_message(
     body: str | None = None,
 ) -> tuple[dict, list[int]]:
     participant = _require_participant(db, conversation_id, current_user.id)
+    _require_visible_conversation(db, conversation_id, current_user)
     attachment = upload_chat_file(upload)
     normalized_body = (body or "").strip() or attachment["filename"]
     now = utc_now()
@@ -399,6 +482,7 @@ def share_chat_attachment_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
     _require_participant(db, original_message.conversation_id, current_user.id)
+    _require_visible_conversation(db, original_message.conversation_id, current_user)
 
     conversation_response = create_or_get_direct_conversation(
         db,
@@ -444,6 +528,7 @@ def share_chat_attachment_message(
 
 def mark_conversation_read(db: Session, current_user: User, conversation_id: int) -> None:
     participant = _require_participant(db, conversation_id, current_user.id)
+    _require_visible_conversation(db, conversation_id, current_user)
     latest_message_id = (
         db.query(func.max(ChatMessage.id))
         .filter(ChatMessage.conversation_id == conversation_id)
@@ -469,6 +554,7 @@ def delete_chat_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
     _require_participant(db, message.conversation_id, current_user.id)
+    _require_visible_conversation(db, message.conversation_id, current_user)
     role_name = current_user.role.name if current_user.role else None
     can_delete = message.sender_id == current_user.id or role_name in {"admin", "administrator"}
     if not can_delete:
@@ -513,6 +599,8 @@ def delete_chat_conversation(db: Session, current_user: User, conversation_id: i
     participant = _participant_for_user(db, conversation_id, current_user.id)
     if not participant:
         return {"message": "Conversation deleted successfully"}
+
+    _require_visible_conversation(db, conversation_id, current_user)
 
     db.query(ChatParticipant).filter(
         ChatParticipant.conversation_id == conversation_id

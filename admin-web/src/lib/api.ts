@@ -8,10 +8,14 @@ const configuredApiBaseUrl = (
 const API_BASE_URL =
   configuredApiBaseUrl ||
   (import.meta.env.DEV
-    ? "http://localhost:8000"
+    ? "http://127.0.0.1:8000"
     : "https://quizzvn.onrender.com");
 const ACCESS_TOKEN_STORAGE_KEY = "quizzvn-admin-access-token";
 const AUTH_UNAUTHORIZED_EVENT = "quizzvn:auth-unauthorized";
+
+export function getGoogleLoginUrl() {
+  return `${API_BASE_URL}/auth/google/login?flow=admin`;
+}
 
 function readStoredAccessToken() {
   if (typeof window === "undefined") {
@@ -654,6 +658,18 @@ export const authApi = {
   me: () => apiGet<MeResponse>("/auth/me"),
   updateProfile: (payload: { full_name?: string; phone?: string | null }) =>
     apiRequest<UpdateProfileResponse>("/auth/profile", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  changePassword: (payload: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+  }) =>
+    apiRequest<{ message: string }>("/auth/password", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",

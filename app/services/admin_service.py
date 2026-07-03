@@ -47,6 +47,7 @@ ADMIN_INVITATION_STATUSES = {"otp_pending", "pending_approval", "approved", "rej
 TEACHER_ROLE_NAME = "teacher"
 STUDENT_ROLE_NAME = "student"
 USER_ACTIVITY_WINDOW = timedelta(hours=1)
+ADMIN_INVITATION_OTP_RESEND_COOLDOWN = timedelta(seconds=60)
 logger = logging.getLogger(__name__)
 
 
@@ -1906,6 +1907,18 @@ def send_admin_invitation_otp(
 
     if invitation.status != "otp_pending":
         raise HTTPException(status_code=400, detail="Admin invitation is not waiting for OTP verification")
+
+    if invitation.otp_attempt_count >= 0:
+        otp_expires_at = _normalize_datetime(invitation.otp_expires_at)
+        if otp_expires_at:
+            last_sent_at = otp_expires_at - timedelta(minutes=settings.ADMIN_INVITATION_OTP_EXPIRE_MINUTES)
+            resend_available_at = last_sent_at + ADMIN_INVITATION_OTP_RESEND_COOLDOWN
+            remaining_seconds = int((resend_available_at - utc_now()).total_seconds())
+            if remaining_seconds > 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Vui lòng chờ {remaining_seconds} giây trước khi gửi lại mã OTP.",
+                )
 
     existing_user = (
         db.query(User)
