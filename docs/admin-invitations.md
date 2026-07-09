@@ -7,6 +7,7 @@ This flow replaces direct admin creation when the administrator wants invitees t
 ```env
 ADMIN_INVITATION_BASE_URL=http://localhost:8000
 FRONTEND_ADMIN_INVITATION_PATH=/admin/invitations/accept
+ADMIN_INVITATION_LINK_EXPIRE_HOURS=24
 ADMIN_INVITATION_OTP_EXPIRE_MINUTES=15
 ADMIN_INVITATION_OTP_MAX_ATTEMPTS=5
 ```
@@ -15,6 +16,30 @@ The invitation email links to:
 
 ```text
 {ADMIN_INVITATION_BASE_URL}{FRONTEND_ADMIN_INVITATION_PATH}?token=...&email=...
+```
+
+The shared email theme lives in:
+
+```text
+app/services/email_templates.py
+```
+
+For local visual checks without sending real email, run the backend and open:
+
+```text
+http://localhost:8000/dev/email-preview/admin-invitation
+```
+
+Optional query params:
+
+```text
+http://localhost:8000/dev/email-preview/admin-invitation?email=test@example.com&name=Thanh
+```
+
+The email logo is served locally from:
+
+```text
+http://localhost:8000/assets/email-logo.png
 ```
 
 By default, `ADMIN_INVITATION_BASE_URL` uses `BACKEND_URL`, so the backend can

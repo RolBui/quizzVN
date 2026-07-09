@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.security import hash_password, utc_now, verify_password
 from app.models.email_verification_otp import EmailVerificationOtp
 from app.models.user import User
+from app.services.email_templates import render_action_email, render_otp_email
 
 logger = logging.getLogger(__name__)
 EMAIL_VERIFICATION_SALT = "email-verification"
@@ -45,7 +46,12 @@ def build_frontend_email_verification_redirect_url(status_value: str) -> str:
     return f"{settings.FRONTEND_URL}{settings.FRONTEND_EMAIL_VERIFICATION_PATH}?{query_string}"
 
 
-def _build_plain_email_message(recipient_email: str, subject: str, text_body: str) -> EmailMessage:
+def _build_email_message_content(
+    recipient_email: str,
+    subject: str,
+    text_body: str,
+    html_body: str | None = None,
+) -> EmailMessage:
     message = EmailMessage()
     from_name = settings.EMAIL_FROM_NAME
     from_address = settings.EMAIL_FROM_ADDRESS or "no-reply@example.com"
@@ -53,21 +59,38 @@ def _build_plain_email_message(recipient_email: str, subject: str, text_body: st
     message["From"] = f"{from_name} <{from_address}>"
     message["To"] = recipient_email
     message.set_content(text_body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
     return message
+
+
+def _build_plain_email_message(recipient_email: str, subject: str, text_body: str) -> EmailMessage:
+    return _build_email_message_content(recipient_email, subject, text_body)
 
 
 def _build_email_message(recipient_email: str, recipient_name: str, verify_url: str) -> EmailMessage:
     app_name = settings.APP_NAME
-    subject = f"Verify your email for {app_name}"
-    safe_name = recipient_name.strip() or recipient_email
-    text_body = (
-        f"Hi {safe_name},\n\n"
-        f"Please verify your email address for {app_name} by opening the link below:\n\n"
-        f"{verify_url}\n\n"
-        f"This link expires in {settings.EMAIL_VERIFICATION_EXPIRE_HOURS} hour(s).\n\n"
-        "If you did not create this account, you can ignore this email."
+    rendered = render_action_email(
+        app_name=settings.EMAIL_FROM_NAME or app_name,
+        recipient_name=recipient_name,
+        recipient_email=recipient_email,
+        subject=f"Xác thực email cho {app_name}",
+        title="Xác thực email",
+        intro_lines=[
+            f"Vui lòng xác thực địa chỉ email đăng ký tại {app_name}.",
+            "Bấm nút bên dưới để hoàn tất xác thực.",
+        ],
+        button_label="Xác thực email",
+        button_url=verify_url,
+        expires_minutes=settings.EMAIL_VERIFICATION_EXPIRE_HOURS * 60,
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    return _build_plain_email_message(recipient_email, subject, text_body)
+    return _build_email_message_content(
+        recipient_email,
+        rendered.subject,
+        rendered.text_body,
+        rendered.html_body,
+    )
 
 
 def _generate_email_verification_otp() -> str:
@@ -76,15 +99,23 @@ def _generate_email_verification_otp() -> str:
 
 def _build_email_otp_message(recipient_email: str, recipient_name: str, otp_code: str) -> EmailMessage:
     app_name = settings.APP_NAME
-    subject = f"Your verification code for {app_name}"
-    safe_name = recipient_name.strip() or recipient_email
-    text_body = (
-        f"Hi {safe_name},\n\n"
-        f"Your {app_name} email verification code is: {otp_code}\n\n"
-        f"This code expires in {settings.EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES} minute(s).\n\n"
-        "If you did not create this account, you can ignore this email."
+    rendered = render_otp_email(
+        app_name=settings.EMAIL_FROM_NAME or app_name,
+        recipient_name=recipient_name,
+        recipient_email=recipient_email,
+        subject=f"Mã xác thực email {app_name}",
+        title="Mã xác thực email",
+        intro=f"Sử dụng mã OTP bên dưới để xác thực email tại {app_name}.",
+        otp_code=otp_code,
+        expires_minutes=settings.EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES,
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    return _build_plain_email_message(recipient_email, subject, text_body)
+    return _build_email_message_content(
+        recipient_email,
+        rendered.subject,
+        rendered.text_body,
+        rendered.html_body,
+    )
 
 
 def _send_via_smtp(message: EmailMessage) -> None:
@@ -115,7 +146,16 @@ def _send_via_smtp(message: EmailMessage) -> None:
 
 
 def send_plain_email(recipient_email: str, subject: str, text_body: str) -> None:
-    message = _build_plain_email_message(recipient_email, subject, text_body)
+    send_email(recipient_email, subject, text_body)
+
+
+def send_email(
+    recipient_email: str,
+    subject: str,
+    text_body: str,
+    html_body: str | None = None,
+) -> None:
+    message = _build_email_message_content(recipient_email, subject, text_body, html_body)
 
     if settings.EMAIL_DELIVERY_MODE == "smtp":
         _send_via_smtp(message)
@@ -180,7 +220,13 @@ def send_email_verification_otp(db: Session, user: User) -> None:
 
     logger.info("EMAIL_DELIVERY_MODE=%s", settings.EMAIL_DELIVERY_MODE)
     logger.info("Email verification OTP sent to %s", user.email)
-    logger.info("Email to %s subject=%s\n%s", user.email, message["Subject"], message.get_content())
+    plain_part = message.get_body(preferencelist=("plain",))
+    logger.info(
+        "Email to %s subject=%s\n%s",
+        user.email,
+        message["Subject"],
+        plain_part.get_content() if plain_part else "",
+    )
 
 
 def verify_email_otp(db: Session, user: User, otp_code: str) -> dict:

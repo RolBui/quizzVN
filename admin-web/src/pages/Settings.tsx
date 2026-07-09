@@ -615,7 +615,10 @@ export function Settings() {
                               <input
                                 value={accountDraft.fullName}
                                 onChange={(event) =>
-                                  updateAccountDraft("fullName", event.target.value)
+                                  updateAccountDraft(
+                                    "fullName",
+                                    event.target.value,
+                                  )
                                 }
                                 className="w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-xl font-bold text-on-surface outline-none focus:border-primary"
                                 placeholder="Họ tên"
@@ -641,11 +644,15 @@ export function Settings() {
                             <p className="text-xs font-semibold uppercase text-outline">
                               {item.label}
                             </p>
-                            {isEditingAccount && item.label === "Số điện thoại" ? (
+                            {isEditingAccount &&
+                            item.label === "Số điện thoại" ? (
                               <input
                                 value={accountDraft.phone}
                                 onChange={(event) =>
-                                  updateAccountDraft("phone", event.target.value)
+                                  updateAccountDraft(
+                                    "phone",
+                                    event.target.value,
+                                  )
                                 }
                                 className="mt-1 w-full rounded-md border border-outline-variant bg-surface-container-low px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:border-primary"
                                 placeholder="Số điện thoại"
@@ -689,7 +696,8 @@ export function Settings() {
                           </h3>
                         </div>
                         <p className="mt-1 text-sm text-outline">
-                          Dùng mật khẩu tạm hoặc mật khẩu hiện tại để đặt mật khẩu mới dễ đăng nhập hơn.
+                          Dùng mật khẩu tạm hoặc mật khẩu hiện tại để đặt mật
+                          khẩu mới dễ đăng nhập hơn.
                         </p>
                       </div>
 
@@ -720,7 +728,10 @@ export function Settings() {
                             type="password"
                             value={passwordDraft.newPassword}
                             onChange={(event) =>
-                              updatePasswordDraft("newPassword", event.target.value)
+                              updatePasswordDraft(
+                                "newPassword",
+                                event.target.value,
+                              )
                             }
                             autoComplete="new-password"
                             className="h-11 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"

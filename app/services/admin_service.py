@@ -33,11 +33,13 @@ from app.services.auth_service import (
     ADMIN_ROLE_NAME,
     ADMINISTRATOR_ROLE_NAME,
     build_username_from_email,
+    create_admin_password_setup_token,
     encode_admin_permissions,
     get_or_create_role,
     normalize_admin_permissions,
 )
-from app.services.email_verification_service import send_plain_email
+from app.services.email_templates import render_action_email, render_notice_email, render_otp_email
+from app.services.email_verification_service import send_email
 from app.services.media_service import delete_document_file, upload_document_file
 
 ATTEMPT_STATUS_SUBMITTED = "submitted"
@@ -1426,6 +1428,7 @@ def _delete_user_auth_rows(db: Session, user_id: int) -> None:
         "oauth_accounts",
         "email_verification_otps",
         "email_verification_tokens",
+        "password_setup_tokens",
         "password_reset_tokens",
         "user_profiles",
     ):
@@ -1604,20 +1607,6 @@ def _generate_admin_invitation_otp() -> str:
     return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
-def _generate_admin_password(length: int = 10) -> str:
-    special_chars = "!@#$%^&*()-_=+"
-    alphabet = string.ascii_letters + string.digits + special_chars
-    password_chars = [
-        secrets.choice(string.ascii_lowercase),
-        secrets.choice(string.ascii_uppercase),
-        secrets.choice(string.digits),
-        secrets.choice(special_chars),
-    ]
-    password_chars.extend(secrets.choice(alphabet) for _ in range(length - len(password_chars)))
-    secrets.SystemRandom().shuffle(password_chars)
-    return "".join(password_chars)
-
-
 def _build_admin_invitation_url(token: str, email: str) -> str:
     query_string = urlencode({"token": token, "email": email})
     return f"{settings.ADMIN_INVITATION_BASE_URL}{settings.FRONTEND_ADMIN_INVITATION_PATH}?{query_string}"
@@ -1678,23 +1667,36 @@ def _serialize_admin_invitation(
 
 def _send_admin_invitation_email(invitation: AdminInvitation, token: str) -> None:
     invitation_url = _build_admin_invitation_url(token, invitation.email)
-    subject = f"Admin invitation for {settings.APP_NAME}"
-    body = (
-        f"You have been invited to request an admin account for {settings.APP_NAME}.\n\n"
-        f"Open this link to complete your information:\n{invitation_url}\n\n"
-        "If you did not expect this invitation, you can ignore this email."
+    rendered = render_action_email(
+        app_name=settings.EMAIL_FROM_NAME or settings.APP_NAME,
+        recipient_name=invitation.full_name,
+        recipient_email=invitation.email,
+        subject=f"Mời xác thực tài khoản quản trị {settings.APP_NAME}",
+        title="Mời xác thực tài khoản quản trị",
+        intro_lines=[
+            f"Bạn được mời gửi yêu cầu tài khoản quản trị cho {settings.APP_NAME}.",
+            "Bấm nút bên dưới để điền thông tin và xác thực OTP.",
+        ],
+        button_label="Mở form xác thực",
+        button_url=invitation_url,
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    send_plain_email(invitation.email, subject, body)
+    send_email(invitation.email, rendered.subject, rendered.text_body, rendered.html_body)
 
 
 def _send_admin_invitation_otp_email(invitation: AdminInvitation, otp_code: str) -> None:
-    subject = f"Your OTP code for {settings.APP_NAME}"
-    body = (
-        f"Your OTP code is: {otp_code}\n\n"
-        f"This code expires in {settings.ADMIN_INVITATION_OTP_EXPIRE_MINUTES} minute(s).\n"
-        "If you did not request this code, you can ignore this email."
+    rendered = render_otp_email(
+        app_name=settings.EMAIL_FROM_NAME or settings.APP_NAME,
+        recipient_name=invitation.full_name,
+        recipient_email=invitation.email,
+        subject=f"Mã OTP quản trị {settings.APP_NAME}",
+        title="Mã OTP quản trị",
+        intro="Sử dụng mã OTP bên dưới để xác thực yêu cầu tài khoản quản trị.",
+        otp_code=otp_code,
+        expires_minutes=settings.ADMIN_INVITATION_OTP_EXPIRE_MINUTES,
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    send_plain_email(invitation.email, subject, body)
+    send_email(invitation.email, rendered.subject, rendered.text_body, rendered.html_body)
 
 
 def _send_admin_pending_review_email(db: Session, invitation: AdminInvitation) -> None:
@@ -1705,27 +1707,40 @@ def _send_admin_pending_review_email(db: Session, invitation: AdminInvitation) -
     if not inviter or not inviter.email:
         return
 
-    subject = f"Admin request waiting for approval - {settings.APP_NAME}"
-    body = (
-        f"{invitation.full_name or invitation.email} has verified the OTP and submitted "
-        f"an admin account request.\n\n"
-        f"Email: {invitation.email}\n"
-        "Please open the Administrator dashboard to approve or reject this request."
+    rendered = render_notice_email(
+        app_name=settings.EMAIL_FROM_NAME or settings.APP_NAME,
+        recipient_name=inviter.full_name,
+        recipient_email=inviter.email,
+        subject=f"Yêu cầu quản trị chờ duyệt - {settings.APP_NAME}",
+        title="Yêu cầu quản trị chờ duyệt",
+        intro_lines=[
+            f"{invitation.full_name or invitation.email} đã xác thực OTP và gửi yêu cầu tài khoản quản trị.",
+            "Vui lòng mở dashboard Administrator để duyệt hoặc từ chối yêu cầu này.",
+        ],
+        details=[("Email", invitation.email)],
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    send_plain_email(inviter.email, subject, body)
+    send_email(inviter.email, rendered.subject, rendered.text_body, rendered.html_body)
 
 
-def _send_admin_credentials_email(user: User, password: str) -> None:
-    subject = f"Your admin account for {settings.APP_NAME}"
-    body = (
-        f"Hi {user.full_name},\n\n"
-        f"Your admin account for {settings.APP_NAME} has been approved.\n\n"
-        f"Login email: {user.email}\n"
-        f"Temporary password: {password}\n\n"
-        f"Open the app here: {settings.FRONTEND_URL}\n\n"
-        "Please sign in and change your password after your first login."
+def _send_admin_password_setup_email(user: User, setup_url: str) -> None:
+    rendered = render_action_email(
+        app_name=settings.EMAIL_FROM_NAME or settings.APP_NAME,
+        recipient_name=user.full_name,
+        recipient_email=user.email,
+        subject=f"Tài khoản quản trị {settings.APP_NAME} đã được duyệt",
+        title="Tài khoản quản trị đã được duyệt",
+        intro_lines=[
+            f"Tài khoản quản trị của bạn trên {settings.APP_NAME} đã được Administrator phê duyệt.",
+            "Bấm nút bên dưới để tạo mật khẩu đăng nhập. Liên kết chỉ sử dụng một lần.",
+        ],
+        button_label="Tạo mật khẩu quản trị",
+        button_url=setup_url,
+        expires_minutes=settings.ADMIN_PASSWORD_SETUP_EXPIRE_MINUTES,
+        details=[("Email đăng nhập", user.email)],
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    send_plain_email(user.email, subject, body)
+    send_email(user.email, rendered.subject, rendered.text_body, rendered.html_body)
 
 
 def _admin_invitation_users_by_id(db: Session, invitations: list[AdminInvitation]) -> dict[int, User]:
@@ -1819,7 +1834,7 @@ def create_admin_invitation(
 
     token = secrets.token_urlsafe(32)
     placeholder_otp_hash = hash_password(secrets.token_urlsafe(16))
-    expires_at = utc_now() + timedelta(days=7)
+    expires_at = utc_now() + timedelta(hours=settings.ADMIN_INVITATION_LINK_EXPIRE_HOURS)
 
     invitation = (
         db.query(AdminInvitation)
@@ -2073,7 +2088,6 @@ def approve_admin_invitation(
     if invitation.status != "pending_approval":
         raise HTTPException(status_code=400, detail="Admin invitation is not waiting for approval")
 
-    generated_password = _generate_admin_password()
     admin_role = get_or_create_role(db, ADMIN_ROLE_NAME)
     existing_user = (
         db.query(User)
@@ -2087,8 +2101,7 @@ def approve_admin_invitation(
     if existing_user:
         user = existing_user
         user.role_id = admin_role.id
-        user.password_hash = hash_password(generated_password)
-        if user.auth_type == "oauth":
+        if user.auth_type == "oauth" and user.password_hash:
             user.auth_type = "mixed"
         elif not user.auth_type:
             user.auth_type = "local"
@@ -2107,7 +2120,7 @@ def approve_admin_invitation(
             username=build_username_from_email(db, invitation.email),
             email=invitation.email,
             phone=invitation.phone,
-            password_hash=hash_password(generated_password),
+            password_hash=hash_password(secrets.token_urlsafe(32)),
             auth_type="local",
             email_verified=True,
             status="active",
@@ -2122,6 +2135,7 @@ def approve_admin_invitation(
     db.flush()
     if not existing_user:
         _apply_admin_invitation_profile(db, user, invitation)
+    _, password_setup_url = create_admin_password_setup_token(db, user)
 
     invitation.status = "approved"
     invitation.approved_by_user_id = current_administrator.id
@@ -2133,12 +2147,12 @@ def approve_admin_invitation(
     db.refresh(invitation)
     user = _get_admin_account(db, user.id)
 
-    message = "Admin invitation approved and credentials sent successfully"
+    message = "Admin invitation approved and password setup email sent successfully"
     try:
-        _send_admin_credentials_email(user, generated_password)
+        _send_admin_password_setup_email(user, password_setup_url)
     except Exception:
-        logger.exception("Failed to send admin credentials email for user_id=%s", user.id)
-        message = "Admin invitation approved, but failed to send credentials email"
+        logger.exception("Failed to send admin password setup email for user_id=%s", user.id)
+        message = "Admin invitation approved, but failed to send password setup email"
 
     return {
         "message": message,
@@ -2247,6 +2261,32 @@ def delete_admin_account(
     _hard_delete_user(db, user.id, role_name)
     db.commit()
     return {"message": "Admin account deleted successfully"}
+
+
+def send_admin_password_setup_link(
+    db: Session,
+    current_administrator: User,
+    user_id: int,
+) -> dict:
+    _require_admin_scope(current_administrator, "admins")
+    user = _get_admin_account(db, user_id)
+    _require_editable_admin(user, current_administrator)
+    if user.status != "active":
+        raise HTTPException(status_code=400, detail="Admin account is disabled")
+
+    _, password_setup_url = create_admin_password_setup_token(db, user)
+    db.commit()
+
+    try:
+        _send_admin_password_setup_email(user, password_setup_url)
+    except Exception as exc:
+        logger.exception("Failed to resend admin password setup email for user_id=%s", user.id)
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to send admin password setup email",
+        ) from exc
+
+    return {"message": "Admin password setup email sent successfully"}
 
 
 def update_admin_permissions(

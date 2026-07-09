@@ -45,6 +45,7 @@ function notifyUnauthorized() {
 const quietErrorPaths = [
   "/auth/me",
   "/auth/login",
+  "/auth/admin/password-setup",
   "/admin/documents",
   "/admin/analytics/realtime",
   "/chat/contacts",
@@ -126,6 +127,13 @@ export interface AdminAccountListResponse {
 export interface AdminAccountResponse {
   message: string;
   admin: AdminAccount;
+}
+
+export interface PasswordSetupTokenResponse {
+  message: string;
+  email: string;
+  full_name: string;
+  expires_at: string;
 }
 
 export type AdminInvitationStatus =
@@ -677,6 +685,22 @@ export const authApi = {
       },
       body: JSON.stringify(payload),
     }),
+  getAdminPasswordSetupToken: (token: string) =>
+    apiGet<PasswordSetupTokenResponse>(
+      `/auth/admin/password-setup?token=${encodeURIComponent(token)}`,
+    ),
+  completeAdminPasswordSetup: (payload: {
+    token: string;
+    new_password: string;
+    confirm_password: string;
+  }) =>
+    apiRequest<{ message: string }>("/auth/admin/password-setup", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
   logout: async () => {
     try {
       return await apiPost<{ message: string }>("/auth/logout");
@@ -770,6 +794,8 @@ export const adminApi = {
       },
       body: JSON.stringify({ permissions }),
     }),
+  sendPasswordSetupLink: (userId: number) =>
+    apiPost<{ message: string }>(`/admin/users/${userId}/password-setup-link`),
   deleteAccount: (userId: number) =>
     apiRequest<{ message: string }>(`/admin/users/${userId}`, {
       method: "DELETE",
