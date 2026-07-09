@@ -1,5 +1,5 @@
 import secrets
-from fastapi import APIRouter, Request, Depends, Response, status, HTTPException
+from fastapi import APIRouter, Request, Depends, Response, status, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from authlib.integrations.base_client import MismatchingStateError
 from authlib.integrations.starlette_client import OAuth
@@ -27,6 +27,9 @@ from app.schemas.auth import (
     ProfileResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    PasswordSetupTokenResponse,
+    CompletePasswordSetupRequest,
+    CompletePasswordSetupResponse,
     AvatarListResponse,
     ProfileImageUploadResponse,
 )
@@ -48,6 +51,8 @@ from app.services.auth_service import (
     serialize_session_tokens,
     update_user_profile,
     change_user_password,
+    get_admin_password_setup_token,
+    complete_admin_password_setup,
     update_user_avatar,
 )
 from app.services.email_verification_service import (
@@ -573,6 +578,27 @@ def change_password(
         db=db,
         user=current_user,
         current_password=payload.current_password,
+        new_password=payload.new_password,
+        confirm_password=payload.confirm_password,
+    )
+
+
+@router.get("/admin/password-setup", response_model=PasswordSetupTokenResponse)
+def get_admin_password_setup(
+    token: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+) -> PasswordSetupTokenResponse:
+    return get_admin_password_setup_token(db, token)
+
+
+@router.post("/admin/password-setup", response_model=CompletePasswordSetupResponse)
+def post_admin_password_setup(
+    payload: CompletePasswordSetupRequest,
+    db: Session = Depends(get_db),
+) -> CompletePasswordSetupResponse:
+    return complete_admin_password_setup(
+        db=db,
+        token=payload.token,
         new_password=payload.new_password,
         confirm_password=payload.confirm_password,
     )

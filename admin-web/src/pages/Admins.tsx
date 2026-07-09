@@ -154,6 +154,8 @@ export function Admins() {
   const [openingChatAdminId, setOpeningChatAdminId] = useState<number | null>(
     null,
   );
+  const [sendingPasswordSetupAdminId, setSendingPasswordSetupAdminId] =
+    useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [form, setForm] = useState<AdminFormState>(emptyForm);
   const [permissionAdmin, setPermissionAdmin] = useState<AdminAccount | null>(
@@ -358,6 +360,27 @@ export function Admins() {
       // apiRequest already shows a failure toast for API errors.
     } finally {
       setIsSavingPermissions(false);
+    }
+  };
+
+  const sendPasswordSetupLink = async (admin: AdminAccount) => {
+    if (sendingPasswordSetupAdminId) {
+      return;
+    }
+
+    setSendingPasswordSetupAdminId(admin.id);
+    setError(null);
+    try {
+      await adminApi.sendPasswordSetupLink(admin.id);
+      toast.success("Đã gửi link tạo mật khẩu cho quản trị viên.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Không gửi được link tạo mật khẩu.",
+      );
+    } finally {
+      setSendingPasswordSetupAdminId(null);
     }
   };
 
@@ -668,6 +691,20 @@ export function Admins() {
                       <td className="py-4 px-6 text-right">
                         {admin.role_name === "admin" ? (
                           <div className="inline-flex items-center gap-1">
+                            {canManageAdmins && (
+                              <button
+                                onClick={() => void sendPasswordSetupLink(admin)}
+                                disabled={sendingPasswordSetupAdminId === admin.id}
+                                className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                                title="Gửi link tạo mật khẩu"
+                              >
+                                {sendingPasswordSetupAdminId === admin.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Mail className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
                             {canManageAdmins && (
                               <button
                                 onClick={() => openPermissionDrawer(admin)}

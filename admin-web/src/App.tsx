@@ -15,6 +15,7 @@ import {
 import { AuthProvider, RequireAdmin, useAuth } from './lib/auth';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
+import { SetPassword } from './pages/SetPassword';
 import { Teachers } from './pages/Teachers';
 import { Students } from './pages/Students';
 import { Admins } from './pages/Admins';
@@ -48,6 +49,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/set-password" element={<SetPassword />} />
           <Route element={<RequireAdmin />}>
             <Route path="/" element={<MainLayout />}>
               <Route index element={<Dashboard />} />

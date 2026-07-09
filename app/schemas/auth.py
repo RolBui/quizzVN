@@ -149,6 +149,23 @@ class ChangePasswordResponse(BaseModel):
     message: str
 
 
+class PasswordSetupTokenResponse(BaseModel):
+    message: str
+    email: str
+    full_name: str
+    expires_at: datetime
+
+
+class CompletePasswordSetupRequest(BaseModel):
+    token: str
+    new_password: str
+    confirm_password: str
+
+
+class CompletePasswordSetupResponse(BaseModel):
+    message: str
+
+
 class ProfileResponse(BaseModel):
     user: UserSchema
 

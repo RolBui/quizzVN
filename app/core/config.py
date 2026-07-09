@@ -34,7 +34,7 @@ def _parse_session_expire_minutes() -> int:
     if raw_days is not None and raw_days.strip():
         return int(raw_days.strip()) * 24 * 60
 
-    return int(os.getenv("SESSION_EXPIRE_MINUTES", "30"))
+    return int(os.getenv("SESSION_EXPIRE_MINUTES", str(7 * 24 * 60)))
 
 
 def _derive_origin_from_url(url: str) -> str | None:
@@ -110,6 +110,9 @@ class Settings:
         os.getenv("FRONTEND_ADMIN_INVITATION_PATH", "/admin/invitations/accept").strip()
         or "/admin/invitations/accept"
     )
+    FRONTEND_ADMIN_PASSWORD_SETUP_PATH: str = (
+        os.getenv("FRONTEND_ADMIN_PASSWORD_SETUP_PATH", "/set-password").strip() or "/set-password"
+    )
     ADMIN_INVITATION_BASE_URL: str = _normalize_origin(
         os.getenv("ADMIN_INVITATION_BASE_URL", BACKEND_URL)
     )
@@ -141,6 +144,9 @@ class Settings:
     EMAIL_DELIVERY_MODE: str = os.getenv("EMAIL_DELIVERY_MODE", "log").strip().lower() or "log"
     EMAIL_FROM_ADDRESS: str = os.getenv("EMAIL_FROM_ADDRESS", "").strip()
     EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", APP_NAME).strip() or APP_NAME
+    EMAIL_BRAND_LOGO_URL: str = (
+        os.getenv("EMAIL_BRAND_LOGO_URL") or f"{BACKEND_URL}/assets/email-logo.png"
+    ).strip()
     SMTP_HOST: str = os.getenv("SMTP_HOST", "").strip()
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USERNAME: str = os.getenv("SMTP_USERNAME", "").strip()
@@ -152,10 +158,12 @@ class Settings:
         os.getenv("EMAIL_VERIFICATION_SECRET", SESSION_SECRET_KEY).strip() or SESSION_SECRET_KEY
     )
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))
-    EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = int(os.getenv("EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES", "15"))
+    EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = int(os.getenv("EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES", "1"))
     EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS: int = int(os.getenv("EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS", "5"))
-    ADMIN_INVITATION_OTP_EXPIRE_MINUTES: int = int(os.getenv("ADMIN_INVITATION_OTP_EXPIRE_MINUTES", "15"))
+    ADMIN_INVITATION_LINK_EXPIRE_HOURS: int = int(os.getenv("ADMIN_INVITATION_LINK_EXPIRE_HOURS", "24"))
+    ADMIN_INVITATION_OTP_EXPIRE_MINUTES: int = int(os.getenv("ADMIN_INVITATION_OTP_EXPIRE_MINUTES", "1"))
     ADMIN_INVITATION_OTP_MAX_ATTEMPTS: int = int(os.getenv("ADMIN_INVITATION_OTP_MAX_ATTEMPTS", "5"))
+    ADMIN_PASSWORD_SETUP_EXPIRE_MINUTES: int = int(os.getenv("ADMIN_PASSWORD_SETUP_EXPIRE_MINUTES", "30"))
     MAX_IMAGE_UPLOAD_BYTES: int = int(os.getenv("MAX_IMAGE_UPLOAD_BYTES", str(5 * 1024 * 1024)))
     MAX_CHAT_FILE_UPLOAD_BYTES: int = int(os.getenv("MAX_CHAT_FILE_UPLOAD_BYTES", str(10 * 1024 * 1024)))
     MAX_DOCUMENT_UPLOAD_BYTES: int = int(os.getenv("MAX_DOCUMENT_UPLOAD_BYTES", str(20 * 1024 * 1024)))
@@ -173,5 +181,8 @@ class Settings:
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini").strip().lower() or "gemini"
     AI_MODEL: str = os.getenv("AI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
+    AI_PROVIDER_TIMEOUT_SECONDS: float = float(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "180"))
+    AI_PROVIDER_RETRY_COUNT: int = int(os.getenv("AI_PROVIDER_RETRY_COUNT", "2"))
+    AI_EXAM_BATCH_SIZE: int = int(os.getenv("AI_EXAM_BATCH_SIZE", "10"))
 
 settings = Settings()

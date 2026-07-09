@@ -55,6 +55,7 @@ from app.services.admin_service import (
     reject_admin_invitation,
     reset_admin_student_password,
     reset_admin_teacher_password,
+    send_admin_password_setup_link,
     send_admin_invitation_otp,
     submit_admin_invitation_otp,
     update_admin_permissions,
@@ -64,6 +65,25 @@ from app.services.admin_service import (
 from app.services.analytics_service import get_web_realtime_overview, get_web_traffic_overview
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+ADMIN_INVITATION_FORM_ERROR_MESSAGES = {
+    "Admin invitation not found": "Không tìm thấy lời mời quản trị.",
+    "Admin invitation is not waiting for OTP verification": "Lời mời quản trị không còn ở bước xác thực OTP.",
+    "Admin invitation OTP expired": "Mã OTP đã hết hạn. Vui lòng gửi lại mã mới.",
+    "Admin invitation OTP attempt limit exceeded": "Bạn đã nhập sai OTP quá số lần cho phép.",
+    "Invalid OTP code": "Mã opt không đúng , vui lòng nhập lại!",
+    "full_name is required": "Vui lòng nhập họ tên.",
+    "phone is required": "Vui lòng nhập số điện thoại.",
+    "date_of_birth is required": "Vui lòng chọn ngày sinh.",
+    "date_of_birth is invalid": "Ngày sinh không hợp lệ. Vui lòng chọn lại.",
+    "date_of_birth cannot be in the future": "Ngày sinh không được ở tương lai.",
+    "gender is required": "Vui lòng chọn giới tính.",
+}
+
+
+def _admin_invitation_form_error(detail: object) -> str:
+    return ADMIN_INVITATION_FORM_ERROR_MESSAGES.get(str(detail), str(detail))
 
 
 def _admin_invitation_accept_html(
@@ -78,6 +98,7 @@ def _admin_invitation_accept_html(
     phone: str = "",
     date_of_birth: str = "",
     gender: str = "",
+    otp_just_sent: bool = False,
 ) -> str:
     safe_token = escape(token or "", quote=True)
     safe_email = escape(email or "", quote=True)
@@ -85,11 +106,12 @@ def _admin_invitation_accept_html(
     safe_phone = escape(phone or "", quote=True)
     safe_date_of_birth = escape(date_of_birth or "", quote=True)
     safe_gender = escape(gender or "", quote=True)
-    error_html = (
-        f'<div class="alert alert-error">{escape(error)}</div>'
-        if error
-        else ""
-    )
+    if error and step == "otp":
+        error_html = f'<p class="form-error-text">{escape(error)}</p>'
+    elif error:
+        error_html = f'<div class="alert alert-error">{escape(error)}</div>'
+    else:
+        error_html = ""
     success_html = (
         f'<div class="alert alert-success">{escape(success)}</div>'
         if success
@@ -109,9 +131,10 @@ def _admin_invitation_accept_html(
         step_description = "Administrator sẽ kiểm tra và duyệt tài khoản của bạn."
     elif step == "otp":
         step_title = "Xác thực mã OTP"
-        step_description = "Bấm Gửi mã để nhận OTP, sau đó nhập 6 chữ số trong email để hoàn tất gửi yêu cầu."
+        step_description = "Nhập 6 chữ số trong email để hoàn tất gửi yêu cầu."
+        auto_cooldown = "true" if otp_just_sent else "false"
         form_html = f"""
-        <form method="post" action="/admin/invitations/accept">
+        <form method="post" action="/admin/invitations/accept" data-otp-form>
           <input type="hidden" name="token" value="{safe_token}" />
           <input type="hidden" name="email" value="{safe_email}" />
           <input type="hidden" name="full_name" value="{safe_full_name}" />
@@ -123,7 +146,7 @@ def _admin_invitation_accept_html(
               <span>Email</span>
               <strong>{safe_email}</strong>
             </div>
-            <button class="send-code-button" type="submit" formaction="/admin/invitations/accept/send-code" formnovalidate data-send-code-button data-cooldown-seconds="60">Gửi mã</button>
+            <button class="send-code-button" type="submit" formaction="/admin/invitations/accept/send-code" formnovalidate data-send-code-button data-cooldown-seconds="60" data-auto-cooldown="{auto_cooldown}">Gửi lại mã OTP</button>
           </div>
           <div class="otp-row" aria-label="Nhập mã OTP gồm 6 số">
             <input name="otp_digit_1" inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="one-time-code" required data-otp-input />
@@ -133,8 +156,6 @@ def _admin_invitation_accept_html(
             <input name="otp_digit_5" inputmode="numeric" pattern="[0-9]" maxlength="1" required data-otp-input />
             <input name="otp_digit_6" inputmode="numeric" pattern="[0-9]" maxlength="1" required data-otp-input />
           </div>
-          <button type="submit">Xác thực OTP</button>
-          <button class="button-secondary" type="submit" formaction="/admin/invitations/accept/edit-profile" formnovalidate>Quay lại chỉnh thông tin</button>
         </form>
         """
     else:
@@ -148,7 +169,7 @@ def _admin_invitation_accept_html(
             )
         )
         form_html = f"""
-        <form method="post" action="/admin/invitations/accept/profile">
+        <form method="post" action="/admin/invitations/accept/profile" novalidate>
           <input type="hidden" name="token" value="{safe_token}" />
           <input type="hidden" name="email" value="{safe_email}" />
           <label>
@@ -192,19 +213,30 @@ def _admin_invitation_accept_html(
       margin: 0;
       min-height: 100vh;
       display: grid;
-      place-items: center;
+      justify-items: center;
+      align-items: start;
       background: #f4f7fb;
       color: #111827;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 20px;
+      padding: 18vh 20px 20px;
     }}
     main {{
       width: min(480px, 100%);
       background: #fff;
       border: 1px solid #e5e7eb;
-      border-radius: 3px;
-      padding: 24px;
+      border-radius: 8px;
+      padding: 22px 24px 24px;
       box-shadow: 0 14px 34px rgba(15, 23, 42, 0.10);
+    }}
+    .form-logo {{
+      display: block;
+      width: 180px;
+      max-width: 70%;
+      height: auto;
+      margin: 0 auto 8px;
+    }}
+    .form-header {{
+      text-align: center;
     }}
     h1 {{
       margin: 0 0 8px;
@@ -216,6 +248,13 @@ def _admin_invitation_accept_html(
       color: #64748b;
       font-size: 14px;
       line-height: 1.5;
+    }}
+    .form-error-text {{
+      margin: 10px 0 12px;
+      color: #991b1b;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.45;
     }}
     label {{
       display: block;
@@ -229,13 +268,21 @@ def _admin_invitation_accept_html(
       height: 42px;
       margin-top: 6px;
       border: 1px solid #cbd5e1;
-      border-radius: 3px;
-      padding: 0 10px;
+      border-radius: 6px;
+      padding: 0 12px;
       font-size: 14px;
       background: white;
       color: #0f172a;
       outline: none;
       transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }}
+    select {{
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%230f172a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      background-size: 18px 18px;
+      padding-right: 48px;
     }}
     input:focus,
     select:focus {{
@@ -254,7 +301,7 @@ def _admin_invitation_accept_html(
       gap: 12px;
       margin: 14px 0 16px;
       border: 1px solid #e2e8f0;
-      border-radius: 3px;
+      border-radius: 6px;
       background: #f8fafc;
       padding: 10px 12px;
       color: #64748b;
@@ -270,11 +317,11 @@ def _admin_invitation_accept_html(
     }}
     .send-code-button {{
       width: auto;
-      min-width: 104px;
+      min-width: 128px;
       height: 36px;
       margin: 0;
       padding: 0 14px;
-      border-radius: 3px;
+      border-radius: 6px;
       font-size: 13px;
       box-shadow: none;
       flex: 0 0 auto;
@@ -297,30 +344,27 @@ def _admin_invitation_accept_html(
       text-align: center;
       font-size: 22px;
       font-weight: 800;
-      border-radius: 3px;
+      border-radius: 6px;
     }}
     button {{
-      width: 100%;
+      width: min(250px, 100%);
       height: 42px;
-      margin-top: 14px;
+      margin: 19px auto 0;
       border: 0;
-      border-radius: 3px;
+      border-radius: 6px;
+      padding: 0 24px;
       background: linear-gradient(135deg, #2563eb, #9333ea);
       color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-size: 15px;
       font-weight: 700;
       cursor: pointer;
       box-shadow: none;
     }}
-    .button-secondary {{
-      margin-top: 10px;
-      border: 1px solid #cbd5e1;
-      background: #fff;
-      color: #334155;
-      box-shadow: none;
-    }}
     .alert {{
-      border-radius: 3px;
+      border-radius: 6px;
       margin: 12px 0;
       padding: 10px 12px;
       line-height: 1.45;
@@ -341,6 +385,9 @@ def _admin_invitation_accept_html(
       border: 1px solid #bfdbfe;
     }}
     @media (max-width: 520px) {{
+      body {{
+        padding: 10vh 14px 16px;
+      }}
       main {{
         padding: 18px;
       }}
@@ -363,21 +410,40 @@ def _admin_invitation_accept_html(
 </head>
 <body>
   <main>
-    <h1>{step_title}</h1>
-    <p>{step_description}</p>
+    <div class="form-header">
+      <img class="form-logo" src="/assets/email-logo.png" alt="QuizzVN" />
+      <h1>{step_title}</h1>
+      <p>{step_description}</p>
+    </div>
     {error_html}
     {success_html}
     {notice_html}
     {form_html}
   </main>
   <script>
+    const otpForm = document.querySelector("[data-otp-form]");
     const otpInputs = Array.from(document.querySelectorAll("[data-otp-input]"));
+    let otpSubmitting = false;
+
+    const submitOtpIfComplete = () => {{
+      if (!otpForm || otpSubmitting || !otpInputs.length) {{
+        return;
+      }}
+      const isComplete = otpInputs.every((input) => /^\\d$/.test(input.value));
+      if (!isComplete) {{
+        return;
+      }}
+      otpSubmitting = true;
+      otpForm.requestSubmit();
+    }};
+
     otpInputs.forEach((input, index) => {{
       input.addEventListener("input", () => {{
         input.value = input.value.replace(/\\D/g, "").slice(0, 1);
         if (input.value && otpInputs[index + 1]) {{
           otpInputs[index + 1].focus();
         }}
+        submitOtpIfComplete();
       }});
       input.addEventListener("keydown", (event) => {{
         if (event.key === "Backspace" && !input.value && otpInputs[index - 1]) {{
@@ -394,6 +460,7 @@ def _admin_invitation_accept_html(
         }});
         const nextIndex = Math.min(value.length, otpInputs.length - 1);
         otpInputs[nextIndex]?.focus();
+        submitOtpIfComplete();
       }});
     }});
     otpInputs[0]?.focus();
@@ -404,8 +471,12 @@ def _admin_invitation_accept_html(
       const emailValue = document.querySelector('input[name="email"]')?.value || "";
       const cooldownKey = `admin-invitation-otp-cooldown:${{tokenValue}}:${{emailValue}}`;
       const cooldownSeconds = Number(sendCodeButton.dataset.cooldownSeconds || "60");
-      const defaultLabel = sendCodeButton.textContent || "Gửi mã";
+      const defaultLabel = sendCodeButton.textContent || "Gửi lại mã OTP";
       let cooldownTimer = null;
+
+      if (sendCodeButton.dataset.autoCooldown === "true" && !sessionStorage.getItem(cooldownKey)) {{
+        sessionStorage.setItem(cooldownKey, String(Date.now() + cooldownSeconds * 1000));
+      }}
 
       const getRemainingSeconds = () => {{
         const expiresAt = Number(sessionStorage.getItem(cooldownKey) || "0");
@@ -469,6 +540,7 @@ def post_admin_invitation_profile_form(
     phone: str = Form(...),
     date_of_birth: str = Form(...),
     gender: str = Form(...),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
     if not full_name.strip():
         return HTMLResponse(
@@ -523,6 +595,30 @@ def post_admin_invitation_profile_form(
             status_code=400,
         )
 
+    try:
+        send_admin_invitation_otp(
+            db,
+            token,
+            email,
+            full_name,
+            phone,
+            date_of_birth,
+            gender,
+        )
+    except HTTPException as exc:
+        return HTMLResponse(
+            _admin_invitation_accept_html(
+                token,
+                email,
+                error=_admin_invitation_form_error(exc.detail),
+                full_name=full_name,
+                phone=phone,
+                date_of_birth=date_of_birth,
+                gender=gender,
+            ),
+            status_code=exc.status_code,
+        )
+
     return HTMLResponse(
         _admin_invitation_accept_html(
             token,
@@ -553,6 +649,7 @@ def post_admin_invitation_edit_profile_form(
             phone=phone,
             date_of_birth=date_of_birth,
             gender=gender,
+            otp_just_sent=True,
         )
     )
 
@@ -583,7 +680,7 @@ def post_admin_invitation_send_code_form(
                 token,
                 email,
                 step="otp",
-                error=str(exc.detail),
+                error=_admin_invitation_form_error(exc.detail),
                 full_name=full_name,
                 phone=phone,
                 date_of_birth=date_of_birth,
@@ -597,11 +694,11 @@ def post_admin_invitation_send_code_form(
             token,
             email,
             step="otp",
-            notice="Đã gửi mã OTP về email. Vui lòng kiểm tra hộp thư đến hoặc thư rác.",
             full_name=full_name,
             phone=phone,
             date_of_birth=date_of_birth,
             gender=gender,
+            otp_just_sent=True,
         )
     )
 
@@ -649,7 +746,7 @@ def post_admin_invitation_accept_form(
                 token,
                 email,
                 step="otp",
-                error=str(exc.detail),
+                error=_admin_invitation_form_error(exc.detail),
                 full_name=full_name,
                 phone=phone,
                 date_of_birth=date_of_birth,
@@ -955,6 +1052,15 @@ def put_admin_permissions(
     current_administrator=Depends(get_current_administrator),
 ) -> AdminAccountResponse:
     return update_admin_permissions(db, current_administrator, user_id, payload.permissions)
+
+
+@router.post("/users/{user_id}/password-setup-link", response_model=MessageResponse)
+def post_admin_password_setup_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_administrator=Depends(get_current_administrator),
+) -> MessageResponse:
+    return send_admin_password_setup_link(db, current_administrator, user_id)
 
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)

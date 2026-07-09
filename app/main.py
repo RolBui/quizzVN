@@ -5,6 +5,7 @@ from app.routers.analytics_router import router as analytics_router
 from app.routers.ai_exam_router import router as ai_exam_router
 from app.routers.auth_router import router as auth_router
 from app.routers.chat_router import router as chat_router
+from app.routers.dev_router import router as dev_router
 from app.routers.student_router import router as student_router
 from app.routers.teacher_router import router as teacher_router
 from starlette.middleware.sessions import SessionMiddleware
@@ -27,6 +28,7 @@ from app.services.realtime_broker import broker
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 FAVICON_PATH = BASE_DIR / "admin-web" / "src" / "assets" / "logoquizzsmall.png"
+EMAIL_LOGO_PATH = BASE_DIR / "admin-web" / "src" / "assets" / "logo quizzvn.png"
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -42,6 +44,11 @@ app = FastAPI(
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> FileResponse:
     return FileResponse(FAVICON_PATH, media_type="image/png")
+
+
+@app.get("/assets/email-logo.png", include_in_schema=False)
+def email_logo() -> FileResponse:
+    return FileResponse(EMAIL_LOGO_PATH, media_type="image/png")
 
 
 app.add_middleware(
@@ -126,3 +133,4 @@ app.include_router(student_router)
 app.include_router(teacher_router)
 app.include_router(chat_router)
 app.include_router(ai_exam_router)
+app.include_router(dev_router)

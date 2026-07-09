@@ -26,13 +26,15 @@ from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.admin_invitation import AdminInvitation
 from app.models.email_verification_otp import EmailVerificationOtp
+from app.models.password_setup_token import PasswordSetupToken
 from app.models.oauth_provider import OAuthProvider
 from app.models.oauth_account import OAuthAccount
 from app.models.user_session import UserSession
 from app.services.email_verification_service import (
     send_email_verification_otp,
-    send_plain_email,
+    send_email,
 )
+from app.services.email_templates import render_action_email
 
 PENDING_ROLE_NAME = "pending"
 ADMINISTRATOR_ROLE_NAME = "administrator"
@@ -40,6 +42,7 @@ ADMIN_ROLE_NAME = "admin"
 ADMIN_ACCESS_ROLE_NAMES = (ADMINISTRATOR_ROLE_NAME, ADMIN_ROLE_NAME)
 SELECTABLE_ROLE_NAMES = ("teacher", "student")
 ADMIN_PERMISSION_KEYS = ("teachers", "students", "admins", "classes", "exams", "documents")
+ADMIN_PASSWORD_SETUP_PURPOSE = "admin_password_setup"
 logger = logging.getLogger(__name__)
 USER_STATUSES = ("active", "inactive", "blocked", "disabled", "deleted")
 
@@ -73,6 +76,7 @@ def bootstrap_auth_storage() -> None:
     UserProfile.__table__.create(bind=engine, checkfirst=True)
     AdminInvitation.__table__.create(bind=engine, checkfirst=True)
     EmailVerificationOtp.__table__.create(bind=engine, checkfirst=True)
+    PasswordSetupToken.__table__.create(bind=engine, checkfirst=True)
     _ensure_admin_invitation_columns()
     _ensure_admin_permissions_column()
     _ensure_user_status_constraint()
@@ -694,6 +698,124 @@ def _has_active_admin_access(user: User) -> bool:
     return user.status == "active" and _admin_role_name(user) in ADMIN_ACCESS_ROLE_NAMES
 
 
+def _hash_password_setup_token(token: str) -> str:
+    raw_value = f"{settings.EMAIL_VERIFICATION_SECRET}:password-setup:{token}"
+    return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
+
+
+def build_admin_password_setup_url(token: str) -> str:
+    query_string = urlencode({"token": token})
+    return f"{settings.ADMIN_WEB_URL}{settings.FRONTEND_ADMIN_PASSWORD_SETUP_PATH}?{query_string}"
+
+
+def create_admin_password_setup_token(db: Session, user: User) -> tuple[PasswordSetupToken, str]:
+    now = utc_now()
+    existing_tokens = (
+        db.query(PasswordSetupToken)
+        .filter(
+            PasswordSetupToken.user_id == user.id,
+            PasswordSetupToken.purpose == ADMIN_PASSWORD_SETUP_PURPOSE,
+            PasswordSetupToken.used_at.is_(None),
+            PasswordSetupToken.revoked_at.is_(None),
+        )
+        .all()
+    )
+    for existing_token in existing_tokens:
+        existing_token.revoked_at = now
+        existing_token.updated_at = now
+
+    raw_token = secrets.token_urlsafe(32)
+    setup_token = PasswordSetupToken(
+        user_id=user.id,
+        token_hash=_hash_password_setup_token(raw_token),
+        purpose=ADMIN_PASSWORD_SETUP_PURPOSE,
+        expires_at=now + timedelta(minutes=settings.ADMIN_PASSWORD_SETUP_EXPIRE_MINUTES),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(setup_token)
+    db.flush()
+    return setup_token, build_admin_password_setup_url(raw_token)
+
+
+def _get_password_setup_token(db: Session, token: str) -> PasswordSetupToken:
+    normalized_token = token.strip()
+    if not normalized_token:
+        raise HTTPException(status_code=400, detail="password_setup_token_required")
+
+    setup_token = (
+        db.query(PasswordSetupToken)
+        .options(joinedload(PasswordSetupToken.user).joinedload(User.role))
+        .filter(
+            PasswordSetupToken.token_hash == _hash_password_setup_token(normalized_token),
+            PasswordSetupToken.purpose == ADMIN_PASSWORD_SETUP_PURPOSE,
+        )
+        .first()
+    )
+    if not setup_token:
+        raise HTTPException(status_code=400, detail="password_setup_token_invalid")
+    return setup_token
+
+
+def _ensure_password_setup_token_usable(setup_token: PasswordSetupToken) -> User:
+    if setup_token.used_at is not None:
+        raise HTTPException(status_code=400, detail="password_setup_token_used")
+    if setup_token.revoked_at is not None:
+        raise HTTPException(status_code=400, detail="password_setup_token_revoked")
+
+    expires_at = _normalize_datetime(setup_token.expires_at)
+    if expires_at and expires_at <= utc_now():
+        raise HTTPException(status_code=400, detail="password_setup_token_expired")
+
+    user = setup_token.user
+    if not user or _admin_role_name(user) not in ADMIN_ACCESS_ROLE_NAMES:
+        raise HTTPException(status_code=400, detail="password_setup_token_invalid")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="admin_account_disabled")
+    return user
+
+
+def get_admin_password_setup_token(db: Session, token: str) -> dict:
+    setup_token = _get_password_setup_token(db, token)
+    user = _ensure_password_setup_token_usable(setup_token)
+    return {
+        "message": "Password setup token is valid",
+        "email": user.email,
+        "full_name": user.full_name,
+        "expires_at": setup_token.expires_at,
+    }
+
+
+def complete_admin_password_setup(
+    db: Session,
+    token: str,
+    new_password: str,
+    confirm_password: str,
+) -> dict:
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="password_setup_password_mismatch")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="password_setup_password_too_short")
+
+    setup_token = _get_password_setup_token(db, token)
+    user = _ensure_password_setup_token_usable(setup_token)
+
+    now = utc_now()
+    user.password_hash = hash_password(new_password)
+    if user.auth_type == "oauth":
+        user.auth_type = "mixed"
+    elif not user.auth_type:
+        user.auth_type = "local"
+    user.email_verified = True
+    user.is_first_login = False
+    user.updated_at = now
+    setup_token.used_at = now
+    setup_token.updated_at = now
+    db.commit()
+
+    return {"message": "Password has been set successfully"}
+
+
 def _hash_admin_invitation_token(token: str) -> str:
     raw_value = f"{settings.EMAIL_VERIFICATION_SECRET}:admin-invitation:{token}"
     return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
@@ -706,13 +828,21 @@ def _build_admin_invitation_url(token: str, email: str) -> str:
 
 def _send_admin_oauth_invitation_email(invitation: AdminInvitation, token: str) -> None:
     invitation_url = _build_admin_invitation_url(token, invitation.email)
-    subject = f"Admin access verification for {settings.APP_NAME}"
-    body = (
-        f"You requested admin access for {settings.APP_NAME} using Google login.\n\n"
-        f"Open this link to verify your email with OTP and submit the admin access request:\n{invitation_url}\n\n"
-        "If you did not request this, you can ignore this email."
+    rendered = render_action_email(
+        app_name=settings.EMAIL_FROM_NAME or settings.APP_NAME,
+        recipient_name=invitation.full_name,
+        recipient_email=invitation.email,
+        subject=f"Xác thực quyền quản trị {settings.APP_NAME}",
+        title="Xác thực quyền quản trị",
+        intro_lines=[
+            f"Bạn vừa yêu cầu quyền quản trị cho {settings.APP_NAME} bằng Google.",
+            "Bấm nút bên dưới để xác thực email bằng OTP và gửi yêu cầu cho Administrator duyệt.",
+        ],
+        button_label="Mở trang xác thực",
+        button_url=invitation_url,
+        brand_logo_url=settings.EMAIL_BRAND_LOGO_URL,
     )
-    send_plain_email(invitation.email, subject, body)
+    send_email(invitation.email, rendered.subject, rendered.text_body, rendered.html_body)
 
 
 def _create_or_refresh_admin_oauth_invitation(db: Session, user: User) -> tuple[AdminInvitation, str]:
@@ -734,7 +864,7 @@ def _create_or_refresh_admin_oauth_invitation(db: Session, user: User) -> tuple[
 
     token = secrets.token_urlsafe(32)
     placeholder_otp_hash = hash_password(secrets.token_urlsafe(16))
-    expires_at = utc_now() + timedelta(days=7)
+    expires_at = utc_now() + timedelta(hours=settings.ADMIN_INVITATION_LINK_EXPIRE_HOURS)
     profile = user.profile or get_user_profile(db, user.id)
 
     if invitation:
