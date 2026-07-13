@@ -400,6 +400,8 @@ export interface AdminExam {
   teacher_id: number | null;
   teacher_name: string | null;
   duration_minutes: number;
+  start_time: string | null;
+  end_time: string | null;
   total_points: number;
   question_count: number;
   attempt_count: number;
@@ -413,6 +415,9 @@ export interface AdminExam {
 export interface AdminExamOverview {
   metrics: AdminMetric[];
   items: AdminExam[];
+  total: number;
+  limit: number | null;
+  offset: number;
 }
 
 export interface AdminDocument {
@@ -758,7 +763,17 @@ export const adminApi = {
   deleteStudent: (studentId: number) =>
     apiDelete<{ message: string }>(`/admin/students/${studentId}`),
   getClassesOverview: () => apiGet<AdminClassOverview>("/admin/classes"),
-  getExamsOverview: () => apiGet<AdminExamOverview>("/admin/exams"),
+  getExamsOverview: (params?: { limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) {
+      searchParams.set("limit", String(params.limit));
+    }
+    if (params?.offset) {
+      searchParams.set("offset", String(params.offset));
+    }
+    const query = searchParams.toString();
+    return apiGet<AdminExamOverview>(`/admin/exams${query ? `?${query}` : ""}`);
+  },
   deleteExam: (examId: number) =>
     apiDelete<{ message: string }>(`/admin/exams/${examId}`),
   getDocumentsOverview: () => apiGet<AdminDocumentOverview>("/admin/documents"),

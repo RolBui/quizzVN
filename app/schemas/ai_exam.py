@@ -270,6 +270,8 @@ class SaveAIExamToQuizRequest(BaseModel):
     scope: AIExamSaveScope = "system"
     classroom_id: int | None = None
     duration_minutes: int | None = Field(default=None, ge=1, le=300)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     is_published: bool = False
     is_active: bool = True
 

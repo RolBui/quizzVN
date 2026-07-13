@@ -122,6 +122,8 @@ class TeacherExamSummarySchema(BaseModel):
     classroom_id: int | None = None
     classroom_name: str | None = None
     duration_minutes: int
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     total_points: float
     question_count: int
     attempt_count: int
@@ -133,6 +135,9 @@ class TeacherExamSummarySchema(BaseModel):
 
 class TeacherExamListResponse(BaseModel):
     items: list[TeacherExamSummarySchema]
+    total: int = 0
+    limit: int | None = None
+    offset: int = 0
 
 
 class TeacherExamDetailSchema(TeacherExamSummarySchema):
@@ -231,6 +236,8 @@ class CreateTeacherExamRequest(BaseModel):
     grade: str = Field(min_length=1, max_length=50)
     image_url: str | None = None
     duration_minutes: int = Field(default=30, ge=1)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     is_published: bool = False
     is_active: bool = False
     questions: list[TeacherExamQuestionInput]
@@ -244,6 +251,8 @@ class UpdateTeacherExamRequest(BaseModel):
     scope: TeacherScope | None = None
     classroom_id: int | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     is_published: bool | None = None
     is_active: bool | None = None
     questions: list[TeacherExamQuestionInput] | None = None
@@ -255,6 +264,8 @@ class UpdateTeacherClassExamRequest(BaseModel):
     grade: str | None = Field(default=None, min_length=1, max_length=50)
     image_url: str | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     is_published: bool | None = None
     is_active: bool | None = None
     questions: list[TeacherExamQuestionInput] | None = None

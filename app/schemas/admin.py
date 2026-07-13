@@ -248,6 +248,8 @@ class AdminExamSchema(BaseModel):
     teacher_id: int | None = None
     teacher_name: str | None = None
     duration_minutes: int
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     total_points: float
     question_count: int
     attempt_count: int
@@ -261,6 +263,9 @@ class AdminExamSchema(BaseModel):
 class AdminExamOverviewResponse(BaseModel):
     metrics: list[AdminMetricSchema]
     items: list[AdminExamSchema]
+    total: int = 0
+    limit: int | None = None
+    offset: int = 0
 
 
 class AdminDocumentSchema(BaseModel):

@@ -907,11 +907,13 @@ def get_classes_overview(
 
 @router.get("/exams", response_model=AdminExamOverviewResponse)
 def get_exams_overview(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ) -> AdminExamOverviewResponse:
     _ = current_admin
-    return get_admin_exams_overview(db)
+    return get_admin_exams_overview(db, limit, offset)
 
 
 @router.delete("/exams/{exam_id}", response_model=MessageResponse)
