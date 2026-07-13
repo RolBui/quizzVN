@@ -1,6 +1,7 @@
 import secrets
 import string
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -33,6 +34,28 @@ TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 PASSING_SCORE_PERCENT = 50.0
 DEFAULT_EXAM_GRADE = "Chưa phân loại"
+
+
+def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _validate_exam_schedule(
+    start_time: datetime | None,
+    end_time: datetime | None,
+) -> tuple[datetime | None, datetime | None]:
+    normalized_start = _normalize_exam_datetime(start_time)
+    normalized_end = _normalize_exam_datetime(end_time)
+    if normalized_start and normalized_end and normalized_start >= normalized_end:
+        raise HTTPException(
+            status_code=400,
+            detail="start_time must be before end_time",
+        )
+    return normalized_start, normalized_end
 
 
 def require_teacher_user(db: Session, user_id: int) -> User:
@@ -453,6 +476,8 @@ def list_teacher_documents(
     teacher: User,
     scope: str,
     classroom_id: int | None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
 
@@ -646,6 +671,8 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "classroom_id": exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
         "duration_minutes": exam.duration_minutes,
+        "start_time": exam.start_time,
+        "end_time": exam.end_time,
         "total_points": _get_exam_total_points(exam),
         "question_count": len(exam.questions),
         "attempt_count": len(exam.attempts),
@@ -744,8 +771,14 @@ def list_teacher_exams(
     else:
         query = query.filter(Exam.classroom_id == classroom.id)
 
-    exams = query.order_by(Exam.created_at.desc()).all()
-    return {"items": [_serialize_exam_summary(exam) for exam in exams]}
+    total = int(query.count())
+    exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "items": [_serialize_exam_summary(exam) for exam in exams],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def get_teacher_exam_detail(db: Session, teacher: User, exam_id: int) -> dict:
@@ -1155,6 +1188,8 @@ def create_teacher_exam(
     scope: str,
     classroom_id: int | None,
     duration_minutes: int,
+    start_time: datetime | None,
+    end_time: datetime | None,
     is_published: bool,
     is_active: bool,
     questions: list[dict],
@@ -1166,6 +1201,7 @@ def create_teacher_exam(
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
 
+    normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
     normalized_questions = _validate_exam_questions(questions)
 
     exam = Exam(
@@ -1177,6 +1213,8 @@ def create_teacher_exam(
         scope=scope,
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
+        start_time=normalized_start_time,
+        end_time=normalized_end_time,
         total_points=0.0,
         is_published=is_published,
         is_active=is_active,
@@ -1205,6 +1243,10 @@ def update_teacher_exam(
     scope: str | None,
     classroom_id: int | None,
     duration_minutes: int | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
+    update_start_time: bool,
+    update_end_time: bool,
     is_published: bool | None,
     is_active: bool | None,
     questions: list[dict] | None,
@@ -1236,6 +1278,16 @@ def update_teacher_exam(
 
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes
+
+    if update_start_time or update_end_time:
+        normalized_start_time, normalized_end_time = _validate_exam_schedule(
+            start_time if update_start_time else exam.start_time,
+            end_time if update_end_time else exam.end_time,
+        )
+        if update_start_time:
+            exam.start_time = normalized_start_time
+        if update_end_time:
+            exam.end_time = normalized_end_time
 
     if is_published is not None:
         exam.is_published = is_published
@@ -1275,6 +1327,10 @@ def update_teacher_class_exam(
     grade: str | None,
     image_url: str | None,
     duration_minutes: int | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
+    update_start_time: bool,
+    update_end_time: bool,
     is_published: bool | None,
     is_active: bool | None,
     questions: list[dict] | None,
@@ -1291,6 +1347,10 @@ def update_teacher_class_exam(
         SCOPE_CLASS,
         class_id,
         duration_minutes,
+        start_time,
+        end_time,
+        update_start_time,
+        update_end_time,
         is_published,
         is_active,
         questions,

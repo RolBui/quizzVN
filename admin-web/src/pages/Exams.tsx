@@ -18,6 +18,9 @@ import {
 const fallbackOverview: AdminExamOverview = {
   metrics: [],
   items: [],
+  total: 0,
+  limit: null,
+  offset: 0,
 };
 
 export function Exams() {
@@ -102,7 +105,7 @@ export function Exams() {
     });
   }, [overview.items, query, scope]);
 
-  const totalExamCount = overview.items.length;
+  const totalExamCount = overview.total || overview.items.length;
   const submittedMetric = overview.metrics.find(
     (metric) => metric.key === "submitted_attempts",
   );

@@ -78,6 +78,8 @@ class StudentExamSummarySchema(BaseModel):
     classroom_id: int | None = None
     classroom_name: str | None = None
     duration_minutes: int
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     total_points: float
     question_count: int
     is_active: bool
@@ -85,6 +87,9 @@ class StudentExamSummarySchema(BaseModel):
 
 class StudentExamListResponse(BaseModel):
     items: list[StudentExamSummarySchema]
+    total: int = 0
+    limit: int | None = None
+    offset: int = 0
 
 
 class StudentExamDetailSchema(StudentExamSummarySchema):

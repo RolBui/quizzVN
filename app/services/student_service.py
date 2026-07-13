@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 import unicodedata
@@ -30,6 +31,14 @@ PASSING_SCORE_PERCENT = 50.0
 DEFAULT_EXAM_GRADE = "Chưa phân loại"
 
 
+def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def bootstrap_student_learning_storage() -> None:
     Classroom.__table__.create(bind=engine, checkfirst=True)
     ClassroomMembership.__table__.create(bind=engine, checkfirst=True)
@@ -57,6 +66,8 @@ def _ensure_student_learning_columns() -> None:
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS total_points NUMERIC(10, 4) DEFAULT 0",
         "ALTER TABLE exams ALTER COLUMN total_points TYPE NUMERIC(10, 4) USING total_points::numeric",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE",
@@ -371,6 +382,8 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "classroom_id": exam.classroom_id,
         "classroom_name": classroom.name if classroom else None,
         "duration_minutes": exam.duration_minutes,
+        "start_time": exam.start_time,
+        "end_time": exam.end_time,
         "total_points": _get_exam_total_points(exam),
         "question_count": len(exam.questions),
         "is_active": exam.is_active,
@@ -448,7 +461,14 @@ def _normalize_text_answer(value: str | None) -> str:
     return normalized
 
 
-def list_student_exams(db: Session, student: User, scope: str, classroom_id: int | None) -> dict:
+def list_student_exams(
+    db: Session,
+    student: User,
+    scope: str,
+    classroom_id: int | None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
     _validate_scope(scope, classroom_id)
 
     query = (
@@ -465,8 +485,14 @@ def list_student_exams(db: Session, student: User, scope: str, classroom_id: int
     if scope == SCOPE_SYSTEM:
         query = query.filter(Exam.classroom_id.is_(None))
 
-    exams = query.order_by(Exam.created_at.desc()).all()
-    return {"items": [_serialize_exam_summary(exam) for exam in exams]}
+    total = int(query.count())
+    exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "items": [_serialize_exam_summary(exam) for exam in exams],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def list_student_exam_results(
@@ -621,6 +647,14 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
     exam = _get_visible_exam(db, student, exam_id)
     if not exam.is_active:
         raise HTTPException(status_code=400, detail="Exam is not active")
+
+    now = utc_now()
+    start_time = _normalize_exam_datetime(exam.start_time)
+    end_time = _normalize_exam_datetime(exam.end_time)
+    if start_time and now < start_time:
+        raise HTTPException(status_code=400, detail="Bài thi chưa đến thời gian làm.")
+    if end_time and now >= end_time:
+        raise HTTPException(status_code=400, detail="Bài thi đã hết thời gian làm.")
 
     existing_attempt = (
         db.query(ExamAttempt)

@@ -17,6 +17,8 @@ class Exam(Base):
     scope = Column(String, nullable=False)
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True)
     duration_minutes = Column(Integer, nullable=False, default=30)
+    start_time = Column(DateTime(timezone=True), nullable=True)
+    end_time = Column(DateTime(timezone=True), nullable=True)
     total_points = Column(Numeric(10, 4, asdecimal=False), nullable=False, default=0)
     is_published = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)

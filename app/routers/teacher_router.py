@@ -271,19 +271,23 @@ def delete_teacher_document_route(
 
 @router.get("/system/exams", response_model=TeacherExamListResponse)
 def get_teacher_system_exams(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
-    return list_teacher_exams(db, current_teacher, "system", None)
+    return list_teacher_exams(db, current_teacher, "system", None, limit, offset)
 
 
 @router.get("/classes/{class_id}/exams", response_model=TeacherExamListResponse)
 def get_teacher_class_exams(
     class_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
-    return list_teacher_exams(db, current_teacher, "class", class_id)
+    return list_teacher_exams(db, current_teacher, "class", class_id, limit, offset)
 
 
 @router.get("/classes/{class_id}/exams/{exam_id}", response_model=TeacherExamDetailSchema)
@@ -351,6 +355,8 @@ def post_teacher_system_exam(
         "system",
         None,
         payload.duration_minutes,
+        payload.start_time,
+        payload.end_time,
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
@@ -374,6 +380,8 @@ def post_teacher_class_exam(
         "class",
         class_id,
         payload.duration_minutes,
+        payload.start_time,
+        payload.end_time,
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
@@ -399,6 +407,10 @@ def put_teacher_class_exam(
         payload.grade,
         payload.image_url,
         payload.duration_minutes,
+        payload.start_time,
+        payload.end_time,
+        "start_time" in payload.model_fields_set,
+        "end_time" in payload.model_fields_set,
         payload.is_published,
         payload.is_active,
         questions,
@@ -424,6 +436,10 @@ def put_teacher_exam(
         payload.scope,
         payload.classroom_id,
         payload.duration_minutes,
+        payload.start_time,
+        payload.end_time,
+        "start_time" in payload.model_fields_set,
+        "end_time" in payload.model_fields_set,
         payload.is_published,
         payload.is_active,
         questions,

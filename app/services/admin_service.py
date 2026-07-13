@@ -154,6 +154,14 @@ def _crm_period_window(now: datetime, period: str) -> dict:
 
 
 def _count_active_users_between(db: Session, start: datetime, end: datetime) -> int:
+    total = int(db.query(func.count(Exam.id)).scalar() or 0)
+    active_exam_count = int(
+        db.query(func.count(Exam.id))
+        .filter(Exam.is_published.is_(True), Exam.is_active.is_(True))
+        .scalar()
+        or 0
+    )
+
     rows = (
         db.query(UserSession.user_id, UserSession.created_at, UserSession.last_used_at)
         .join(User, User.id == UserSession.user_id)
@@ -922,7 +930,7 @@ def get_admin_classes_overview(db: Session) -> dict:
     }
 
 
-def get_admin_exams_overview(db: Session) -> dict:
+def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> dict:
     question_counts = _count_by(
         db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
         .group_by(ExamQuestion.exam_id)
@@ -959,6 +967,8 @@ def get_admin_exams_overview(db: Session) -> dict:
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
+            Exam.start_time,
+            Exam.end_time,
             Exam.total_points,
             Exam.is_published,
             Exam.is_active,
@@ -970,6 +980,8 @@ def get_admin_exams_overview(db: Session) -> dict:
         .outerjoin(User, User.id == Exam.created_by_user_id)
         .outerjoin(Classroom, Classroom.id == Exam.classroom_id)
         .order_by(Exam.created_at.desc(), Exam.id.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
@@ -990,7 +1002,7 @@ def get_admin_exams_overview(db: Session) -> dict:
         "metrics": [
             _metric("average_score", "Điểm trung bình", completed_average_value, suffix="%", subtext="trên bài đã nộp"),
             _metric("submitted_attempts", "Lượt hoàn thành", total_submitted, subtext="bài làm đã nộp"),
-            _metric("active_exams", "Bài thi đang mở", sum(1 for row in rows if row.is_published and row.is_active), subtext="đã xuất bản và đang mở"),
+            _metric("active_exams", "Bài thi đang mở", active_exam_count, subtext="đã xuất bản và đang mở"),
         ],
         "items": [
             {
@@ -1004,6 +1016,8 @@ def get_admin_exams_overview(db: Session) -> dict:
                 "teacher_id": row.created_by_user_id,
                 "teacher_name": row.teacher_name,
                 "duration_minutes": row.duration_minutes,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
                 "total_points": row.total_points,
                 "question_count": question_counts.get(row.id, 0),
                 "attempt_count": attempt_counts.get(row.id, 0),
@@ -1015,6 +1029,9 @@ def get_admin_exams_overview(db: Session) -> dict:
             }
             for row in rows
         ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -2584,6 +2601,8 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
+            Exam.start_time,
+            Exam.end_time,
             Exam.total_points,
             Exam.is_published,
             Exam.is_active,
@@ -2668,6 +2687,8 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
                 "teacher_id": teacher.id,
                 "teacher_name": teacher.full_name,
                 "duration_minutes": exam.duration_minutes,
+                "start_time": exam.start_time,
+                "end_time": exam.end_time,
                 "total_points": exam.total_points,
                 "question_count": exam_question_counts.get(exam.id, 0),
                 "attempt_count": exam_attempt_counts.get(exam.id, 0),
@@ -2770,6 +2791,8 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
+            Exam.start_time,
+            Exam.end_time,
             Exam.total_points,
             Exam.is_published,
             Exam.is_active,
@@ -2901,6 +2924,8 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
                 "teacher_id": exam.created_by_user_id,
                 "teacher_name": teachers[exam.created_by_user_id].full_name if exam.created_by_user_id in teachers else None,
                 "duration_minutes": exam.duration_minutes,
+                "start_time": exam.start_time,
+                "end_time": exam.end_time,
                 "total_points": exam.total_points,
                 "question_count": exam_question_counts.get(exam.id, 0),
                 "attempt_count": exam_attempt_counts.get(exam.id, 0),

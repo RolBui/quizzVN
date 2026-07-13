@@ -394,6 +394,8 @@ def save_ai_exam_job_to_quiz(
         scope=data.get("scope") or "system",
         classroom_id=data.get("classroom_id"),
         duration_minutes=data.get("duration_minutes") or job.duration_minutes,
+        start_time=data.get("start_time"),
+        end_time=data.get("end_time"),
         is_published=bool(data.get("is_published", False)),
         is_active=bool(data.get("is_active", True)),
         questions=questions,
