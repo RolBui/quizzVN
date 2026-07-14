@@ -82,6 +82,12 @@ class StudentExamSummarySchema(BaseModel):
     end_time: datetime | None = None
     total_points: float
     question_count: int
+    creator_id: int | None = None
+    creator_name: str = "Hệ thống"
+    creator_type: str = "system"
+    source: str = "system"
+    source_label: str = "Hệ thống tạo"
+    is_ai_generated: bool = False
     is_active: bool
 
 

@@ -127,6 +127,12 @@ class TeacherExamSummarySchema(BaseModel):
     total_points: float
     question_count: int
     attempt_count: int
+    creator_id: int | None = None
+    creator_name: str = "Hệ thống"
+    creator_type: str = "system"
+    source: str = "system"
+    source_label: str = "Hệ thống tạo"
+    is_ai_generated: bool = False
     is_published: bool
     is_active: bool
     created_at: datetime

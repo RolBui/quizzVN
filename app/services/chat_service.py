@@ -14,7 +14,6 @@ from app.models.user_session import UserSession
 from app.services.auth_service import (
     ADMINISTRATOR_ROLE_NAME,
     ADMIN_ROLE_NAME,
-    normalize_admin_permissions,
 )
 from app.services.media_service import upload_chat_file
 
@@ -95,15 +94,7 @@ def _admin_visible_contact_role_names(current_user: User) -> set[str] | None:
     if role_name != ADMIN_ROLE_NAME:
         return None
 
-    permissions = set(normalize_admin_permissions(current_user.admin_permissions))
-    visible_role_names = {ADMINISTRATOR_ROLE_NAME}
-    if "admins" in permissions:
-        visible_role_names.add(ADMIN_ROLE_NAME)
-    if "teachers" in permissions:
-        visible_role_names.add("teacher")
-    if "students" in permissions:
-        visible_role_names.add("student")
-    return visible_role_names
+    return {ADMINISTRATOR_ROLE_NAME}
 
 
 def _apply_contact_scope(users_query, current_user: User):

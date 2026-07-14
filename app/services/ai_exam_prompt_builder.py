@@ -87,6 +87,27 @@ Return JSON in this exact structure:
 """
 
 
+def build_exam_batch_generation_prompt(
+    data: dict[str, Any],
+    batch_index: int,
+    batch_count: int,
+    existing_questions: list[dict[str, Any]],
+) -> str:
+    base_prompt = build_exam_generation_prompt(data)
+    existing_json = json.dumps(existing_questions, ensure_ascii=False, indent=2)
+
+    return f"""{base_prompt}
+
+Batch generation context:
+- This is batch {batch_index}/{batch_count} for a larger exam.
+- Return only this batch's {data["question_count"]} questions.
+- Do not mention batch numbers in question content, answers, or explanations.
+- Keep style and difficulty consistent with the full exam.
+
+Existing draft questions to avoid repeating:
+{existing_json}
+"""
+
 def build_exam_repair_prompt(
     original_prompt: str,
     previous_payload: dict[str, Any],

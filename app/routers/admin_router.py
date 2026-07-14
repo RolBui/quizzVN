@@ -14,6 +14,9 @@ from app.schemas.admin import (
     AdminDocumentOverviewResponse,
     AdminDocumentResponse,
     AdminExamOverviewResponse,
+    AdminExamResponse,
+    AdminImageListResponse,
+    AdminImageUploadResponse,
     AdminInvitationListResponse,
     AdminInvitationResponse,
     AdminStudentDetailResponse,
@@ -23,6 +26,7 @@ from app.schemas.admin import (
     ApproveAdminInvitationRequest,
     ApproveAdminInvitationResponse,
     CreateAdminAccountRequest,
+    CreateAdminExamRequest,
     CreateAdminInvitationRequest,
     RejectAdminInvitationRequest,
     ResetAdminUserPasswordRequest,
@@ -35,6 +39,7 @@ from app.schemas.analytics import AdminWebRealtimeResponse, AdminWebTrafficOverv
 from app.schemas.common import MessageResponse
 from app.services.admin_service import (
     create_admin_account,
+    create_admin_exam,
     create_admin_invitation,
     create_admin_uploaded_document,
     delete_admin_account,
@@ -42,6 +47,7 @@ from app.services.admin_service import (
     delete_admin_student,
     delete_admin_teacher,
     approve_admin_invitation,
+    clear_admin_invitations,
     get_admin_classes_overview,
     get_admin_crm_overview,
     get_admin_documents_overview,
@@ -63,6 +69,7 @@ from app.services.admin_service import (
     update_admin_teacher_profile,
 )
 from app.services.analytics_service import get_web_realtime_overview, get_web_traffic_overview
+from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -916,6 +923,30 @@ def get_exams_overview(
     return get_admin_exams_overview(db, limit, offset)
 
 
+@router.post("/exams", response_model=AdminExamResponse)
+def post_admin_exam(
+    payload: CreateAdminExamRequest,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamResponse:
+    return create_admin_exam(
+        db,
+        current_admin,
+        payload.title,
+        payload.description,
+        payload.grade,
+        payload.image_url,
+        payload.scope,
+        payload.classroom_id,
+        payload.duration_minutes,
+        payload.start_time,
+        payload.end_time,
+        payload.is_published,
+        payload.is_active,
+        [question.model_dump() for question in payload.questions],
+    )
+
+
 @router.delete("/exams/{exam_id}", response_model=MessageResponse)
 def delete_exam_route(
     exam_id: int,
@@ -923,6 +954,37 @@ def delete_exam_route(
     current_administrator=Depends(get_current_administrator),
 ) -> MessageResponse:
     return delete_admin_exam(db, current_administrator, exam_id)
+
+
+@router.get("/image", response_model=AdminImageListResponse)
+def get_admin_images(
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminImageListResponse:
+    items = list_uploaded_images(db, current_admin.id, category="exam")
+    return {"items": items}
+
+
+@router.post("/image", response_model=AdminImageUploadResponse)
+def post_admin_image(
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminImageUploadResponse:
+    return {
+        "message": "Image uploaded successfully",
+        "image": save_exam_image(db, current_admin.id, image),
+    }
+
+
+@router.delete("/image/{image_id}", response_model=MessageResponse)
+def delete_admin_image_route(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> MessageResponse:
+    delete_uploaded_image(db, current_admin.id, image_id)
+    return {"message": "Image deleted successfully"}
 
 
 @router.get("/documents", response_model=AdminDocumentOverviewResponse)
@@ -1034,6 +1096,14 @@ def post_admin_invitation_rejection(
     current_administrator=Depends(get_current_administrator),
 ) -> AdminInvitationResponse:
     return reject_admin_invitation(db, current_administrator, invitation_id, payload.reason)
+
+
+@router.delete("/invitations", response_model=MessageResponse)
+def delete_admin_invitations(
+    db: Session = Depends(get_db),
+    current_administrator=Depends(get_current_administrator),
+) -> MessageResponse:
+    return clear_admin_invitations(db, current_administrator)
 
 
 @router.post("/users", response_model=AdminAccountResponse)

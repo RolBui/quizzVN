@@ -319,28 +319,28 @@ export function Teachers() {
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-outline-variant bg-surface-container-lowest flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="relative w-full max-w-md">
+        <div className="p-4 border-b border-surface-variant bg-surface-container-lowest flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full md:w-96">
             <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Tìm giáo viên theo tên, mã hoặc email..."
-              className="w-full pl-9 pr-4 py-2 bg-surface-container-low border border-outline-variant rounded-md text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+              className="w-full pl-9 pr-4 py-2 bg-surface-container-low rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none placeholder:text-outline"
             />
           </div>
-          <div className="relative w-full md:w-48">
+          <div className="relative w-full sm:w-40">
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
-              className="w-full appearance-none bg-surface-container-low border border-outline-variant text-on-surface text-sm py-2 pl-3 pr-10 rounded-md focus:outline-none focus:border-primary cursor-pointer"
+              className="w-full appearance-none bg-surface-container-low border border-surface-variant text-on-surface text-sm py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-primary cursor-pointer"
             >
             <option value="all">Tất cả trạng thái</option>
             <option value="online">Hoạt động</option>
             <option value="offline">Không hoạt động</option>
             </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
           </div>
         </div>
 

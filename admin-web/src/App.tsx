@@ -21,6 +21,7 @@ import { Students } from './pages/Students';
 import { Admins } from './pages/Admins';
 import { Classes } from './pages/Classes';
 import { Exams } from './pages/Exams';
+import { ExamCreate } from './pages/ExamCreate';
 import { Documents } from './pages/Documents';
 import { Chat } from './pages/Chat';
 import { Analytics } from './pages/Analytics';
@@ -91,6 +92,14 @@ export default function App() {
                 element={
                   <RequireAdminPermission permission="exams">
                     <Exams />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="exams/new"
+                element={
+                  <RequireAdminPermission permission="exams">
+                    <ExamCreate />
                   </RequireAdminPermission>
                 }
               />

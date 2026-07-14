@@ -40,7 +40,17 @@ from app.services.auth_service import (
 )
 from app.services.email_templates import render_action_email, render_notice_email, render_otp_email
 from app.services.email_verification_service import send_email
+from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 from app.services.media_service import delete_document_file, upload_document_file
+from app.services.teacher_service import (
+    SCOPE_CLASS,
+    SCOPE_SYSTEM,
+    _normalize_exam_grade,
+    _replace_exam_questions,
+    _serialize_exam_detail,
+    _validate_exam_questions,
+    _validate_exam_schedule,
+)
 
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 ADMIN_MUTABLE_STATUSES = {"active", "disabled"}
@@ -154,14 +164,6 @@ def _crm_period_window(now: datetime, period: str) -> dict:
 
 
 def _count_active_users_between(db: Session, start: datetime, end: datetime) -> int:
-    total = int(db.query(func.count(Exam.id)).scalar() or 0)
-    active_exam_count = int(
-        db.query(func.count(Exam.id))
-        .filter(Exam.is_published.is_(True), Exam.is_active.is_(True))
-        .scalar()
-        or 0
-    )
-
     rows = (
         db.query(UserSession.user_id, UserSession.created_at, UserSession.last_used_at)
         .join(User, User.id == UserSession.user_id)
@@ -931,31 +933,13 @@ def get_admin_classes_overview(db: Session) -> dict:
 
 
 def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> dict:
-    question_counts = _count_by(
-        db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
-        .group_by(ExamQuestion.exam_id)
-        .all()
+    total = int(db.query(func.count(Exam.id)).scalar() or 0)
+    active_exam_count = int(
+        db.query(func.count(Exam.id))
+        .filter(Exam.is_published.is_(True), Exam.is_active.is_(True))
+        .scalar()
+        or 0
     )
-    attempt_counts = _count_by(
-        db.query(ExamAttempt.exam_id, func.count(ExamAttempt.id))
-        .group_by(ExamAttempt.exam_id)
-        .all()
-    )
-    average_scores = {
-        exam_id: round(float(value), 1) if value is not None else None
-        for exam_id, value in (
-            db.query(
-                ExamAttempt.exam_id,
-                func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)),
-            )
-            .filter(
-                ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
-                ExamAttempt.total_points > 0,
-            )
-            .group_by(ExamAttempt.exam_id)
-            .all()
-        )
-    }
 
     rows = (
         db.query(
@@ -975,15 +959,57 @@ def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> d
             Exam.created_at,
             Exam.updated_at,
             User.full_name.label("teacher_name"),
+            Role.name.label("creator_role_name"),
             Classroom.name.label("classroom_name"),
         )
         .outerjoin(User, User.id == Exam.created_by_user_id)
+        .outerjoin(Role, Role.id == User.role_id)
         .outerjoin(Classroom, Classroom.id == Exam.classroom_id)
         .order_by(Exam.created_at.desc(), Exam.id.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
+    row_ids = [row.id for row in rows]
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, row_ids)
+    question_counts = (
+        _count_by(
+            db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
+            .filter(ExamQuestion.exam_id.in_(row_ids))
+            .group_by(ExamQuestion.exam_id)
+            .all()
+        )
+        if row_ids
+        else {}
+    )
+    attempt_counts = (
+        _count_by(
+            db.query(ExamAttempt.exam_id, func.count(ExamAttempt.id))
+            .filter(ExamAttempt.exam_id.in_(row_ids))
+            .group_by(ExamAttempt.exam_id)
+            .all()
+        )
+        if row_ids
+        else {}
+    )
+    average_scores = {
+        exam_id: round(float(value), 1) if value is not None else None
+        for exam_id, value in (
+            db.query(
+                ExamAttempt.exam_id,
+                func.avg((ExamAttempt.score * 100.0) / func.nullif(ExamAttempt.total_points, 0)),
+            )
+            .filter(
+                ExamAttempt.exam_id.in_(row_ids),
+                ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+                ExamAttempt.total_points > 0,
+            )
+            .group_by(ExamAttempt.exam_id)
+            .all()
+            if row_ids
+            else []
+        )
+    }
 
     total_submitted = int(
         db.query(func.count(ExamAttempt.id))
@@ -1015,6 +1041,12 @@ def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> d
                 "classroom_name": row.classroom_name,
                 "teacher_id": row.created_by_user_id,
                 "teacher_name": row.teacher_name,
+                **build_exam_creator_metadata(
+                    creator_id=row.created_by_user_id,
+                    creator_name=row.teacher_name,
+                    creator_role_name=row.creator_role_name,
+                    is_ai_generated=row.id in ai_generated_exam_ids,
+                ),
                 "duration_minutes": row.duration_minutes,
                 "start_time": row.start_time,
                 "end_time": row.end_time,
@@ -1032,6 +1064,77 @@ def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> d
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+def create_admin_exam(
+    db: Session,
+    current_admin: User,
+    title: str,
+    description: str | None,
+    grade: str | None,
+    image_url: str | None,
+    scope: str,
+    classroom_id: int | None,
+    duration_minutes: int,
+    start_time: datetime | None,
+    end_time: datetime | None,
+    is_published: bool,
+    is_active: bool,
+    questions: list[dict],
+) -> dict:
+    normalized_title = title.strip()
+    if not normalized_title:
+        raise HTTPException(status_code=400, detail="title is required")
+
+    normalized_scope = (scope or SCOPE_SYSTEM).strip().lower()
+    if normalized_scope not in {SCOPE_SYSTEM, SCOPE_CLASS}:
+        raise HTTPException(status_code=400, detail="scope must be system or class")
+
+    classroom = None
+    if normalized_scope == SCOPE_CLASS:
+        if classroom_id is None:
+            raise HTTPException(status_code=400, detail="classroom_id is required for class exam")
+        classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+        if not classroom:
+            raise HTTPException(status_code=404, detail="Classroom not found")
+
+    normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
+    normalized_questions = _validate_exam_questions(questions)
+
+    exam = Exam(
+        created_by_user_id=current_admin.id,
+        title=normalized_title,
+        description=description.strip() if description else None,
+        grade=_normalize_exam_grade(grade),
+        image_url=image_url.strip() if image_url else None,
+        scope=normalized_scope,
+        classroom_id=classroom.id if classroom else None,
+        duration_minutes=duration_minutes,
+        start_time=normalized_start_time,
+        end_time=normalized_end_time,
+        total_points=0.0,
+        is_published=is_published,
+        is_active=is_active,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    db.add(exam)
+    exam.total_points = _replace_exam_questions(exam, normalized_questions)
+    db.commit()
+
+    created_exam = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(Exam.attempts))
+        .filter(Exam.id == exam.id)
+        .first()
+    )
+    return {
+        "message": "Exam created successfully",
+        "exam": _serialize_exam_detail(created_exam or exam, is_ai_generated=False),
     }
 
 
@@ -2204,6 +2307,20 @@ def reject_admin_invitation(
     }
 
 
+def clear_admin_invitations(
+    db: Session,
+    current_administrator: User,
+) -> dict:
+    _require_admin_scope(current_administrator, "admins")
+    deleted_count = (
+        db.query(AdminInvitation)
+        .filter(AdminInvitation.status != "pending_approval")
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"message": f"Cleared {deleted_count} admin invitation(s)"}
+
+
 def list_admin_accounts(db: Session, current_admin: User) -> dict:
     _require_admin_scope(current_admin, "admins")
 
@@ -2614,6 +2731,7 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
         .all()
     )
     exam_ids = [exam.id for exam in exams]
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, exam_ids)
     exam_question_counts = (
         _count_by(
             db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
@@ -2686,6 +2804,12 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
                 "teacher_id": teacher.id,
                 "teacher_name": teacher.full_name,
+                **build_exam_creator_metadata(
+                    creator_id=teacher.id,
+                    creator_name=teacher.full_name,
+                    creator_role_name=TEACHER_ROLE_NAME,
+                    is_ai_generated=exam.id in ai_generated_exam_ids,
+                ),
                 "duration_minutes": exam.duration_minutes,
                 "start_time": exam.start_time,
                 "end_time": exam.end_time,
@@ -2806,6 +2930,7 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
         else []
     )
     exam_ids = [exam.id for exam in exams]
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, exam_ids)
     exam_question_counts = (
         _count_by(
             db.query(ExamQuestion.exam_id, func.count(ExamQuestion.id))
@@ -2923,6 +3048,14 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
                 "teacher_id": exam.created_by_user_id,
                 "teacher_name": teachers[exam.created_by_user_id].full_name if exam.created_by_user_id in teachers else None,
+                **build_exam_creator_metadata(
+                    creator_id=exam.created_by_user_id,
+                    creator_name=teachers[exam.created_by_user_id].full_name
+                    if exam.created_by_user_id in teachers
+                    else None,
+                    creator_role_name=TEACHER_ROLE_NAME if exam.created_by_user_id in teachers else None,
+                    is_ai_generated=exam.id in ai_generated_exam_ids,
+                ),
                 "duration_minutes": exam.duration_minutes,
                 "start_time": exam.start_time,
                 "end_time": exam.end_time,

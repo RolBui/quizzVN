@@ -1,13 +1,25 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ChatNotificationsProvider } from "../../lib/chat-notifications";
 import { AppNotificationsProvider } from "../../lib/app-notifications";
 
 export default function MainLayout() {
+  const location = useLocation();
   const [isSidebarPinned, setIsSidebarPinned] = useState(true);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/exams/new")) {
+      setIsSidebarPinned(false);
+      return;
+    }
+
+    if (location.pathname === "/exams") {
+      setIsSidebarPinned(true);
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!isMobileSidebarOpen) {
