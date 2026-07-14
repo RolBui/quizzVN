@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import httpx
@@ -14,11 +15,13 @@ class GeminiAIProviderClient(AIProviderClient):
         self,
         api_key: str | None = None,
         model: str | None = None,
-        timeout_seconds: float = 60.0,
+        timeout_seconds: float | None = None,
+        retry_count: int | None = None,
     ) -> None:
         self.api_key = (api_key or settings.GEMINI_API_KEY).strip()
         self.model = (model or settings.AI_MODEL).strip()
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = float(timeout_seconds or settings.AI_PROVIDER_TIMEOUT_SECONDS)
+        self.retry_count = max(0, int(settings.AI_PROVIDER_RETRY_COUNT if retry_count is None else retry_count))
 
     def generate_exam(
         self,
@@ -78,24 +81,37 @@ class GeminiAIProviderClient(AIProviderClient):
                 "generationConfig": generation_config,
             }
 
-            try:
-                with httpx.Client(timeout=self.timeout_seconds) as client:
-                    response = client.post(
-                        url,
-                        headers={
-                            "x-goog-api-key": self.api_key,
-                        },
-                        json=request_payload,
-                    )
-                    response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                detail = _extract_gemini_error(exc.response)
-                last_error = AIProviderError(detail)
-                if _is_unsupported_generation_config_error(detail):
-                    continue
-                raise last_error from exc
-            except httpx.HTTPError as exc:
-                raise AIProviderError(f"AI provider request failed: {exc}") from exc
+            response: httpx.Response | None = None
+            for attempt in range(self.retry_count + 1):
+                try:
+                    with httpx.Client(timeout=self.timeout_seconds) as client:
+                        response = client.post(
+                            url,
+                            headers={
+                                "x-goog-api-key": self.api_key,
+                            },
+                            json=request_payload,
+                        )
+                        response.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    detail = _extract_gemini_error(exc.response)
+                    last_error = AIProviderError(detail)
+                    if _is_unsupported_generation_config_error(detail):
+                        continue
+                    raise last_error from exc
+                except httpx.TimeoutException as exc:
+                    if attempt < self.retry_count:
+                        time.sleep(min(2, attempt + 1))
+                        continue
+                    raise AIProviderError(
+                        f"AI provider request timed out after {self.timeout_seconds:g}s. Try fewer questions or retry later."
+                    ) from exc
+                except httpx.HTTPError as exc:
+                    raise AIProviderError(f"AI provider request failed: {exc}") from exc
+
+            if response is None:
+                raise AIProviderError("AI provider request failed")
 
             raw_response = response.json()
             return _extract_text(raw_response), raw_response

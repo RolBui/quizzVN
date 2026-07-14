@@ -247,6 +247,12 @@ class AdminExamSchema(BaseModel):
     classroom_name: str | None = None
     teacher_id: int | None = None
     teacher_name: str | None = None
+    creator_id: int | None = None
+    creator_name: str = "Hệ thống"
+    creator_type: str = "system"
+    source: str = "system"
+    source_label: str = "Hệ thống tạo"
+    is_ai_generated: bool = False
     duration_minutes: int
     start_time: datetime | None = None
     end_time: datetime | None = None
@@ -266,6 +272,67 @@ class AdminExamOverviewResponse(BaseModel):
     total: int = 0
     limit: int | None = None
     offset: int = 0
+
+
+AdminQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
+AdminExamScope = Literal["system", "class"]
+
+
+class AdminExamOptionInput(BaseModel):
+    option_key: str
+    option_text: str = ""
+    image_url: str | None = None
+    is_correct: bool = False
+
+
+class AdminExamQuestionInput(BaseModel):
+    question_type: AdminQuestionType = "single_choice"
+    prompt: str = ""
+    explanation: str = ""
+    image_url: str | None = None
+    order_index: int | None = None
+    points: float = Field(default=1.0, gt=0)
+    options: list[AdminExamOptionInput] = Field(default_factory=list)
+    accepted_answers: list[str] = Field(default_factory=list)
+
+
+class CreateAdminExamRequest(BaseModel):
+    title: str
+    description: str | None = None
+    grade: str = Field(min_length=1, max_length=50)
+    image_url: str | None = None
+    scope: AdminExamScope = "system"
+    classroom_id: int | None = None
+    duration_minutes: int = Field(default=30, ge=1)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    is_published: bool = False
+    is_active: bool = False
+    questions: list[AdminExamQuestionInput]
+
+
+class AdminExamResponse(BaseModel):
+    message: str
+    exam: AdminExamSchema
+
+
+class AdminUploadedImageSchema(BaseModel):
+    id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    public_id: str
+    url: str
+    created_at: str | None = None
+
+
+class AdminImageUploadResponse(BaseModel):
+    message: str
+    image: AdminUploadedImageSchema
+
+
+class AdminImageListResponse(BaseModel):
+    items: list[AdminUploadedImageSchema]
 
 
 class AdminDocumentSchema(BaseModel):

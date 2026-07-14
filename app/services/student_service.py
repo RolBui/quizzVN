@@ -15,6 +15,7 @@ from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
+from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 
 STUDENT_ROLE_NAME = "student"
 SCOPE_SYSTEM = "system"
@@ -370,7 +371,11 @@ def list_student_documents(db: Session, student: User, scope: str, classroom_id:
     return {"items": [_serialize_document(document) for document in documents]}
 
 
-def _serialize_exam_summary(exam: Exam) -> dict:
+def _is_ai_generated_exam(db: Session, exam_id: int | None) -> bool:
+    return bool(exam_id and exam_id in get_ai_generated_exam_ids(db, [exam_id]))
+
+
+def _serialize_exam_summary(exam: Exam, is_ai_generated: bool = False) -> dict:
     classroom = exam.classroom
     return {
         "id": exam.id,
@@ -386,6 +391,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "end_time": exam.end_time,
         "total_points": _get_exam_total_points(exam),
         "question_count": len(exam.questions),
+        **build_exam_creator_metadata(exam.created_by, is_ai_generated=is_ai_generated),
         "is_active": exam.is_active,
     }
 
@@ -474,6 +480,7 @@ def list_student_exams(
     query = (
         db.query(Exam)
         .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
         .options(joinedload(Exam.questions))
         .filter(Exam.scope == scope, Exam.is_published.is_(True))
     )
@@ -487,8 +494,12 @@ def list_student_exams(
 
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, [exam.id for exam in exams])
     return {
-        "items": [_serialize_exam_summary(exam) for exam in exams],
+        "items": [
+            _serialize_exam_summary(exam, is_ai_generated=exam.id in ai_generated_exam_ids)
+            for exam in exams
+        ],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -551,6 +562,7 @@ def _get_visible_exam(db: Session, student: User, exam_id: int) -> Exam:
     exam = (
         db.query(Exam)
         .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
         .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
         .filter(Exam.id == exam_id)
         .first()
@@ -582,7 +594,7 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
         .first()
     )
 
-    detail = _serialize_exam_summary(exam)
+    detail = _serialize_exam_summary(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id))
     detail["questions"] = [
         {
             "id": question.id,

@@ -236,6 +236,7 @@ export function Chat() {
   const selectedConversationRef = useRef<number | null>(null);
   const conversationIdsRef = useRef<Set<number>>(new Set());
   const hiddenConversationIdsRef = useRef<Set<number>>(new Set());
+  const autoStartedAdminContactIdRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const actionHoldTimerRef = useRef<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -813,6 +814,68 @@ export function Chat() {
     return Array.from(targetMap.values());
   }, [selectedConversationId, user?.id, visibleConversations]);
   const shouldShowContacts = query.trim().length > 0 || visibleConversations.length === 0;
+
+  useEffect(() => {
+    const defaultAdminContact = visibleContacts[0];
+    if (
+      user?.role_name !== "admin" ||
+      query.trim() ||
+      selectedConversationId ||
+      visibleConversations.length > 0 ||
+      visibleContacts.length !== 1 ||
+      defaultAdminContact?.role_name !== "administrator"
+    ) {
+      return undefined;
+    }
+
+    if (autoStartedAdminContactIdRef.current === defaultAdminContact.id) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    autoStartedAdminContactIdRef.current = defaultAdminContact.id;
+
+    const openDefaultAdminConversation = async () => {
+      try {
+        setError(null);
+        const response = await chatApi.createConversation(defaultAdminContact.id);
+        if (isCancelled) {
+          return;
+        }
+        setConversations((current) => {
+          const withoutDuplicate = current.filter(
+            (conversation) => conversation.id !== response.conversation.id,
+          );
+          return [response.conversation, ...withoutDuplicate];
+        });
+        setSelectedConversationId(response.conversation.id);
+        setIsMobileConversationOpen(true);
+        void refreshNotifications();
+      } catch (err) {
+        if (!isCancelled) {
+          autoStartedAdminContactIdRef.current = null;
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Không thể tạo cuộc trò chuyện với Administrator.",
+          );
+        }
+      }
+    };
+
+    void openDefaultAdminConversation();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    query,
+    refreshNotifications,
+    selectedConversationId,
+    user?.role_name,
+    visibleContacts,
+    visibleConversations.length,
+  ]);
 
   function savePinnedConversationIds(nextIds: Set<number>) {
     if (!pinnedStorageKey) {

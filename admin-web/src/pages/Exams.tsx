@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ChevronDown,
   Loader2,
+  Plus,
   Search,
   Trash2,
   X,
 } from "lucide-react";
 import { adminApi, type AdminExam, type AdminExamOverview } from "../lib/api";
+import { PaginationBar } from "../components/PaginationBar";
 import {
   formatDateTime,
   formatDecimal,
@@ -23,10 +26,14 @@ const fallbackOverview: AdminExamOverview = {
   offset: 0,
 };
 
+const PAGE_SIZE = 7;
+
 export function Exams() {
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<AdminExamOverview>(fallbackOverview);
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingExam, setDeletingExam] = useState<AdminExam | null>(null);
@@ -95,15 +102,33 @@ export function Exams() {
   const filteredExams = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return overview.items.filter((exam) => {
-      const matchesScope = scope === "all" || exam.scope === scope;
+      const matchesSource =
+        sourceFilter === "all" || exam.source === sourceFilter;
       const matchesQuery =
         !normalizedQuery ||
         exam.title.toLowerCase().includes(normalizedQuery) ||
         (exam.classroom_name || "").toLowerCase().includes(normalizedQuery) ||
         (exam.teacher_name || "").toLowerCase().includes(normalizedQuery);
-      return matchesScope && matchesQuery;
+      return matchesSource && matchesQuery;
     });
-  }, [overview.items, query, scope]);
+  }, [overview.items, query, sourceFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredExams.length / PAGE_SIZE));
+
+  const paginatedExams = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredExams.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [currentPage, filteredExams]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, sourceFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const totalExamCount = overview.total || overview.items.length;
   const submittedMetric = overview.metrics.find(
@@ -121,29 +146,14 @@ export function Exams() {
             Quản lý Bài thi
           </h1>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          <div className="relative w-full sm:w-80">
-            <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Tìm bài thi, lớp hoặc giáo viên..."
-              className="w-full bg-surface-container-lowest border border-surface-variant rounded-lg pl-9 pr-3 py-2 text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none placeholder:text-outline"
-            />
-          </div>
-          <div className="relative w-full sm:w-36">
-            <select
-              value={scope}
-              onChange={(event) => setScope(event.target.value)}
-              className="w-full appearance-none bg-surface-container-lowest border border-surface-variant text-sm py-2 pl-3 pr-10 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
-            >
-              <option value="all">Tất cả</option>
-              <option value="system">Hệ thống</option>
-              <option value="class">Trong lớp</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/exams/new")}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
+        >
+          <Plus className="w-4 h-4" />
+          Tạo đề thi
+        </button>
       </div>
 
       {error && (
@@ -194,10 +204,30 @@ export function Exams() {
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant overflow-hidden">
-        <div className="p-5 border-b border-surface-variant flex justify-between items-center bg-surface-container-lowest">
-          <h3 className="text-sx font-bold text-on-surface">
-            Bài thi trên hệ thống
-          </h3>
+        <div className="p-4 border-b border-surface-variant bg-surface-container-lowest">
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full md:w-96">
+              <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Tìm bài thi, lớp hoặc giáo viên..."
+                className="w-full pl-9 pr-4 py-2 bg-surface-container-low rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none placeholder:text-outline"
+              />
+            </div>
+            <div className="relative w-full sm:w-32">
+              <select
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+                className="w-full appearance-none bg-surface-container-low border border-surface-variant text-sm py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+              >
+                <option value="all">Tất cả</option>
+                <option value="system">Hệ thống</option>
+                <option value="teacher">Giáo viên</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -231,7 +261,7 @@ export function Exams() {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-variant">
-              {filteredExams.map((exam) => (
+              {paginatedExams.map((exam) => (
                 <tr
                   key={exam.id}
                   className="hover:bg-surface-container-low/50 transition-colors bg-surface-container-lowest"
@@ -303,6 +333,12 @@ export function Exams() {
             </tbody>
           </table>
         </div>
+        <PaginationBar
+          page={currentPage}
+          pageSize={PAGE_SIZE}
+          totalItems={filteredExams.length}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {deletingExam && (

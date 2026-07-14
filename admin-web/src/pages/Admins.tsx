@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ChevronDown,
   Check,
   Inbox,
   Loader2,
@@ -8,6 +9,7 @@ import {
   Mail,
   MessageSquare,
   Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Trash2,
@@ -136,6 +138,7 @@ export function Admins() {
   const canManageAdmins = user?.role_name === "administrator";
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -148,7 +151,10 @@ export function Admins() {
   const [invitationActionId, setInvitationActionId] = useState<string | null>(
     null,
   );
+  const [isClearingInvitations, setIsClearingInvitations] = useState(false);
   const [deletingAdmin, setDeletingAdmin] = useState<AdminAccount | null>(null);
+  const [passwordSetupAdmin, setPasswordSetupAdmin] =
+    useState<AdminAccount | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [openingChatAdminId, setOpeningChatAdminId] = useState<number | null>(
@@ -217,10 +223,22 @@ export function Admins() {
 
   const filteredAdmins = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return admins;
-    }
     return admins.filter((admin) => {
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "online"
+          ? admin.status === "active" && admin.is_online
+          : statusFilter === "offline"
+            ? admin.status === "active" && !admin.is_online
+            : admin.status !== "active");
+      if (!matchesStatus) {
+        return false;
+      }
+
+      if (!normalizedQuery) {
+        return true;
+      }
+
       const permissionSearchText = getPermissionTagLabels(admin)
         .join(" ")
         .toLowerCase();
@@ -232,7 +250,7 @@ export function Admins() {
         permissionSearchText.includes(normalizedQuery)
       );
     });
-  }, [admins, query]);
+  }, [admins, query, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAdmins.length / PAGE_SIZE));
   const paginatedAdmins = useMemo(() => {
@@ -242,7 +260,7 @@ export function Admins() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [query]);
+  }, [query, statusFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -363,16 +381,35 @@ export function Admins() {
     }
   };
 
-  const sendPasswordSetupLink = async (admin: AdminAccount) => {
+  const openPasswordSetupModal = (admin: AdminAccount) => {
     if (sendingPasswordSetupAdminId) {
       return;
     }
 
+    setPasswordSetupAdmin(admin);
+    setError(null);
+  };
+
+  const closePasswordSetupModal = () => {
+    if (sendingPasswordSetupAdminId) {
+      return;
+    }
+
+    setPasswordSetupAdmin(null);
+  };
+
+  const sendPasswordSetupLink = async () => {
+    if (!passwordSetupAdmin || sendingPasswordSetupAdminId) {
+      return;
+    }
+
+    const admin = passwordSetupAdmin;
     setSendingPasswordSetupAdminId(admin.id);
     setError(null);
     try {
       await adminApi.sendPasswordSetupLink(admin.id);
       toast.success("Đã gửi link tạo mật khẩu cho quản trị viên.");
+      setPasswordSetupAdmin(null);
     } catch (err) {
       setError(
         err instanceof Error
@@ -381,6 +418,28 @@ export function Admins() {
       );
     } finally {
       setSendingPasswordSetupAdminId(null);
+    }
+  };
+
+  const clearInvitations = async () => {
+    if (isClearingInvitations || invitationActionId) {
+      return;
+    }
+
+    setIsClearingInvitations(true);
+    setInvitationError(null);
+    try {
+      await adminApi.clearInvitations();
+      toast.success("Đã dọn danh sách lời mời quản trị viên.");
+      await loadInvitations();
+    } catch (err) {
+      setInvitationError(
+        err instanceof Error
+          ? err.message
+          : "Không dọn được danh sách lời mời.",
+      );
+    } finally {
+      setIsClearingInvitations(false);
     }
   };
 
@@ -583,7 +642,7 @@ export function Admins() {
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) overflow-hidden">
-        <div className="p-4 border-b border-surface-variant flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div className="p-4 border-b border-surface-variant flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="relative w-full md:w-96">
             <Search className="w-4 h-4 text-outline absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -593,6 +652,19 @@ export function Admins() {
               placeholder="Tìm theo tên, email, vai trò hoặc tag..."
               className="w-full pl-9 pr-4 py-2 bg-surface-container-low rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary outline-none"
             />
+          </div>
+          <div className="relative w-full sm:w-40">
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="w-full appearance-none bg-surface-container-low border border-surface-variant text-on-surface text-sm py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-primary cursor-pointer"
+            >
+              <option value="all">Tất cả trạng thái</option>
+              <option value="online">Hoạt động</option>
+              <option value="offline">Không hoạt động</option>
+              <option value="disabled">Vô hiệu hóa</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface" />
           </div>
         </div>
 
@@ -693,7 +765,7 @@ export function Admins() {
                           <div className="inline-flex items-center gap-1">
                             {canManageAdmins && (
                               <button
-                                onClick={() => void sendPasswordSetupLink(admin)}
+                                onClick={() => openPasswordSetupModal(admin)}
                                 disabled={sendingPasswordSetupAdminId === admin.id}
                                 className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
                                 title="Gửi link tạo mật khẩu"
@@ -896,17 +968,40 @@ export function Admins() {
                     {openInvitationCount} đang mở
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void loadInvitations()}
-                  disabled={isLoadingInvitations || Boolean(invitationActionId)}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-outline-variant px-4 text-sm font-medium text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-60"
-                >
-                  {isLoadingInvitations && (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  )}
-                  Tải lại
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void clearInvitations()}
+                    disabled={
+                      isClearingInvitations ||
+                      isLoadingInvitations ||
+                      Boolean(invitationActionId)
+                    }
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-error-container text-error transition-colors hover:bg-error-container disabled:opacity-60"
+                    aria-label="Dọn danh sách lời mời"
+                    title="Dọn lời mời đã xử lý hoặc chưa xác thực"
+                  >
+                    {isClearingInvitations ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadInvitations()}
+                    disabled={isLoadingInvitations || Boolean(invitationActionId)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-outline-variant text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-60"
+                    aria-label="Tải lại danh sách lời mời"
+                    title="Tải lại"
+                  >
+                    {isLoadingInvitations ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {invitationError && (
@@ -1121,6 +1216,87 @@ export function Admins() {
                 >
                   {isDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Xóa quản trị viên
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {passwordSetupAdmin && (
+        <div className="fixed inset-0 z-[90] bg-black/35 flex items-center justify-center px-4">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-xl border border-outline-variant shadow-(--shadow-level-2)">
+            <div className="px-5 py-4 border-b border-outline-variant flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-on-surface">
+                  Gửi link tạo lại mật khẩu
+                </h2>
+                <p className="text-sm text-outline mt-1">
+                  Link mới sẽ được gửi đến email của quản trị viên này.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePasswordSetupModal}
+                disabled={Boolean(sendingPasswordSetupAdminId)}
+                className="p-2 rounded-lg hover:bg-surface-container-low text-outline disabled:opacity-60"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void sendPasswordSetupLink();
+              }}
+              className="p-5 space-y-4"
+            >
+              <div className="rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-3">
+                <p className="text-sm text-on-surface">
+                  Bạn có gửi link tạo lại mật khẩu cho quản trị viên này không?
+                </p>
+                <div className="mt-3 flex items-center gap-3">
+                  {passwordSetupAdmin.avatar_url ? (
+                    <img
+                      src={passwordSetupAdmin.avatar_url}
+                      alt={passwordSetupAdmin.full_name}
+                      className="h-10 w-10 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-container-highest/60 text-sm font-bold text-on-surface-variant">
+                      {getInitials(passwordSetupAdmin)}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-on-surface">
+                      {passwordSetupAdmin.full_name}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-outline">
+                      {passwordSetupAdmin.email}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closePasswordSetupModal}
+                  disabled={Boolean(sendingPasswordSetupAdminId)}
+                  className="px-4 py-2 rounded-lg border border-outline-variant text-sm font-medium text-on-surface hover:bg-surface-container-low disabled:opacity-60"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={Boolean(sendingPasswordSetupAdminId)}
+                  className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold hover:bg-primary/90 disabled:opacity-70 flex items-center gap-2"
+                >
+                  {sendingPasswordSetupAdminId && (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  )}
+                  Xác nhận
                 </button>
               </div>
             </form>

@@ -399,6 +399,12 @@ export interface AdminExam {
   classroom_name: string | null;
   teacher_id: number | null;
   teacher_name: string | null;
+  creator_id: number | null;
+  creator_name: string;
+  creator_type: string;
+  source: string;
+  source_label: string;
+  is_ai_generated: boolean;
   duration_minutes: number;
   start_time: string | null;
   end_time: string | null;
@@ -418,6 +424,69 @@ export interface AdminExamOverview {
   total: number;
   limit: number | null;
   offset: number;
+}
+
+export type AdminExamQuestionType =
+  | "single_choice"
+  | "true_false"
+  | "short_answer"
+  | "text";
+
+export interface AdminExamOptionPayload {
+  option_key: string;
+  option_text: string;
+  image_url?: string | null;
+  is_correct: boolean;
+}
+
+export interface AdminExamQuestionPayload {
+  question_type: AdminExamQuestionType;
+  prompt: string;
+  explanation?: string;
+  image_url?: string | null;
+  order_index?: number | null;
+  points: number;
+  options?: AdminExamOptionPayload[];
+  accepted_answers?: string[];
+}
+
+export interface CreateAdminExamPayload {
+  title: string;
+  description?: string | null;
+  grade: string;
+  image_url?: string | null;
+  scope: "system" | "class";
+  classroom_id?: number | null;
+  duration_minutes: number;
+  start_time?: string | null;
+  end_time?: string | null;
+  is_published: boolean;
+  is_active: boolean;
+  questions: AdminExamQuestionPayload[];
+}
+
+export interface AdminExamResponse {
+  message: string;
+  exam: AdminExam;
+}
+
+export interface AdminUploadedImage {
+  id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  public_id: string;
+  url: string;
+  created_at: string | null;
+}
+
+export interface AdminImageUploadResponse {
+  message: string;
+  image: AdminUploadedImage;
+}
+
+export interface AdminImageListResponse {
+  items: AdminUploadedImage[];
 }
 
 export interface AdminDocument {
@@ -774,6 +843,14 @@ export const adminApi = {
     const query = searchParams.toString();
     return apiGet<AdminExamOverview>(`/admin/exams${query ? `?${query}` : ""}`);
   },
+  createExam: (payload: CreateAdminExamPayload) =>
+    apiPost<AdminExamResponse>("/admin/exams", payload),
+  uploadExamImage: (file: File) => {
+    const formData = new FormData();
+    formData.append("image", file);
+    return apiPostForm<AdminImageUploadResponse>("/admin/image", formData);
+  },
+  listExamImages: () => apiGet<AdminImageListResponse>("/admin/image"),
   deleteExam: (examId: number) =>
     apiDelete<{ message: string }>(`/admin/exams/${examId}`),
   getDocumentsOverview: () => apiGet<AdminDocumentOverview>("/admin/documents"),
@@ -786,6 +863,8 @@ export const adminApi = {
     ),
   createInvitation: (payload: { email: string }) =>
     apiPost<AdminInvitationResponse>("/admin/invitations", payload),
+  clearInvitations: () =>
+    apiDelete<{ message: string }>("/admin/invitations"),
   approveInvitation: (invitationId: number, permissions: string[] = []) =>
     apiPost<ApproveAdminInvitationResponse>(
       `/admin/invitations/${invitationId}/approve`,

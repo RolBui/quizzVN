@@ -26,5 +26,6 @@ class Exam(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     classroom = relationship("Classroom", back_populates="exams")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
     questions = relationship("ExamQuestion", back_populates="exam", cascade="all, delete-orphan")
     attempts = relationship("ExamAttempt", back_populates="exam", cascade="all, delete-orphan")

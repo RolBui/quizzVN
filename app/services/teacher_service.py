@@ -19,6 +19,7 @@ from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
+from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 from app.services.media_service import delete_document_file, upload_document_file
 
 TEACHER_ROLE_NAME = "teacher"
@@ -476,8 +477,6 @@ def list_teacher_documents(
     teacher: User,
     scope: str,
     classroom_id: int | None,
-    limit: int = 50,
-    offset: int = 0,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
 
@@ -659,7 +658,11 @@ def _get_exam_preview_image_url(exam: Exam) -> str | None:
     return None
 
 
-def _serialize_exam_summary(exam: Exam) -> dict:
+def _is_ai_generated_exam(db: Session, exam_id: int | None) -> bool:
+    return bool(exam_id and exam_id in get_ai_generated_exam_ids(db, [exam_id]))
+
+
+def _serialize_exam_summary(exam: Exam, is_ai_generated: bool = False) -> dict:
     classroom = exam.classroom
     return {
         "id": exam.id,
@@ -676,6 +679,7 @@ def _serialize_exam_summary(exam: Exam) -> dict:
         "total_points": _get_exam_total_points(exam),
         "question_count": len(exam.questions),
         "attempt_count": len(exam.attempts),
+        **build_exam_creator_metadata(exam.created_by, is_ai_generated=is_ai_generated),
         "is_published": exam.is_published,
         "is_active": exam.is_active,
         "created_at": exam.created_at,
@@ -683,8 +687,8 @@ def _serialize_exam_summary(exam: Exam) -> dict:
     }
 
 
-def _serialize_exam_detail(exam: Exam) -> dict:
-    detail = _serialize_exam_summary(exam)
+def _serialize_exam_detail(exam: Exam, is_ai_generated: bool = False) -> dict:
+    detail = _serialize_exam_summary(exam, is_ai_generated=is_ai_generated)
     detail["questions"] = [
         {
             "id": question.id,
@@ -722,6 +726,7 @@ def _get_teacher_exam(db: Session, teacher: User, exam_id: int) -> Exam:
     exam = (
         db.query(Exam)
         .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
         .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
         .options(joinedload(Exam.attempts))
         .filter(Exam.id == exam_id)
@@ -755,12 +760,15 @@ def list_teacher_exams(
     teacher: User,
     scope: str,
     classroom_id: int | None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
 
     query = (
         db.query(Exam)
         .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
         .options(joinedload(Exam.questions))
         .options(joinedload(Exam.attempts))
         .filter(Exam.scope == scope)
@@ -773,8 +781,12 @@ def list_teacher_exams(
 
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, [exam.id for exam in exams])
     return {
-        "items": [_serialize_exam_summary(exam) for exam in exams],
+        "items": [
+            _serialize_exam_summary(exam, is_ai_generated=exam.id in ai_generated_exam_ids)
+            for exam in exams
+        ],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -783,7 +795,7 @@ def list_teacher_exams(
 
 def get_teacher_exam_detail(db: Session, teacher: User, exam_id: int) -> dict:
     exam = _get_teacher_exam(db, teacher, exam_id)
-    return _serialize_exam_detail(exam)
+    return _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id))
 
 
 def get_teacher_class_exam_detail(
@@ -793,7 +805,7 @@ def get_teacher_class_exam_detail(
     exam_id: int,
 ) -> dict:
     exam = _get_teacher_class_exam(db, teacher, class_id, exam_id)
-    return _serialize_exam_detail(exam)
+    return _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id))
 
 
 def list_teacher_class_exam_results(
@@ -1228,7 +1240,7 @@ def create_teacher_exam(
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
         "message": "Exam created successfully",
-        "exam": _serialize_exam_detail(exam),
+        "exam": _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id)),
     }
 
 
@@ -1313,7 +1325,7 @@ def update_teacher_exam(
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
         "message": "Exam updated successfully",
-        "exam": _serialize_exam_detail(exam),
+        "exam": _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id)),
     }
 
 
@@ -1395,5 +1407,5 @@ def set_teacher_exam_visibility(
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
         "message": "Exam published successfully" if is_published else "Exam set to private successfully",
-        "exam": _serialize_exam_detail(exam),
+        "exam": _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id)),
     }

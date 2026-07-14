@@ -8,12 +8,15 @@ import {
   Users,
 } from "lucide-react";
 import { adminApi, type AdminClass, type AdminClassOverview } from "../lib/api";
+import { PaginationBar } from "../components/PaginationBar";
 import { formatDate, initials } from "../lib/format";
 
 const fallbackOverview: AdminClassOverview = {
   metrics: [],
   items: [],
 };
+
+const PAGE_SIZE = 7;
 
 function TeacherAvatar({ classroom }: { classroom: AdminClass }) {
   if (classroom.teacher_avatar_url) {
@@ -36,6 +39,7 @@ export function Classes() {
   const [overview, setOverview] =
     useState<AdminClassOverview>(fallbackOverview);
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +84,23 @@ export function Classes() {
       );
     });
   }, [overview.items, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredClasses.length / PAGE_SIZE));
+
+  const paginatedClasses = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredClasses.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [currentPage, filteredClasses]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -132,7 +153,7 @@ export function Classes() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
-        {filteredClasses.map((classroom) => (
+        {paginatedClasses.map((classroom) => (
           <div
             key={classroom.id}
             className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant overflow-hidden flex flex-col"
@@ -216,6 +237,13 @@ export function Classes() {
           </div>
         )}
       </div>
+
+      <PaginationBar
+        page={currentPage}
+        pageSize={PAGE_SIZE}
+        totalItems={filteredClasses.length}
+        onPageChange={setCurrentPage}
+      />
     </div>
   );
 }

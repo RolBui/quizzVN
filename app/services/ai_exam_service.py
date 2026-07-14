@@ -14,6 +14,7 @@ from app.models.ai_exam import AIExamGenerationJob, AIQuestionDraft
 from app.models.exam import Exam
 from app.models.user import User
 from app.services.ai_exam_prompt_builder import (
+    build_exam_batch_generation_prompt,
     build_exam_generation_prompt,
     build_exam_repair_prompt,
     build_more_questions_prompt,
@@ -215,22 +216,12 @@ def _process_ai_exam_job(
 ) -> None:
     try:
         provider = _get_ai_provider_client()
-        result = provider.generate_exam(job.prompt)
-        result.payload = sanitize_ai_exam_payload(result.payload)
-        valid, errors = validate_ai_exam_payload(result.payload, request_data)
+        batch_size = _get_ai_exam_batch_size()
+        if int(request_data["question_count"]) > batch_size:
+            _process_ai_exam_job_in_batches(db, job, request_data, provider, batch_size)
+            return
 
-        if not valid:
-            repair_prompt = build_exam_repair_prompt(job.prompt, result.payload, errors)
-            retry_result = provider.generate_exam(repair_prompt)
-            retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
-            retry_valid, retry_errors = validate_ai_exam_payload(retry_result.payload, request_data)
-            result = retry_result
-            valid = retry_valid
-            errors = retry_errors
-
-        if not valid:
-            raise AIExamGenerationError(errors)
-
+        result = _generate_valid_ai_exam_result(provider, job.prompt, request_data)
         _save_completed_job(db, job, result)
     except AIExamGenerationError as exc:
         _mark_job_failed(db, job.id, exc.errors)
@@ -244,6 +235,254 @@ def _process_ai_exam_job(
         _mark_job_failed(db, job.id, errors)
         raise AIExamGenerationError(errors) from exc
 
+
+def _process_ai_exam_job_in_batches(
+    db: Session,
+    job: AIExamGenerationJob,
+    request_data: dict[str, Any],
+    provider: AIProviderClient,
+    batch_size: int,
+) -> None:
+    question_type_batches = _build_question_type_distribution_batches(
+        request_data.get("question_type_distribution") or {},
+        list(request_data.get("question_types") or []),
+        batch_size,
+    )
+    if not question_type_batches:
+        raise AIExamGenerationError(["Unable to split AI exam into batches"])
+
+    difficulty_batches = _build_difficulty_distribution_batches(request_data, question_type_batches)
+    raw_batches: list[dict[str, Any]] = []
+    batch_count = len(question_type_batches)
+
+    for batch_index, type_distribution in enumerate(question_type_batches, start=1):
+        batch_data = _build_batch_request_data(
+            request_data,
+            type_distribution,
+            difficulty_batches[batch_index - 1],
+        )
+        existing_questions = _build_existing_question_context(db, job.id)
+        batch_prompt = build_exam_batch_generation_prompt(
+            batch_data,
+            batch_index,
+            batch_count,
+            existing_questions,
+        )
+        result = _generate_valid_ai_exam_result(
+            provider,
+            batch_prompt,
+            batch_data,
+            db=db,
+            job_id=job.id,
+            check_existing_duplicates=bool(existing_questions),
+        )
+        raw_batches.append(
+            {
+                "batch": batch_index,
+                "question_count": batch_data["question_count"],
+                "question_type_distribution": batch_data["question_type_distribution"],
+                "raw_response": result.raw_response,
+            }
+        )
+        _append_questions_to_job(
+            db,
+            job,
+            result,
+            status="running",
+            question_count=int(request_data["question_count"]),
+            raw_response={"batches": raw_batches},
+        )
+
+    _finalize_batched_ai_exam_job(db, job.id, request_data, raw_batches)
+
+
+def _generate_valid_ai_exam_result(
+    provider: AIProviderClient,
+    prompt: str,
+    request_data: dict[str, Any],
+    db: Session | None = None,
+    job_id: int | None = None,
+    check_existing_duplicates: bool = False,
+) -> AIProviderResult:
+    result = provider.generate_exam(prompt)
+    result.payload = sanitize_ai_exam_payload(result.payload)
+    errors = _validate_generated_ai_exam_payload(
+        db,
+        job_id,
+        result.payload,
+        request_data,
+        check_existing_duplicates,
+    )
+
+    if errors:
+        repair_prompt = build_exam_repair_prompt(prompt, result.payload, errors)
+        retry_result = provider.generate_exam(repair_prompt)
+        retry_result.payload = sanitize_ai_exam_payload(retry_result.payload)
+        retry_errors = _validate_generated_ai_exam_payload(
+            db,
+            job_id,
+            retry_result.payload,
+            request_data,
+            check_existing_duplicates,
+        )
+        result = retry_result
+        errors = retry_errors
+
+    if errors:
+        raise AIExamGenerationError(errors)
+
+    return result
+
+
+def _validate_generated_ai_exam_payload(
+    db: Session | None,
+    job_id: int | None,
+    payload: dict[str, Any],
+    request_data: dict[str, Any],
+    check_existing_duplicates: bool,
+) -> list[str]:
+    _, errors = validate_ai_exam_payload(payload, request_data)
+    if check_existing_duplicates and db is not None and job_id is not None:
+        errors.extend(_validate_new_questions_against_existing(db, job_id, payload))
+    return errors
+
+
+def _get_ai_exam_batch_size() -> int:
+    return max(1, min(int(settings.AI_EXAM_BATCH_SIZE or 10), 50))
+
+
+def _build_question_type_distribution_batches(
+    distribution: dict[str, int],
+    question_types: list[str],
+    batch_size: int,
+) -> list[dict[str, int]]:
+    remaining = {
+        str(question_type): int(count or 0)
+        for question_type, count in distribution.items()
+        if int(count or 0) > 0
+    }
+    ordered_types = [question_type for question_type in question_types if question_type in remaining]
+    ordered_types.extend(question_type for question_type in remaining if question_type not in ordered_types)
+
+    batches: list[dict[str, int]] = []
+    while sum(remaining.values()) > 0:
+        slots = batch_size
+        batch: dict[str, int] = {}
+        for question_type in ordered_types:
+            if slots <= 0:
+                break
+            available = remaining.get(question_type, 0)
+            if available <= 0:
+                continue
+            take = min(available, slots)
+            batch[question_type] = take
+            remaining[question_type] = available - take
+            slots -= take
+
+        if not batch:
+            break
+        batches.append(batch)
+
+    return batches
+
+
+def _build_difficulty_distribution_batches(
+    request_data: dict[str, Any],
+    question_type_batches: list[dict[str, int]],
+) -> list[dict[str, int]]:
+    distribution = {
+        str(difficulty): int(count or 0)
+        for difficulty, count in (request_data.get("difficulty_distribution") or {}).items()
+    }
+    if sum(distribution.values()) != int(request_data["question_count"]):
+        return [dict(distribution) for _ in question_type_batches]
+
+    remaining = dict(distribution)
+    difficulty_order = ["easy", "medium", "hard"]
+    batches: list[dict[str, int]] = []
+    for question_type_batch in question_type_batches:
+        target_count = sum(question_type_batch.values())
+        batch: dict[str, int] = {}
+        slots = target_count
+        for difficulty in difficulty_order:
+            if slots <= 0:
+                break
+            available = remaining.get(difficulty, 0)
+            if available <= 0:
+                continue
+            take = min(available, slots)
+            batch[difficulty] = take
+            remaining[difficulty] = available - take
+            slots -= take
+        batches.append(batch or dict(distribution))
+
+    return batches
+
+
+def _build_batch_request_data(
+    request_data: dict[str, Any],
+    question_type_distribution: dict[str, int],
+    difficulty_distribution: dict[str, int],
+) -> dict[str, Any]:
+    batch_data = dict(request_data)
+    batch_question_types = [
+        question_type
+        for question_type in request_data.get("question_types", [])
+        if question_type_distribution.get(question_type, 0) > 0
+    ]
+    batch_question_types.extend(
+        question_type
+        for question_type in question_type_distribution
+        if question_type not in batch_question_types
+    )
+    batch_data["question_count"] = sum(question_type_distribution.values())
+    batch_data["question_types"] = batch_question_types
+    batch_data["question_type_distribution"] = dict(question_type_distribution)
+    batch_data["difficulty_distribution"] = dict(difficulty_distribution)
+    return batch_data
+
+
+def _finalize_batched_ai_exam_job(
+    db: Session,
+    job_id: int,
+    request_data: dict[str, Any],
+    raw_batches: list[dict[str, Any]],
+) -> None:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        return
+
+    drafts = (
+        db.query(AIQuestionDraft)
+        .filter(AIQuestionDraft.job_id == job_id)
+        .order_by(AIQuestionDraft.order.asc())
+        .all()
+    )
+    expected_count = int(request_data["question_count"])
+    if len(drafts) != expected_count:
+        raise AIExamGenerationError([f"Expected {expected_count} questions, got {len(drafts)}"])
+
+    expected_distribution = request_data.get("question_type_distribution") or {}
+    actual_distribution: dict[str, int] = {}
+    for draft in drafts:
+        actual_distribution[draft.question_type] = actual_distribution.get(draft.question_type, 0) + 1
+
+    distribution_errors = []
+    for question_type, expected in expected_distribution.items():
+        actual = actual_distribution.get(question_type, 0)
+        if actual != expected:
+            distribution_errors.append(f"Expected {expected} {question_type} questions, got {actual}")
+    if distribution_errors:
+        raise AIExamGenerationError(distribution_errors)
+
+    job.question_count = expected_count
+    job.total_points = sum(float(draft.points or 0) for draft in drafts)
+    job.raw_response = {"batches": raw_batches}
+    job.error_message = ""
+    job.status = "completed"
+    job.updated_at = utc_now()
+    db.commit()
+    db.refresh(job)
 
 def _process_more_questions_job(
     db: Session,
@@ -807,7 +1046,10 @@ def _get_ai_provider_client() -> AIProviderClient:
         return MockAIProviderClient()
 
     if provider == "gemini":
-        return GeminiAIProviderClient()
+        return GeminiAIProviderClient(
+            timeout_seconds=settings.AI_PROVIDER_TIMEOUT_SECONDS,
+            retry_count=settings.AI_PROVIDER_RETRY_COUNT,
+        )
 
     raise AIProviderError(f"Unsupported AI_PROVIDER: {settings.AI_PROVIDER}")
 
@@ -970,6 +1212,10 @@ def _append_questions_to_job(
     db: Session,
     job: AIExamGenerationJob,
     result: AIProviderResult,
+    *,
+    status: str = "completed",
+    question_count: int | None = None,
+    raw_response: dict[str, Any] | None = None,
 ) -> None:
     payload = result.payload
     questions = payload.get("questions") or []
@@ -1017,10 +1263,10 @@ def _append_questions_to_job(
     if not job.description:
         job.description = (payload.get("description") or "").strip() or None
     job.total_points = float(existing_points or 0) + new_points
-    job.question_count = int(existing_count) + len(questions)
-    job.raw_response = result.raw_response
+    job.question_count = question_count if question_count is not None else int(existing_count) + len(questions)
+    job.raw_response = raw_response if raw_response is not None else result.raw_response
     job.error_message = ""
-    job.status = "completed"
+    job.status = status
     job.updated_at = utc_now()
     db.commit()
     db.refresh(job)
@@ -1032,7 +1278,13 @@ def _mark_job_failed(db: Session, job_id: int, errors: list[str]) -> None:
     if not job:
         return
 
-    job.status = "failed"
+    has_existing_drafts = (
+        db.query(AIQuestionDraft.id)
+        .filter(AIQuestionDraft.job_id == job_id)
+        .first()
+        is not None
+    )
+    job.status = "completed" if has_existing_drafts else "failed"
     job.error_message = "\n".join(errors)
     job.updated_at = utc_now()
     db.commit()
