@@ -391,12 +391,18 @@ export function ExamCreate() {
       scope,
       classroom_id: scope === "class" ? Number(classroomId) : null,
       duration_minutes: Number(durationMinutes),
-      start_time: toIsoDateTime(startTime),
-      end_time: toIsoDateTime(endTime),
       is_published: publish,
       is_active: publish,
       questions: questions.map(buildQuestionPayload),
     };
+    const normalizedStartTime = toIsoDateTime(startTime);
+    const normalizedEndTime = toIsoDateTime(endTime);
+    if (normalizedStartTime) {
+      payload.start_time = normalizedStartTime;
+    }
+    if (normalizedEndTime) {
+      payload.end_time = normalizedEndTime;
+    }
 
     try {
       await adminApi.createExam(payload);
