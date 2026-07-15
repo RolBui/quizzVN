@@ -184,5 +184,17 @@ class Settings:
     AI_PROVIDER_TIMEOUT_SECONDS: float = float(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "180"))
     AI_PROVIDER_RETRY_COUNT: int = int(os.getenv("AI_PROVIDER_RETRY_COUNT", "2"))
     AI_EXAM_BATCH_SIZE: int = int(os.getenv("AI_EXAM_BATCH_SIZE", "10"))
+    SEPAY_API_BASE_URL: str = (
+        os.getenv("SEPAY_API_BASE_URL", "https://userapi.sepay.vn/v2").strip().rstrip("/")
+        or "https://userapi.sepay.vn/v2"
+    )
+    SEPAY_API_TOKEN: str = os.getenv("SEPAY_API_TOKEN", "").strip()
+    SEPAY_BANK_ACCOUNT_ID: str = os.getenv("SEPAY_BANK_ACCOUNT_ID", "").strip()
+    SEPAY_VA_PREFIX: str = os.getenv("SEPAY_VA_PREFIX", "").strip()
+    SEPAY_WEBHOOK_SECRET: str = os.getenv("SEPAY_WEBHOOK_SECRET", "").strip()
+    SEPAY_QR_TEMPLATE: str = os.getenv("SEPAY_QR_TEMPLATE", "compact2").strip() or "compact2"
+    SEPAY_TIMEOUT_SECONDS: float = float(os.getenv("SEPAY_TIMEOUT_SECONDS", "15"))
+    SEPAY_WEBHOOK_TOLERANCE_SECONDS: int = int(os.getenv("SEPAY_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    BILLING_ORDER_EXPIRE_MINUTES: int = int(os.getenv("BILLING_ORDER_EXPIRE_MINUTES", "15"))
 
 settings = Settings()
