@@ -152,6 +152,23 @@ def create_sepay_va_order(order: PaymentOrder) -> dict[str, Any]:
         )
         response.raise_for_status()
         response_payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        provider_code, provider_message = _read_sepay_error(exc.response)
+        logger.warning(
+            "SePay rejected order creation: status=%s code=%s message=%s",
+            exc.response.status_code,
+            provider_code or "unknown",
+            provider_message or "unknown",
+        )
+        error_label = f" {provider_code}" if provider_code else ""
+        error_message = f" {provider_message}" if provider_message else ""
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "SePay từ chối tạo mã thanh toán "
+                f"({exc.response.status_code}{error_label}).{error_message}"
+            ),
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         logger.exception("Unable to create SePay VA order")
         raise HTTPException(
@@ -166,6 +183,23 @@ def create_sepay_va_order(order: PaymentOrder) -> dict[str, Any]:
             detail="SePay trả về dữ liệu đơn thanh toán không hợp lệ.",
         )
     return data
+
+
+def _read_sepay_error(response: httpx.Response) -> tuple[str, str]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "", ""
+    if not isinstance(payload, dict):
+        return "", ""
+
+    provider_code = str(
+        payload.get("error_code") or payload.get("code") or ""
+    ).strip()[:80]
+    provider_message = str(
+        payload.get("message") or payload.get("error") or ""
+    ).strip()[:300]
+    return provider_code, provider_message
 
 
 def create_payment_order(

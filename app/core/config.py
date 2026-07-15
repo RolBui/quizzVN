@@ -192,7 +192,7 @@ class Settings:
     SEPAY_BANK_ACCOUNT_ID: str = os.getenv("SEPAY_BANK_ACCOUNT_ID", "").strip()
     SEPAY_VA_PREFIX: str = os.getenv("SEPAY_VA_PREFIX", "").strip()
     SEPAY_WEBHOOK_SECRET: str = os.getenv("SEPAY_WEBHOOK_SECRET", "").strip()
-    SEPAY_QR_TEMPLATE: str = os.getenv("SEPAY_QR_TEMPLATE", "compact2").strip() or "compact2"
+    SEPAY_QR_TEMPLATE: str = os.getenv("SEPAY_QR_TEMPLATE", "compact").strip() or "compact"
     SEPAY_TIMEOUT_SECONDS: float = float(os.getenv("SEPAY_TIMEOUT_SECONDS", "15"))
     SEPAY_WEBHOOK_TOLERANCE_SECONDS: int = int(os.getenv("SEPAY_WEBHOOK_TOLERANCE_SECONDS", "300"))
     BILLING_ORDER_EXPIRE_MINUTES: int = int(os.getenv("BILLING_ORDER_EXPIRE_MINUTES", "15"))
