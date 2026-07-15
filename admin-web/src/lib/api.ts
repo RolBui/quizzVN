@@ -458,8 +458,8 @@ export interface CreateAdminExamPayload {
   scope: "system" | "class";
   classroom_id?: number | null;
   duration_minutes: number;
-  start_time?: string | null;
-  end_time?: string | null;
+  start_time?: string;
+  end_time?: string;
   is_published: boolean;
   is_active: boolean;
   questions: AdminExamQuestionPayload[];
