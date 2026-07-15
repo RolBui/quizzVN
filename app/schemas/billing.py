@@ -10,7 +10,6 @@ class BillingPlanResponse(BaseModel):
     name: str
     price_vnd: int
     qc_amount: int
-    duration_days: int
 
 
 class BillingPlanListResponse(BaseModel):
@@ -28,7 +27,6 @@ class PaymentOrderResponse(BaseModel):
     plan_name: str
     amount_vnd: int
     qc_amount: int
-    duration_days: int
     status: str
     provider: str
     payment_account: str | None = None

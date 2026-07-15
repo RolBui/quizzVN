@@ -40,21 +40,21 @@ DEFAULT_PLANS = (
         "name": "Bạc",
         "price_vnd": 69_000,
         "qc_amount": 300,
-        "duration_days": 30,
+        "duration_days": 0,
     },
     {
         "code": "gold",
         "name": "Vàng",
         "price_vnd": 129_000,
         "qc_amount": 800,
-        "duration_days": 30,
+        "duration_days": 0,
     },
     {
         "code": "premium",
         "name": "Premium",
         "price_vnd": 249_000,
         "qc_amount": 2_000,
-        "duration_days": 30,
+        "duration_days": 0,
     },
 )
 
@@ -69,10 +69,15 @@ def bootstrap_billing_storage() -> None:
 
     db = SessionLocal()
     try:
-        existing_codes = {code for (code,) in db.query(SubscriptionPlan.code).all()}
+        existing_plans = {
+            plan.code: plan for plan in db.query(SubscriptionPlan).all()
+        }
         for plan_data in DEFAULT_PLANS:
-            if plan_data["code"] not in existing_codes:
+            existing_plan = existing_plans.get(plan_data["code"])
+            if not existing_plan:
                 db.add(SubscriptionPlan(**plan_data, is_active=True))
+            else:
+                existing_plan.duration_days = 0
         db.commit()
     finally:
         db.close()
@@ -551,7 +556,6 @@ def serialize_payment_order(order: PaymentOrder) -> dict[str, Any]:
         "plan_name": order.plan.name,
         "amount_vnd": order.amount_vnd,
         "qc_amount": order.qc_amount,
-        "duration_days": order.duration_days,
         "status": order.status,
         "provider": order.provider or "sepay",
         "payment_account": order.provider_va_number,
