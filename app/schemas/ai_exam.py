@@ -239,6 +239,11 @@ class AIExamGenerationJobResponse(BaseModel):
     total_points: float
     provider: str
     model: str
+    qc_reserved: int = 0
+    qc_charged: int = 0
+    qc_refunded: int = 0
+    free_questions_used: int = 0
+    qc_status: str = "none"
     error_message: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None

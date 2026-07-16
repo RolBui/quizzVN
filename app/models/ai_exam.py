@@ -35,6 +35,12 @@ class AIExamGenerationJob(Base):
     provider = Column(String(50), nullable=False, default="")
     model = Column(String(100), nullable=False, default="")
 
+    qc_reserved = Column(Integer, nullable=False, default=0)
+    qc_charged = Column(Integer, nullable=False, default=0)
+    qc_refunded = Column(Integer, nullable=False, default=0)
+    free_questions_used = Column(Integer, nullable=False, default=0)
+    qc_status = Column(String(30), nullable=False, default="none")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

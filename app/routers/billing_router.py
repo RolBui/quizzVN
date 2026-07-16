@@ -6,18 +6,23 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import get_current_teacher
 from app.schemas.billing import (
+    AIQCCostEstimateRequest,
+    AIQCCostEstimateResponse,
     BillingPlanListResponse,
     CreatePaymentOrderRequest,
     PaymentOrderListResponse,
     PaymentOrderResponse,
     QCWalletResponse,
+    QCTransactionListResponse,
     SePayWebhookResponse,
 )
 from app.services.billing_service import (
     create_payment_order,
+    estimate_ai_qc_cost,
     get_teacher_qc_wallet,
     get_teacher_payment_order,
     list_active_plans,
+    list_teacher_qc_transactions,
     list_teacher_payment_orders,
     process_sepay_webhook,
     verify_sepay_webhook_signature,
@@ -65,7 +70,12 @@ def post_payment_order(
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> PaymentOrderResponse:
-    return create_payment_order(db, current_teacher, payload.plan_code)
+    return create_payment_order(
+        db,
+        current_teacher,
+        payload.plan_code,
+        payload.quantity,
+    )
 
 
 @router.get("/orders", response_model=PaymentOrderListResponse)
@@ -83,6 +93,29 @@ def get_qc_wallet(
     current_teacher=Depends(get_current_teacher),
 ) -> QCWalletResponse:
     return get_teacher_qc_wallet(db, current_teacher)
+
+
+@router.post("/ai-cost/estimate", response_model=AIQCCostEstimateResponse)
+def post_ai_cost_estimate(
+    payload: AIQCCostEstimateRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> AIQCCostEstimateResponse:
+    return estimate_ai_qc_cost(
+        db,
+        current_teacher,
+        payload.question_count,
+        payload.operation,
+    )
+
+
+@router.get("/transactions", response_model=QCTransactionListResponse)
+def get_qc_transactions(
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> QCTransactionListResponse:
+    return list_teacher_qc_transactions(db, current_teacher, limit)
 
 
 @router.get("/orders/{order_id}", response_model=PaymentOrderResponse)
