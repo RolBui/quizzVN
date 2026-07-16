@@ -6,6 +6,7 @@ import re
 import time
 from datetime import timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import HTTPException, status
@@ -207,6 +208,23 @@ def _read_sepay_error(response: httpx.Response) -> tuple[str, str]:
     return provider_code, provider_message
 
 
+def _with_transfer_code(qr_url: str, transfer_code: str) -> str:
+    """Embed the order code so banking apps prefill the transfer description."""
+    if not qr_url.startswith(("http://", "https://")):
+        return qr_url
+
+    parsed = urlsplit(qr_url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() != "des"
+    ]
+    query.append(("des", transfer_code))
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
+    )
+
+
 def create_payment_order(
     db: Session,
     teacher: User,
@@ -260,6 +278,8 @@ def create_payment_order(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="SePay trả thiếu thông tin VA hoặc mã QR.",
             )
+
+        qr_url = _with_transfer_code(qr_url, order.transfer_code)
 
         order.provider_order_id = provider_order_id
         order.provider_va_number = va_number
