@@ -142,6 +142,23 @@ class BillingServiceTests(unittest.TestCase):
         self.assertEqual(self.db.query(TeacherQCWallet).count(), 0)
         self.assertEqual(self.db.query(QCTransaction).count(), 0)
 
+    def test_separate_paid_orders_accumulate_qc_balance(self):
+        first_order = self._create_pending_order("963QUIZVN000005")
+        second_order = self._create_pending_order("963QUIZVN000006")
+
+        process_sepay_webhook(
+            self.db,
+            self._webhook_payload(92707, first_order.provider_va_number, 129_000),
+        )
+        process_sepay_webhook(
+            self.db,
+            self._webhook_payload(92708, second_order.provider_va_number, 129_000),
+        )
+
+        wallet = self.db.query(TeacherQCWallet).one()
+        self.assertEqual(wallet.balance, 1_600)
+        self.assertEqual(self.db.query(QCTransaction).count(), 2)
+
     def test_dashboard_mock_webhook_is_acknowledged_without_credit(self):
         payload = self._webhook_payload(
             sepay_id=0,

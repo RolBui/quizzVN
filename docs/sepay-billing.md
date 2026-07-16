@@ -27,6 +27,9 @@ Never commit API tokens, webhook secrets, bank identifiers, or account details.
 The browser never sends a price or QC amount. The API reads both from
 `subscription_plans` and asks SePay to create an order VA for that exact amount.
 
+QC packages do not expire. A successful payment adds QC to the teacher's current
+wallet balance; later purchases accumulate instead of resetting the balance.
+
 ## Production webhook
 
 Create the webhook in SePay with these settings:
