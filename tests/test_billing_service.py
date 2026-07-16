@@ -5,6 +5,7 @@ import json
 import pkgutil
 import unittest
 from datetime import timedelta
+from urllib.parse import parse_qs, urlsplit
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -88,7 +89,10 @@ class BillingServiceTests(unittest.TestCase):
             return {
                 "id": "provider-order-id",
                 "va_number": "963QUIZVN000001",
-                "qr_code_url": "https://example.com/payment-qr.png",
+                "qr_code_url": (
+                    "https://vietqr.app/img?acc=963QUIZVN000001"
+                    "&bank=Sacombank&amount=129000&template=compact"
+                ),
             }
 
         result = create_payment_order(
@@ -101,7 +105,10 @@ class BillingServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending")
         self.assertEqual(result["provider"], "sepay")
         self.assertEqual(result["payment_account"], "963QUIZVN000001")
-        self.assertEqual(result["qr_url"], "https://example.com/payment-qr.png")
+        qr_query = parse_qs(urlsplit(result["qr_url"]).query)
+        self.assertEqual(qr_query["amount"], ["129000"])
+        self.assertEqual(qr_query["template"], ["compact"])
+        self.assertEqual(qr_query["des"], [result["transfer_code"]])
 
     def test_valid_webhook_credits_qc_only_once(self):
         order = self._create_pending_order("963QUIZVN000002")
