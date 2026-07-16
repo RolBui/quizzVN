@@ -284,6 +284,9 @@ def verify_email_otp(db: Session, user: User, otp_code: str) -> dict:
     verification_otp.updated_at = now
     db.commit()
     db.refresh(user)
+    from app.services.billing_service import grant_teacher_welcome_qc
+
+    grant_teacher_welcome_qc(db, user)
     return {"message": "Email verified successfully", "user": user}
 
 
@@ -329,4 +332,7 @@ def verify_email_token(db: Session, token: str) -> str:
     user.email_verified = True
     db.commit()
     db.refresh(user)
+    from app.services.billing_service import grant_teacher_welcome_qc
+
+    grant_teacher_welcome_qc(db, user)
     return "verified"

@@ -683,6 +683,11 @@ def complete_user_onboarding(
     db.refresh(user)
     db.refresh(profile)
 
+    if role_name == "teacher" and user.email_verified:
+        from app.services.billing_service import grant_teacher_welcome_qc
+
+        grant_teacher_welcome_qc(db, user)
+
     return {
         "message": "Onboarding completed successfully",
         "user": serialize_user(user, profile),

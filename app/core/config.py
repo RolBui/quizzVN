@@ -184,6 +184,8 @@ class Settings:
     AI_PROVIDER_TIMEOUT_SECONDS: float = float(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "180"))
     AI_PROVIDER_RETRY_COUNT: int = int(os.getenv("AI_PROVIDER_RETRY_COUNT", "2"))
     AI_EXAM_BATCH_SIZE: int = int(os.getenv("AI_EXAM_BATCH_SIZE", "10"))
+    AI_QC_COST_PER_QUESTION: int = int(os.getenv("AI_QC_COST_PER_QUESTION", "1"))
+    TEACHER_WELCOME_QC: int = int(os.getenv("TEACHER_WELCOME_QC", "30"))
     SEPAY_API_BASE_URL: str = (
         os.getenv("SEPAY_API_BASE_URL", "https://userapi.sepay.vn/v2").strip().rstrip("/")
         or "https://userapi.sepay.vn/v2"

@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, text
@@ -28,6 +29,13 @@ from app.services.ai_exam_validator import (
 )
 from app.services.ai_provider_client import AIProviderClient, AIProviderError, AIProviderResult
 from app.services.gemini_client import GeminiAIProviderClient
+from app.services.billing_service import (
+    get_ai_usage_by_operation_key,
+    grant_teacher_welcome_qc,
+    refund_ai_qc_usage,
+    reserve_ai_qc,
+    settle_ai_qc_usage,
+)
 from app.services.teacher_service import create_teacher_exam
 
 
@@ -88,6 +96,11 @@ def _ensure_ai_exam_generation_job_columns() -> None:
         statement = """
             ALTER TABLE ai_exam_generation_jobs
             ADD COLUMN IF NOT EXISTS question_type_distribution JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_reserved INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_charged INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_refunded INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS free_questions_used INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_status VARCHAR(30) NOT NULL DEFAULT 'none';
             UPDATE ai_exam_generation_jobs
             SET question_type_distribution = '{}'::jsonb
             WHERE question_type_distribution IS NULL;
@@ -96,6 +109,11 @@ def _ensure_ai_exam_generation_job_columns() -> None:
         statement = """
             ALTER TABLE ai_exam_generation_jobs
             ADD COLUMN IF NOT EXISTS question_type_distribution JSON NOT NULL DEFAULT '{}';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_reserved INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_charged INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_refunded INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS free_questions_used INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_status VARCHAR(30) NOT NULL DEFAULT 'none';
             UPDATE ai_exam_generation_jobs
             SET question_type_distribution = '{}'
             WHERE question_type_distribution IS NULL;
@@ -105,11 +123,42 @@ def _ensure_ai_exam_generation_job_columns() -> None:
         connection.execute(text(statement))
 
 
+def _ai_operation_key(
+    teacher_id: int,
+    operation: str,
+    idempotency_key: str | None,
+) -> str:
+    token = (idempotency_key or uuid4().hex).strip()
+    if not token or len(token) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Idempotency-Key phải có từ 1 đến 100 ký tự.",
+        )
+    return f"ai:{operation}:{teacher_id}:{token}"
+
+
 def create_ai_exam_generation_job(
     db: Session,
     teacher: User,
     request_data: dict[str, Any],
-) -> AIExamGenerationJob:
+    idempotency_key: str | None = None,
+) -> tuple[AIExamGenerationJob, bool]:
+    grant_teacher_welcome_qc(db, teacher)
+    operation_key = _ai_operation_key(
+        teacher.id,
+        "initial",
+        idempotency_key,
+    )
+    db.query(User).filter(User.id == teacher.id).with_for_update().one()
+    existing_usage = get_ai_usage_by_operation_key(db, teacher.id, operation_key)
+    if existing_usage:
+        existing_job = get_teacher_ai_exam_job(
+            db,
+            teacher,
+            existing_usage.ai_job_id,
+        )
+        return existing_job, False
+
     provider_name = settings.AI_PROVIDER
     model_name = "mock" if provider_name == "mock" else settings.AI_MODEL
 
@@ -134,9 +183,18 @@ def create_ai_exam_generation_job(
         updated_at=utc_now(),
     )
     db.add(job)
+    db.flush()
+    reserve_ai_qc(
+        db,
+        teacher,
+        job,
+        operation_key=operation_key,
+        operation_type="initial",
+        question_count=int(request_data["question_count"]),
+    )
     db.commit()
     db.refresh(job)
-    return job
+    return job, True
 
 
 def generate_exam_for_teacher(
@@ -144,8 +202,13 @@ def generate_exam_for_teacher(
     teacher: User,
     request_data: dict[str, Any],
 ) -> AIExamGenerationJob:
-    job = create_ai_exam_generation_job(db, teacher, request_data)
-    _process_ai_exam_job(db, job, request_data)
+    job, _ = create_ai_exam_generation_job(db, teacher, request_data)
+    try:
+        _process_ai_exam_job(db, job, request_data)
+    except AIExamGenerationError:
+        refund_ai_qc_usage(db, job.id, "initial")
+        raise
+    settle_ai_qc_usage(db, job.id, "initial")
     return get_teacher_ai_exam_job(db, teacher, job.id)
 
 
@@ -156,7 +219,9 @@ def run_ai_exam_generation_job(job_id: int) -> None:
         if not job or job.status != "running":
             return
         _process_ai_exam_job(db, job, _build_request_data_from_job(job))
+        settle_ai_qc_usage(db, job.id, "initial")
     except AIExamGenerationError:
+        refund_ai_qc_usage(db, job_id, "initial")
         return
     finally:
         db.close()
@@ -167,8 +232,19 @@ def start_more_questions_for_teacher(
     teacher: User,
     job_id: int,
     data: dict[str, Any],
-) -> tuple[AIExamGenerationJob, dict[str, Any]]:
+    idempotency_key: str | None = None,
+) -> tuple[AIExamGenerationJob, dict[str, Any] | None, bool]:
+    grant_teacher_welcome_qc(db, teacher)
     job = get_teacher_ai_exam_job(db, teacher, job_id)
+    operation_key = _ai_operation_key(
+        teacher.id,
+        f"generate-more:{job_id}",
+        idempotency_key,
+    )
+    db.query(User).filter(User.id == teacher.id).with_for_update().one()
+    existing_usage = get_ai_usage_by_operation_key(db, teacher.id, operation_key)
+    if existing_usage:
+        return job, None, False
     if job.status in {"running", "generating_more"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -191,9 +267,17 @@ def start_more_questions_for_teacher(
     job.status = "generating_more"
     job.error_message = ""
     job.updated_at = utc_now()
+    reserve_ai_qc(
+        db,
+        teacher,
+        job,
+        operation_key=operation_key,
+        operation_type="generate_more",
+        question_count=int(request_data["question_count"]),
+    )
     db.commit()
     db.refresh(job)
-    return job, request_data
+    return job, request_data, True
 
 
 def run_more_questions_job(job_id: int, request_data: dict[str, Any]) -> None:
@@ -203,7 +287,9 @@ def run_more_questions_job(job_id: int, request_data: dict[str, Any]) -> None:
         if not job or job.status != "generating_more":
             return
         _process_more_questions_job(db, job, request_data)
+        settle_ai_qc_usage(db, job.id, "generate_more")
     except AIExamGenerationError:
+        refund_ai_qc_usage(db, job_id, "generate_more")
         return
     finally:
         db.close()
@@ -700,6 +786,11 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
         "total_points": float(job.total_points or 0),
         "provider": job.provider or "",
         "model": job.model or "",
+        "qc_reserved": int(job.qc_reserved or 0),
+        "qc_charged": int(job.qc_charged or 0),
+        "qc_refunded": int(job.qc_refunded or 0),
+        "free_questions_used": int(job.free_questions_used or 0),
+        "qc_status": job.qc_status or "none",
         "error_message": job.error_message or "",
         "created_at": job.created_at,
         "updated_at": job.updated_at,
@@ -1278,13 +1369,10 @@ def _mark_job_failed(db: Session, job_id: int, errors: list[str]) -> None:
     if not job:
         return
 
-    has_existing_drafts = (
-        db.query(AIQuestionDraft.id)
-        .filter(AIQuestionDraft.job_id == job_id)
-        .first()
-        is not None
+    db.query(AIQuestionDraft).filter(AIQuestionDraft.job_id == job_id).delete(
+        synchronize_session=False
     )
-    job.status = "completed" if has_existing_drafts else "failed"
+    job.status = "failed"
     job.error_message = "\n".join(errors)
     job.updated_at = utc_now()
     db.commit()

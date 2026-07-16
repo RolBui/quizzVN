@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -34,15 +34,23 @@ router = APIRouter(prefix="/api/ai-exams", tags=["AI Exams"])
 def post_generate_ai_exam(
     payload: GenerateExamRequest,
     background_tasks: BackgroundTasks,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=100,
+    ),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> AIExamGenerationJobResponse:
-    job = create_ai_exam_generation_job(
+    job, created = create_ai_exam_generation_job(
         db,
         current_teacher,
         payload.model_dump(),
+        idempotency_key,
     )
-    background_tasks.add_task(run_ai_exam_generation_job, job.id)
+    if created:
+        background_tasks.add_task(run_ai_exam_generation_job, job.id)
 
     return serialize_ai_exam_job(job)
 
@@ -53,16 +61,24 @@ def post_generate_more_questions(
     job_id: int,
     payload: GenerateMoreQuestionsRequest,
     background_tasks: BackgroundTasks,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=100,
+    ),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> AIExamGenerationJobResponse:
-    job, request_data = start_more_questions_for_teacher(
+    job, request_data, created = start_more_questions_for_teacher(
         db,
         current_teacher,
         job_id,
         payload.model_dump(),
+        idempotency_key,
     )
-    background_tasks.add_task(run_more_questions_job, job.id, request_data)
+    if created and request_data is not None:
+        background_tasks.add_task(run_more_questions_job, job.id, request_data)
     return serialize_ai_exam_job(job)
 
 
