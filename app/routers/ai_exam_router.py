@@ -16,14 +16,24 @@ from app.schemas.ai_exam import (
 from app.services.ai_exam_service import (
     AIExamGenerationError,
     create_ai_exam_generation_job,
+    fail_ai_agent_job,
     get_teacher_ai_exam_job,
     run_ai_exam_generation_job,
     run_more_questions_job,
+    prepare_ai_agent_dispatch,
+    register_ai_agent_job,
+    restore_local_ai_execution,
     save_ai_exam_job_to_quiz,
     serialize_ai_exam_job,
     serialize_question_draft,
     start_more_questions_for_teacher,
     update_teacher_question_draft,
+)
+from app.core.config import settings
+from app.services.ai_agent_client import (
+    AIAgentDispatchError,
+    dispatch_ai_agent_job,
+    is_ai_agent_enabled,
 )
 
 router = APIRouter(prefix="/api/ai-exams", tags=["AI Exams"])
@@ -50,7 +60,32 @@ def post_generate_ai_exam(
         idempotency_key,
     )
     if created:
-        background_tasks.add_task(run_ai_exam_generation_job, job.id)
+        if is_ai_agent_enabled():
+            dispatch_payload = prepare_ai_agent_dispatch(db, job.id, "initial")
+            try:
+                agent_job_id = dispatch_ai_agent_job(dispatch_payload)
+                register_ai_agent_job(
+                    db,
+                    job.id,
+                    dispatch_payload["dispatch_id"],
+                    agent_job_id,
+                )
+            except AIAgentDispatchError as exc:
+                if settings.AI_AGENT_FALLBACK_LOCAL:
+                    restore_local_ai_execution(db, job.id, "initial")
+                    background_tasks.add_task(run_ai_exam_generation_job, job.id)
+                else:
+                    job = fail_ai_agent_job(
+                        db,
+                        job.id,
+                        dispatch_payload["dispatch_id"],
+                        "initial",
+                        [str(exc)],
+                    )
+        else:
+            background_tasks.add_task(run_ai_exam_generation_job, job.id)
+
+    db.refresh(job)
 
     return serialize_ai_exam_job(job)
 
@@ -78,7 +113,37 @@ def post_generate_more_questions(
         idempotency_key,
     )
     if created and request_data is not None:
-        background_tasks.add_task(run_more_questions_job, job.id, request_data)
+        if is_ai_agent_enabled():
+            dispatch_payload = prepare_ai_agent_dispatch(
+                db,
+                job.id,
+                "generate_more",
+                request_data,
+            )
+            try:
+                agent_job_id = dispatch_ai_agent_job(dispatch_payload)
+                register_ai_agent_job(
+                    db,
+                    job.id,
+                    dispatch_payload["dispatch_id"],
+                    agent_job_id,
+                )
+            except AIAgentDispatchError as exc:
+                if settings.AI_AGENT_FALLBACK_LOCAL:
+                    restore_local_ai_execution(db, job.id, "generate_more")
+                    background_tasks.add_task(run_more_questions_job, job.id, request_data)
+                else:
+                    job = fail_ai_agent_job(
+                        db,
+                        job.id,
+                        dispatch_payload["dispatch_id"],
+                        "generate_more",
+                        [str(exc)],
+                    )
+        else:
+            background_tasks.add_task(run_more_questions_job, job.id, request_data)
+
+    db.refresh(job)
     return serialize_ai_exam_job(job)
 
 

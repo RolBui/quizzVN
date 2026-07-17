@@ -35,6 +35,13 @@ class AIExamGenerationJob(Base):
     provider = Column(String(50), nullable=False, default="")
     model = Column(String(100), nullable=False, default="")
 
+    agent_dispatch_id = Column(String(64), nullable=True, unique=True, index=True)
+    agent_job_id = Column(String(64), nullable=True, index=True)
+    agent_operation = Column(String(30), nullable=True)
+    agent_request_data = Column(JSON, nullable=True)
+    agent_prompt = Column(Text, nullable=True)
+    agent_result_status = Column(String(30), nullable=False, default="none")
+
     qc_reserved = Column(Integer, nullable=False, default=0)
     qc_charged = Column(Integer, nullable=False, default=0)
     qc_refunded = Column(Integer, nullable=False, default=0)
