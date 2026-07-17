@@ -21,7 +21,7 @@ services:
     volumes:
       - ai_agent_data:/data
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     depends_on:
       redis:
         condition: service_healthy
