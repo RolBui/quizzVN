@@ -101,6 +101,17 @@ def _ensure_ai_exam_generation_job_columns() -> None:
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_refunded INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS free_questions_used INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_dispatch_id VARCHAR(64);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_job_id VARCHAR(64);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_operation VARCHAR(30);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_request_data JSONB;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_prompt TEXT;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_result_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_dispatch_id
+            ON ai_exam_generation_jobs (agent_dispatch_id)
+            WHERE agent_dispatch_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_job_id
+            ON ai_exam_generation_jobs (agent_job_id);
             UPDATE ai_exam_generation_jobs
             SET question_type_distribution = '{}'::jsonb
             WHERE question_type_distribution IS NULL;
@@ -114,6 +125,16 @@ def _ensure_ai_exam_generation_job_columns() -> None:
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_refunded INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS free_questions_used INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS qc_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_dispatch_id VARCHAR(64);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_job_id VARCHAR(64);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_operation VARCHAR(30);
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_request_data JSON;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_prompt TEXT;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_result_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_dispatch_id
+            ON ai_exam_generation_jobs (agent_dispatch_id);
+            CREATE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_job_id
+            ON ai_exam_generation_jobs (agent_job_id);
             UPDATE ai_exam_generation_jobs
             SET question_type_distribution = '{}'
             WHERE question_type_distribution IS NULL;
@@ -216,8 +237,10 @@ def run_ai_exam_generation_job(job_id: int) -> None:
     db = SessionLocal()
     try:
         job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
-        if not job or job.status != "running":
+        if not job or job.status not in {"running", "queued"}:
             return
+        job.status = "running"
+        db.commit()
         _process_ai_exam_job(db, job, _build_request_data_from_job(job))
         settle_ai_qc_usage(db, job.id, "initial")
     except AIExamGenerationError:
@@ -245,7 +268,7 @@ def start_more_questions_for_teacher(
     existing_usage = get_ai_usage_by_operation_key(db, teacher.id, operation_key)
     if existing_usage:
         return job, None, False
-    if job.status in {"running", "generating_more"}:
+    if job.status in {"running", "queued", "generating_more"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="AI exam job is already generating questions",
@@ -293,6 +316,162 @@ def run_more_questions_job(job_id: int, request_data: dict[str, Any]) -> None:
         return
     finally:
         db.close()
+
+
+def prepare_ai_agent_dispatch(
+    db: Session,
+    job_id: int,
+    operation: str,
+    request_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    job = (
+        db.query(AIExamGenerationJob)
+        .filter(AIExamGenerationJob.id == job_id)
+        .with_for_update()
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI exam job not found")
+    if operation not in {"initial", "generate_more"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported AI operation")
+
+    normalized_request = dict(request_data or _build_request_data_from_job(job))
+    if operation == "generate_more":
+        existing_questions = _build_existing_question_context(db, job.id)
+        prompt = build_more_questions_prompt(normalized_request, existing_questions)
+    else:
+        prompt = job.prompt
+
+    dispatch_id = uuid4().hex
+    job.agent_dispatch_id = dispatch_id
+    job.agent_job_id = None
+    job.agent_operation = operation
+    job.agent_request_data = normalized_request
+    job.agent_prompt = prompt
+    job.agent_result_status = "pending"
+    job.status = "queued"
+    job.error_message = ""
+    job.updated_at = utc_now()
+    db.commit()
+
+    return {
+        "dispatch_id": dispatch_id,
+        "external_job_id": str(job.id),
+        "operation": operation,
+        "prompt": prompt,
+        "request_data": normalized_request,
+    }
+
+
+def register_ai_agent_job(db: Session, job_id: int, dispatch_id: str, agent_job_id: str) -> None:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job or job.agent_dispatch_id != dispatch_id:
+        return
+    job.agent_job_id = agent_job_id
+    job.updated_at = utc_now()
+    db.commit()
+
+
+def restore_local_ai_execution(db: Session, job_id: int, operation: str) -> None:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        return
+    job.status = "running" if operation == "initial" else "generating_more"
+    job.agent_result_status = "fallback_local"
+    job.updated_at = utc_now()
+    db.commit()
+
+
+def fail_ai_agent_job(
+    db: Session,
+    job_id: int,
+    dispatch_id: str,
+    operation: str,
+    errors: list[str],
+) -> AIExamGenerationJob:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI exam job not found")
+    if job.agent_dispatch_id != dispatch_id or job.agent_operation != operation:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stale AI Agent callback")
+    if job.agent_result_status in {"completed", "failed"}:
+        return job
+
+    if operation == "initial":
+        _mark_job_failed(db, job.id, errors)
+    else:
+        _mark_more_questions_failed(db, job.id, errors)
+    refund_ai_qc_usage(db, job.id, operation)
+
+    job = db.get(AIExamGenerationJob, job_id)
+    job.agent_result_status = "failed"
+    job.updated_at = utc_now()
+    db.commit()
+    return job
+
+
+def complete_ai_agent_job(
+    db: Session,
+    job_id: int,
+    dispatch_id: str,
+    operation: str,
+    payload: dict[str, Any],
+    raw_response: dict[str, Any] | str,
+    provider: str,
+    model: str,
+) -> AIExamGenerationJob:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI exam job not found")
+    if job.agent_dispatch_id != dispatch_id or job.agent_operation != operation:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stale AI Agent callback")
+    if job.agent_result_status == "completed":
+        return job
+    if job.agent_result_status == "failed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="AI Agent job already failed")
+
+    request_data = dict(job.agent_request_data or {})
+    if not request_data:
+        return fail_ai_agent_job(
+            db,
+            job_id,
+            dispatch_id,
+            operation,
+            ["AI Agent request context is missing"],
+        )
+
+    # A callback can be retried after the result was saved but before QC settlement.
+    already_applied = job.status == "completed"
+    if not already_applied:
+        sanitized_payload = sanitize_ai_exam_payload(payload)
+        if operation == "initial":
+            errors = _validate_generated_ai_exam_payload(
+                db,
+                job.id,
+                sanitized_payload,
+                request_data,
+                False,
+            )
+        else:
+            errors = _validate_more_questions_payload(db, job.id, sanitized_payload, request_data)
+
+        if errors:
+            return fail_ai_agent_job(db, job_id, dispatch_id, operation, errors)
+
+        result = AIProviderResult(payload=sanitized_payload, raw_response=raw_response)
+        if operation == "initial":
+            _save_completed_job(db, job, result)
+        else:
+            _append_questions_to_job(db, job, result)
+
+    settle_ai_qc_usage(db, job_id, operation)
+    job = db.get(AIExamGenerationJob, job_id)
+    job.provider = provider or job.provider
+    job.model = model or job.model
+    job.agent_result_status = "completed"
+    job.updated_at = utc_now()
+    db.commit()
+    return job
 
 
 def _process_ai_exam_job(
@@ -786,6 +965,9 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
         "total_points": float(job.total_points or 0),
         "provider": job.provider or "",
         "model": job.model or "",
+        "agent_job_id": job.agent_job_id,
+        "agent_operation": job.agent_operation,
+        "agent_result_status": job.agent_result_status or "none",
         "qc_reserved": int(job.qc_reserved or 0),
         "qc_charged": int(job.qc_charged or 0),
         "qc_refunded": int(job.qc_refunded or 0),

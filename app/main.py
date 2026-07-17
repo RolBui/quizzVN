@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.admin_router import router as admin_router
 from app.routers.analytics_router import router as analytics_router
 from app.routers.ai_exam_router import router as ai_exam_router
+from app.routers.ai_agent_router import router as ai_agent_router
 from app.routers.auth_router import router as auth_router
 from app.routers.billing_router import router as billing_router
 from app.routers.chat_router import router as chat_router
@@ -136,5 +137,6 @@ app.include_router(student_router)
 app.include_router(teacher_router)
 app.include_router(chat_router)
 app.include_router(ai_exam_router)
+app.include_router(ai_agent_router)
 app.include_router(billing_router)
 app.include_router(dev_router)

@@ -186,6 +186,17 @@ class Settings:
     AI_EXAM_BATCH_SIZE: int = int(os.getenv("AI_EXAM_BATCH_SIZE", "10"))
     AI_QC_COST_PER_QUESTION: int = int(os.getenv("AI_QC_COST_PER_QUESTION", "1"))
     TEACHER_WELCOME_QC: int = int(os.getenv("TEACHER_WELCOME_QC", "30"))
+    AI_EXECUTION_MODE: str = os.getenv("AI_EXECUTION_MODE", "background").strip().lower() or "background"
+    AI_AGENT_URL: str = os.getenv("AI_AGENT_URL", "").strip().rstrip("/")
+    AI_AGENT_CALLBACK_BASE_URL: str = _normalize_origin(
+        os.getenv("AI_AGENT_CALLBACK_BASE_URL", BACKEND_URL)
+    )
+    AI_AGENT_SHARED_SECRET: str = os.getenv("AI_AGENT_SHARED_SECRET", "").strip()
+    AI_AGENT_TIMEOUT_SECONDS: float = float(os.getenv("AI_AGENT_TIMEOUT_SECONDS", "10"))
+    AI_AGENT_CALLBACK_TOLERANCE_SECONDS: int = int(
+        os.getenv("AI_AGENT_CALLBACK_TOLERANCE_SECONDS", "300")
+    )
+    AI_AGENT_FALLBACK_LOCAL: bool = _parse_bool(os.getenv("AI_AGENT_FALLBACK_LOCAL"), False)
     SEPAY_API_BASE_URL: str = (
         os.getenv("SEPAY_API_BASE_URL", "https://userapi.sepay.vn/v2").strip().rstrip("/")
         or "https://userapi.sepay.vn/v2"

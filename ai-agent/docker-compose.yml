@@ -1,0 +1,45 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - ai_agent_redis:/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      AI_AGENT_DATABASE_URL: ${AI_AGENT_DATABASE_URL:-sqlite:////data/ai_agent.db}
+    volumes:
+      - ai_agent_data:/data
+    ports:
+      - "8100:8100"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: celery -A ai_agent.celery_app:celery_app worker --loglevel=INFO --concurrency=1
+    env_file: ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      AI_AGENT_DATABASE_URL: ${AI_AGENT_DATABASE_URL:-sqlite:////data/ai_agent.db}
+    volumes:
+      - ai_agent_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  ai_agent_redis:
+  ai_agent_data:

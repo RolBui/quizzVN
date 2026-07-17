@@ -239,6 +239,9 @@ class AIExamGenerationJobResponse(BaseModel):
     total_points: float
     provider: str
     model: str
+    agent_job_id: str | None = None
+    agent_operation: str | None = None
+    agent_result_status: str = "none"
     qc_reserved: int = 0
     qc_charged: int = 0
     qc_refunded: int = 0
