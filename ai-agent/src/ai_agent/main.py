@@ -54,7 +54,7 @@ def create_job(
             existing.error_message = ""
             db.commit()
             try:
-                generate_exam.delay(existing.id)
+                generate_exam.apply_async(args=[existing.id], priority=int(existing.priority or 0))
             except Exception as exc:
                 existing.status = "dispatch_failed"
                 existing.error_message = str(exc)
@@ -73,6 +73,11 @@ def create_job(
         request_data=payload.request_data,
         callback_url=str(payload.callback_url),
         status="queued",
+        stage="queued",
+        progress_current=0,
+        progress_total=int(payload.request_data.get("question_count") or 0),
+        progress_message="Job is waiting for an AI worker",
+        priority=payload.priority,
         provider=settings.AI_PROVIDER,
         model=settings.AI_MODEL,
     )
@@ -87,7 +92,7 @@ def create_job(
         raise
     db.refresh(job)
     try:
-        generate_exam.delay(job.id)
+        generate_exam.apply_async(args=[job.id], priority=payload.priority)
     except Exception as exc:
         job.status = "dispatch_failed"
         job.error_message = str(exc)

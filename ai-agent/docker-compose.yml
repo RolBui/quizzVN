@@ -29,7 +29,7 @@ services:
   worker:
     build: .
     restart: unless-stopped
-    command: celery -A ai_agent.celery_app:celery_app worker --loglevel=INFO --concurrency=1
+    command: celery -A ai_agent.celery_app:celery_app worker --loglevel=INFO --concurrency=${AI_AGENT_WORKER_CONCURRENCY:-1}
     env_file: ../.env
     environment:
       REDIS_URL: redis://redis:6379/0

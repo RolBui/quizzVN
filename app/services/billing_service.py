@@ -470,6 +470,11 @@ def _active_entitlement(
     return entitlement
 
 
+def get_teacher_ai_priority(db: Session, teacher_id: int) -> int:
+    entitlement = _active_entitlement(db, teacher_id)
+    return max(0, min(int(entitlement.priority_level or 0), 9)) if entitlement else 0
+
+
 def _today_in_vietnam() -> date:
     return utc_now().astimezone(VIETNAM_TIMEZONE).date()
 

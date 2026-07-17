@@ -67,6 +67,7 @@ Rules:
 3. Each question must have a clear content field.
 4. Each multiple_choice question must have exactly 4 options.
 5. correct_answer must match one of the options for multiple_choice.
+5a. For true_false, options must be an empty array and correct_answer MUST be the unquoted JSON boolean true or false. Never return "true", "false", "Đúng", "Sai", 1, or 0.
 6. Each question must include explanation.
 7. Each question must include difficulty: easy, medium, or hard.
 8. Each question must include points.
@@ -127,6 +128,7 @@ Previous JSON:
 {previous_json}
 
 Please fix the JSON. Return only valid JSON. Do not add markdown.
+For true_false questions, correct_answer must be the unquoted JSON boolean true or false.
 Do not use underscores or artificial underline markers in option text.
 Keep modern international proper nouns in their common form. Do not use hyphenated Vietnamese phonetic spellings such as In-do-ne-xi-a or Phi-lip-pin.
 """

@@ -24,6 +24,11 @@ class AgentJob(Base):
     raw_response = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=False, default="")
     attempt_count = Column(Integer, nullable=False, default=0)
+    stage = Column(String(30), nullable=False, default="queued")
+    progress_current = Column(Integer, nullable=False, default=0)
+    progress_total = Column(Integer, nullable=False, default=0)
+    progress_message = Column(Text, nullable=False, default="")
+    priority = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

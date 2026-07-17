@@ -50,7 +50,7 @@ class AgentApiTests(unittest.TestCase):
         settings.SHARED_SECRET = self.original_secret
 
     def test_create_job_is_idempotent(self) -> None:
-        with patch("ai_agent.main.generate_exam.delay") as delay:
+        with patch("ai_agent.main.generate_exam.apply_async") as delay:
             first = self.client.post("/v1/jobs", json=self.payload, headers=self.headers)
             second = self.client.post("/v1/jobs", json=self.payload, headers=self.headers)
 
@@ -67,6 +67,26 @@ class AgentApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+    def test_accepts_100_jobs_without_executing_them_in_request_thread(self) -> None:
+        with patch("ai_agent.main.generate_exam.apply_async") as delay:
+            responses = []
+            for index in range(100):
+                dispatch_id = f"{index:032x}"
+                payload = {
+                    **self.payload,
+                    "dispatch_id": dispatch_id,
+                    "external_job_id": str(index + 1),
+                }
+                headers = {
+                    **self.headers,
+                    "Idempotency-Key": dispatch_id,
+                }
+                responses.append(self.client.post("/v1/jobs", json=payload, headers=headers))
+
+        self.assertTrue(all(response.status_code == 202 for response in responses))
+        self.assertTrue(all(response.json()["status"] == "queued" for response in responses))
+        self.assertEqual(delay.call_count, 100)
 
 
 if __name__ == "__main__":

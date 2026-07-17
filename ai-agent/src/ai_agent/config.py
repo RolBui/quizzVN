@@ -26,6 +26,12 @@ class Settings:
     PROVIDER_TIMEOUT_SECONDS = float(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "180"))
     PROVIDER_RETRY_COUNT = int(os.getenv("AI_PROVIDER_RETRY_COUNT", "3"))
     RETRY_BASE_SECONDS = float(os.getenv("AI_AGENT_RETRY_BASE_SECONDS", "5"))
+    BATCH_SIZE = max(1, min(int(os.getenv("AI_AGENT_BATCH_SIZE", "10")), 50))
+    SEMANTIC_REPAIR_COUNT = max(
+        0,
+        min(int(os.getenv("AI_AGENT_SEMANTIC_REPAIR_COUNT", "2")), 3),
+    )
+    TASK_RATE_LIMIT = os.getenv("AI_AGENT_TASK_RATE_LIMIT", "").strip()
     CALLBACK_TIMEOUT_SECONDS = float(os.getenv("AI_AGENT_CALLBACK_TIMEOUT_SECONDS", "15"))
     CALLBACK_RETRY_COUNT = int(os.getenv("AI_AGENT_CALLBACK_RETRY_COUNT", "5"))
     CELERY_EAGER = _as_bool("AI_AGENT_CELERY_EAGER", False)

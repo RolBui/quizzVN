@@ -11,6 +11,7 @@ class AgentJobCreate(BaseModel):
     prompt: str = Field(min_length=1)
     request_data: dict[str, Any]
     callback_url: HttpUrl
+    priority: int = Field(default=0, ge=0, le=9)
 
 
 class AgentJobResponse(BaseModel):
@@ -23,6 +24,11 @@ class AgentJobResponse(BaseModel):
     model: str
     error_message: str
     attempt_count: int
+    stage: str
+    progress_current: int
+    progress_total: int
+    progress_message: str
+    priority: int
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -106,6 +106,34 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertEqual(result.payload, {"questions": []})
         self.assertEqual([item[1] for item in attempts], ["failed", "succeeded"])
 
+    @patch("ai_agent.provider.httpx.Client", FakeClient)
+    def test_normalizes_vietnamese_true_false_answer(self) -> None:
+        FakeClient.responses = [
+            FakeResponse(
+                200,
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": '{"questions":[{"type":"true_false","correct_answer":"Đúng"}]}'
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+
+        result = GeminiProvider(sleep=lambda _: None).generate(
+            "prompt",
+            lambda *values: None,
+        )
+
+        self.assertIs(result.payload["questions"][0]["correct_answer"], True)
+
 
 if __name__ == "__main__":
     unittest.main()
