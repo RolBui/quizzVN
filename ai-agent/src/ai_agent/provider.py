@@ -7,6 +7,7 @@ from typing import Any, Callable
 import httpx
 
 from ai_agent.config import settings
+from ai_agent.normalization import normalize_exam_payload
 
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -33,19 +34,32 @@ class GeminiProvider:
     def __init__(self, sleep: Callable[[float], None] = time.sleep) -> None:
         self.sleep = sleep
 
-    def generate(self, prompt: str, record_attempt: AttemptRecorder) -> ProviderResult:
-        text, raw_response, attempts = self._request_text(prompt, record_attempt)
+    def generate(
+        self,
+        prompt: str,
+        record_attempt: AttemptRecorder,
+        attempt_offset: int = 0,
+    ) -> ProviderResult:
+        text, raw_response, attempts = self._request_text(
+            prompt,
+            record_attempt,
+            attempt_offset=attempt_offset,
+        )
         try:
-            return ProviderResult(_parse_json(text), raw_response, attempts)
+            return ProviderResult(
+                normalize_exam_payload(_parse_json(text)),
+                raw_response,
+                attempts,
+            )
         except ProviderError:
             repair_prompt = _repair_prompt(prompt, text)
             repaired_text, repaired_raw, repair_attempts = self._request_text(
                 repair_prompt,
                 record_attempt,
-                attempt_offset=attempts,
+                attempt_offset=attempt_offset + attempts,
             )
             return ProviderResult(
-                _parse_json(repaired_text),
+                normalize_exam_payload(_parse_json(repaired_text)),
                 {"first_response": raw_response, "repair_response": repaired_raw},
                 attempts + repair_attempts,
             )
@@ -190,4 +204,27 @@ Return one valid JSON object only, without markdown or commentary.
 
 Previous response:
 {previous_text[:4000]}
+"""
+
+
+def build_semantic_repair_prompt(
+    original_prompt: str,
+    previous_payload: dict[str, Any],
+    errors: list[str],
+) -> str:
+    previous_json = json.dumps(previous_payload, ensure_ascii=False, indent=2)
+    error_text = "\n".join(f"- {error}" for error in errors)
+    return f"""{original_prompt}
+
+The previous JSON was syntactically valid but failed semantic validation.
+
+Validation errors:
+{error_text}
+
+Previous JSON:
+{previous_json}
+
+Fix every validation error and return one complete valid JSON object only.
+Do not include markdown or commentary.
+For true_false questions, correct_answer must be the unquoted JSON boolean true or false.
 """

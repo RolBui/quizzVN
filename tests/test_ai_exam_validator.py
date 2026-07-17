@@ -194,6 +194,51 @@ class AIExamValidatorTest(unittest.TestCase):
         self.assertIn("Indonesia", sanitized["questions"][0]["explanation"])
         self.assertEqual(errors, [])
 
+    def test_normalizes_true_false_answer_variants_to_json_booleans(self) -> None:
+        request_data = {
+            "question_count": 6,
+            "question_types": ["true_false"],
+            "question_type_distribution": {"true_false": 6},
+        }
+        values = ["Đúng", "Sai", "true", "false", 1, 0]
+        payload = _payload(
+            [
+                {
+                    **_question(f"Question {index}", "true_false"),
+                    "correct_answer": value,
+                }
+                for index, value in enumerate(values, start=1)
+            ]
+        )
+
+        sanitized = sanitize_ai_exam_payload(payload)
+        valid, errors = validate_ai_exam_payload(sanitized, request_data)
+
+        self.assertTrue(valid)
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            [question["correct_answer"] for question in sanitized["questions"]],
+            [True, False, True, False, True, False],
+        )
+
+    def test_rejects_unknown_true_false_answer_after_sanitizing(self) -> None:
+        request_data = {
+            "question_count": 1,
+            "question_types": ["true_false"],
+            "question_type_distribution": {"true_false": 1},
+        }
+        question = _question("Question 1", "true_false")
+        question["correct_answer"] = "Có thể đúng"
+
+        sanitized = sanitize_ai_exam_payload(_payload([question]))
+        valid, errors = validate_ai_exam_payload(sanitized, request_data)
+
+        self.assertFalse(valid)
+        self.assertIn(
+            "Question 1: true_false correct_answer must be true or false",
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

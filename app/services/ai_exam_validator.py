@@ -5,6 +5,8 @@ from typing import Any
 
 ALLOWED_QUESTION_TYPES = {"multiple_choice", "true_false", "short_answer", "essay"}
 ALLOWED_DIFFICULTIES = {"easy", "medium", "hard"}
+TRUE_ANSWER_VALUES = {"true", "1", "\u0111\u00fang", "dung", "yes"}
+FALSE_ANSWER_VALUES = {"false", "0", "sai", "no"}
 PHONETIC_PROPER_NOUN_REPLACEMENTS = (
     (
         re.compile(
@@ -129,14 +131,10 @@ def sanitize_ai_exam_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 for option in options
             ]
 
-        correct_answer = question.get("correct_answer")
-        if isinstance(correct_answer, str):
-            question["correct_answer"] = sanitize_ai_text(correct_answer)
-        elif isinstance(correct_answer, list):
-            question["correct_answer"] = [
-                sanitize_ai_text(answer) if isinstance(answer, str) else answer
-                for answer in correct_answer
-            ]
+        correct_answer = _sanitize_answer_value(question.get("correct_answer"))
+        if _normalize_text(question.get("type")).lower() == "true_false":
+            correct_answer = normalize_true_false_answer(correct_answer)
+        question["correct_answer"] = correct_answer
 
     return sanitized_payload
 
@@ -200,6 +198,10 @@ def validate_ai_question_payload(
 
 
 def build_question_payload_from_draft(draft) -> dict[str, Any]:
+    correct_answer = _sanitize_answer_value(draft.correct_answer)
+    if draft.question_type == "true_false":
+        correct_answer = normalize_true_false_answer(correct_answer)
+
     return {
         "type": draft.question_type,
         "content": sanitize_ai_text(draft.content or ""),
@@ -207,7 +209,7 @@ def build_question_payload_from_draft(draft) -> dict[str, Any]:
             sanitize_ai_text(option) if isinstance(option, str) else option
             for option in draft.options or []
         ],
-        "correct_answer": _sanitize_answer_value(draft.correct_answer),
+        "correct_answer": correct_answer,
         "explanation": sanitize_ai_text(draft.explanation or ""),
         "difficulty": draft.difficulty,
         "points": float(draft.points or 0),
@@ -223,6 +225,24 @@ def _sanitize_answer_value(value: Any) -> Any:
             sanitize_ai_text(answer) if isinstance(answer, str) else answer
             for answer in value
         ]
+    return value
+
+
+def normalize_true_false_answer(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+
+    if isinstance(value, str):
+        normalized = sanitize_ai_text(value).casefold()
+        normalized = re.sub(r"[.!?]+$", "", normalized).strip()
+        if normalized in TRUE_ANSWER_VALUES:
+            return True
+        if normalized in FALSE_ANSWER_VALUES:
+            return False
+
     return value
 
 
@@ -256,9 +276,6 @@ def _validate_multiple_choice(question: dict[str, Any], index: int) -> list[str]
 def _validate_true_false(question: dict[str, Any], index: int) -> list[str]:
     correct_answer = question.get("correct_answer")
     if isinstance(correct_answer, bool):
-        return []
-
-    if isinstance(correct_answer, str) and correct_answer.strip().lower() in {"true", "false"}:
         return []
 
     return [f"Question {index}: true_false correct_answer must be true or false"]

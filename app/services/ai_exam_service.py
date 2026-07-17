@@ -32,6 +32,7 @@ from app.services.gemini_client import GeminiAIProviderClient
 from app.services.billing_service import (
     get_ai_usage_by_operation_key,
     grant_teacher_welcome_qc,
+    get_teacher_ai_priority,
     refund_ai_qc_usage,
     reserve_ai_qc,
     settle_ai_qc_usage,
@@ -49,6 +50,12 @@ OPTION_KEYS = ("A", "B", "C", "D")
 class AIExamGenerationError(RuntimeError):
     def __init__(self, errors: list[str]) -> None:
         super().__init__("AI exam generation failed")
+        self.errors = errors
+
+
+class AIAgentResultValidationError(RuntimeError):
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("AI Agent result failed semantic validation")
         self.errors = errors
 
 
@@ -107,6 +114,10 @@ def _ensure_ai_exam_generation_job_columns() -> None:
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_request_data JSONB;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_prompt TEXT;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_result_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_stage VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_current INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_total INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_message TEXT NOT NULL DEFAULT '';
             CREATE UNIQUE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_dispatch_id
             ON ai_exam_generation_jobs (agent_dispatch_id)
             WHERE agent_dispatch_id IS NOT NULL;
@@ -131,6 +142,10 @@ def _ensure_ai_exam_generation_job_columns() -> None:
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_request_data JSON;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_prompt TEXT;
             ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_result_status VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_stage VARCHAR(30) NOT NULL DEFAULT 'none';
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_current INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_total INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE ai_exam_generation_jobs ADD COLUMN IF NOT EXISTS agent_progress_message TEXT NOT NULL DEFAULT '';
             CREATE UNIQUE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_dispatch_id
             ON ai_exam_generation_jobs (agent_dispatch_id);
             CREATE INDEX IF NOT EXISTS ix_ai_exam_generation_jobs_agent_job_id
@@ -349,6 +364,10 @@ def prepare_ai_agent_dispatch(
     job.agent_request_data = normalized_request
     job.agent_prompt = prompt
     job.agent_result_status = "pending"
+    job.agent_stage = "queued"
+    job.agent_progress_current = 0
+    job.agent_progress_total = int(normalized_request.get("question_count") or 0)
+    job.agent_progress_message = "Dang cho AI Agent xu ly"
     job.status = "queued"
     job.error_message = ""
     job.updated_at = utc_now()
@@ -360,6 +379,7 @@ def prepare_ai_agent_dispatch(
         "operation": operation,
         "prompt": prompt,
         "request_data": normalized_request,
+        "priority": get_teacher_ai_priority(db, job.teacher_id),
     }
 
 
@@ -405,6 +425,37 @@ def fail_ai_agent_job(
 
     job = db.get(AIExamGenerationJob, job_id)
     job.agent_result_status = "failed"
+    job.agent_stage = "failed"
+    job.agent_progress_message = errors[0] if errors else "AI Agent generation failed"
+    job.updated_at = utc_now()
+    db.commit()
+    return job
+
+
+def update_ai_agent_job_progress(
+    db: Session,
+    job_id: int,
+    dispatch_id: str,
+    operation: str,
+    stage: str,
+    current: int,
+    total: int,
+    message: str,
+) -> AIExamGenerationJob:
+    job = db.query(AIExamGenerationJob).filter(AIExamGenerationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI exam job not found")
+    if job.agent_dispatch_id != dispatch_id or job.agent_operation != operation:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stale AI Agent callback")
+    if job.agent_result_status in {"completed", "failed"}:
+        return job
+
+    progress_total = max(0, int(total or job.agent_progress_total or job.question_count or 0))
+    job.agent_stage = (stage or "running")[:30]
+    job.agent_progress_total = progress_total
+    job.agent_progress_current = max(0, min(int(current or 0), progress_total))
+    job.agent_progress_message = (message or "")[:500]
+    job.status = "queued" if job.agent_stage == "queued" else "running"
     job.updated_at = utc_now()
     db.commit()
     return job
@@ -456,7 +507,7 @@ def complete_ai_agent_job(
             errors = _validate_more_questions_payload(db, job.id, sanitized_payload, request_data)
 
         if errors:
-            return fail_ai_agent_job(db, job_id, dispatch_id, operation, errors)
+            raise AIAgentResultValidationError(errors)
 
         result = AIProviderResult(payload=sanitized_payload, raw_response=raw_response)
         if operation == "initial":
@@ -469,6 +520,9 @@ def complete_ai_agent_job(
     job.provider = provider or job.provider
     job.model = model or job.model
     job.agent_result_status = "completed"
+    job.agent_stage = "completed"
+    job.agent_progress_current = int(job.agent_progress_total or job.question_count or 0)
+    job.agent_progress_message = "Da tao xong cau hoi"
     job.updated_at = utc_now()
     db.commit()
     return job
@@ -968,6 +1022,10 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
         "agent_job_id": job.agent_job_id,
         "agent_operation": job.agent_operation,
         "agent_result_status": job.agent_result_status or "none",
+        "agent_stage": job.agent_stage or "none",
+        "agent_progress_current": int(job.agent_progress_current or 0),
+        "agent_progress_total": int(job.agent_progress_total or 0),
+        "agent_progress_message": job.agent_progress_message or "",
         "qc_reserved": int(job.qc_reserved or 0),
         "qc_charged": int(job.qc_charged or 0),
         "qc_refunded": int(job.qc_refunded or 0),

@@ -41,6 +41,10 @@ class AIExamGenerationJob(Base):
     agent_request_data = Column(JSON, nullable=True)
     agent_prompt = Column(Text, nullable=True)
     agent_result_status = Column(String(30), nullable=False, default="none")
+    agent_stage = Column(String(30), nullable=False, default="none")
+    agent_progress_current = Column(Integer, nullable=False, default=0)
+    agent_progress_total = Column(Integer, nullable=False, default=0)
+    agent_progress_message = Column(Text, nullable=False, default="")
 
     qc_reserved = Column(Integer, nullable=False, default=0)
     qc_charged = Column(Integer, nullable=False, default=0)

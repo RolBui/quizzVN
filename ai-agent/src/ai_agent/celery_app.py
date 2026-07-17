@@ -16,4 +16,14 @@ celery_app.conf.update(
     task_track_started=True,
     task_always_eager=settings.CELERY_EAGER,
     task_eager_propagates=True,
+    task_default_priority=0,
+    task_inherit_parent_priority=True,
+    broker_transport_options={
+        "priority_steps": list(range(10)),
+        "sep": ":",
+    },
 )
+if settings.TASK_RATE_LIMIT:
+    celery_app.conf.task_annotations = {
+        "ai_agent.generate_exam": {"rate_limit": settings.TASK_RATE_LIMIT},
+    }

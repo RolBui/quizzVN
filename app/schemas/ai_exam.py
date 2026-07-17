@@ -242,6 +242,10 @@ class AIExamGenerationJobResponse(BaseModel):
     agent_job_id: str | None = None
     agent_operation: str | None = None
     agent_result_status: str = "none"
+    agent_stage: str = "none"
+    agent_progress_current: int = 0
+    agent_progress_total: int = 0
+    agent_progress_message: str = ""
     qc_reserved: int = 0
     qc_charged: int = 0
     qc_refunded: int = 0
