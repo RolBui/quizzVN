@@ -4,17 +4,24 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from ai_agent.config import settings
 
 
-connect_args = (
-    {"check_same_thread": False, "timeout": 30}
-    if settings.DATABASE_URL.startswith("sqlite")
-    else {}
-)
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
+is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
+engine_options = {
+    "pool_pre_ping": True,
+    "connect_args": connect_args,
+}
+if not is_sqlite:
+    engine_options.update(
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
+    )
+engine = create_engine(settings.DATABASE_URL, **engine_options)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
-if settings.DATABASE_URL.startswith("sqlite"):
+if is_sqlite:
     @event.listens_for(engine, "connect")
     def _configure_sqlite(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()

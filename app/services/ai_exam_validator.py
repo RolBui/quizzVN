@@ -49,6 +49,16 @@ def validate_ai_exam_payload(
     duration_minutes = _to_float(payload.get("duration_minutes"))
     if duration_minutes is None or duration_minutes <= 0:
         errors.append("duration_minutes must be greater than 0")
+    expected_duration_minutes = _to_float(request_data.get("duration_minutes"))
+    if (
+        duration_minutes is not None
+        and expected_duration_minutes is not None
+        and duration_minutes != expected_duration_minutes
+    ):
+        errors.append(
+            "Expected duration_minutes "
+            f"{expected_duration_minutes:g}, got {duration_minutes:g}"
+        )
 
     declared_total_points = _to_float(payload.get("total_points"))
     if declared_total_points is None or declared_total_points <= 0:
@@ -282,20 +292,29 @@ def _validate_true_false(question: dict[str, Any], index: int) -> list[str]:
 
 
 def _validate_short_answer(question: dict[str, Any], index: int) -> list[str]:
+    errors: list[str] = []
+    if question.get("options") not in (None, []):
+        errors.append(f"Question {index}: short_answer options must be an empty list")
+
     correct_answer = question.get("correct_answer")
     if isinstance(correct_answer, str) and correct_answer.strip():
-        return []
+        return errors
 
     if isinstance(correct_answer, list) and any(_normalize_text(answer) for answer in correct_answer):
-        return []
+        return errors
 
-    return [f"Question {index}: short_answer correct_answer is required"]
+    errors.append(f"Question {index}: short_answer correct_answer is required")
+    return errors
 
 
 def _validate_essay(question: dict[str, Any], index: int) -> list[str]:
+    errors: list[str] = []
+    if question.get("options") not in (None, []):
+        errors.append(f"Question {index}: essay options must be an empty list")
     if _normalize_text(question.get("explanation")):
-        return []
-    return [f"Question {index}: essay explanation or rubric is required"]
+        return errors
+    errors.append(f"Question {index}: essay explanation or rubric is required")
+    return errors
 
 
 def _normalize_text(value: Any) -> str:

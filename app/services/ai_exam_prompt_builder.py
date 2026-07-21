@@ -9,18 +9,50 @@ EXAM_OUTPUT_SCHEMA = {
     "grade": "string",
     "duration_minutes": 0,
     "total_points": 0,
-    "questions": [
-        {
-            "type": "multiple_choice",
-            "content": "string",
-            "options": ["string", "string", "string", "string"],
-            "correct_answer": "string",
-            "explanation": "string",
-            "difficulty": "easy",
-            "points": 1,
-            "topic": "string",
-        }
-    ],
+    "questions": [],
+}
+
+QUESTION_TYPE_OUTPUT_SCHEMAS = {
+    "multiple_choice": {
+        "type": "multiple_choice",
+        "content": "string",
+        "options": ["option A", "option B", "option C", "option D"],
+        "correct_answer": "one exact value from options",
+        "explanation": "string",
+        "difficulty": "easy | medium | hard",
+        "points": 1,
+        "topic": "string",
+    },
+    "true_false": {
+        "type": "true_false",
+        "content": "string",
+        "options": [],
+        "correct_answer": True,
+        "explanation": "string",
+        "difficulty": "easy | medium | hard",
+        "points": 1,
+        "topic": "string",
+    },
+    "short_answer": {
+        "type": "short_answer",
+        "content": "string",
+        "options": [],
+        "correct_answer": "a non-empty string or an array of accepted strings",
+        "explanation": "string",
+        "difficulty": "easy | medium | hard",
+        "points": 1,
+        "topic": "string",
+    },
+    "essay": {
+        "type": "essay",
+        "content": "string",
+        "options": [],
+        "correct_answer": None,
+        "explanation": "a detailed scoring rubric or expected answer outline",
+        "difficulty": "easy | medium | hard",
+        "points": 1,
+        "topic": "string",
+    },
 }
 
 
@@ -41,6 +73,15 @@ def build_exam_generation_prompt(data: dict[str, Any]) -> str:
         else "percentages"
     )
     output_schema = json.dumps(EXAM_OUTPUT_SCHEMA, ensure_ascii=False, indent=2)
+    selected_type_schemas = {
+        question_type: QUESTION_TYPE_OUTPUT_SCHEMAS[question_type]
+        for question_type in data["question_types"]
+    }
+    question_type_schemas = json.dumps(
+        selected_type_schemas,
+        ensure_ascii=False,
+        indent=2,
+    )
     additional_instructions = data.get("additional_instructions") or "None"
 
     return f"""You are an exam generation assistant for QuizzVN.
@@ -62,12 +103,15 @@ Exam requirements:
 - Additional instructions: {additional_instructions}
 
 Rules:
+0. The structured Exam requirements above are authoritative. If Topic or Additional instructions contain a conflicting duration, question count, question type, type count, or difficulty count, ignore the conflicting value and follow the structured fields above.
 1. The exam must be suitable for the specified grade.
 2. Do not create duplicate questions.
 3. Each question must have a clear content field.
 4. Each multiple_choice question must have exactly 4 options.
 5. correct_answer must match one of the options for multiple_choice.
 5a. For true_false, options must be an empty array and correct_answer MUST be the unquoted JSON boolean true or false. Never return "true", "false", "Đúng", "Sai", 1, or 0.
+5b. For short_answer, options must be an empty array and correct_answer must be a non-empty string or a non-empty array of accepted strings.
+5c. For essay, options must be an empty array, correct_answer may be null, and explanation must contain a detailed scoring rubric or expected answer outline.
 6. Each question must include explanation.
 7. Each question must include difficulty: easy, medium, or hard.
 8. Each question must include points.
@@ -85,6 +129,10 @@ Rules:
 
 Return JSON in this exact structure:
 {output_schema}
+
+Use the matching question object format below for each selected question type.
+These are format examples only; do not add example questions to the response:
+{question_type_schemas}
 """
 
 

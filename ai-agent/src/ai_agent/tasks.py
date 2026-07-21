@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -7,9 +8,11 @@ from celery import Task
 
 from ai_agent.celery_app import celery_app
 from ai_agent.batching import aggregate_batch_payloads, build_batch_prompt, build_batch_specs
+from ai_agent.artifact_service import create_job_artifact
 from ai_agent.config import settings
+from ai_agent.data_lake import DataLakeError, get_data_lake
 from ai_agent.database import SessionLocal
-from ai_agent.models import AgentAttempt, AgentJob
+from ai_agent.models import AgentArtifact, AgentAttempt, AgentJob
 from ai_agent.provider import ProviderError, build_semantic_repair_prompt, get_provider
 from ai_agent.security import callback_headers
 from ai_agent.validation import validate_exam_payload
@@ -292,6 +295,71 @@ def _deliver_with_semantic_repair(db, job: AgentJob) -> None:
         _deliver_callback(job)
 
 
+def _queue_terminal_artifact(db, job: AgentJob) -> None:
+    if not settings.DATA_LAKE_ENABLED:
+        return
+    artifact_type = "generated" if job.result_payload is not None else "rejected"
+    try:
+        artifact, created = create_job_artifact(db, job, artifact_type)
+        if created or artifact.status in {"queued", "failed"}:
+            archive_artifact.apply_async(args=[artifact.id], priority=0)
+    except Exception as exc:
+        logger.warning("Unable to queue data lake artifact for job %s: %s", job.id, exc)
+
+
+@celery_app.task(bind=True, name="ai_agent.archive_artifact", max_retries=3)
+def archive_artifact(self: Task, artifact_id: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        artifact = db.get(AgentArtifact, artifact_id)
+        if not artifact:
+            return {"status": "missing"}
+        if artifact.status == "uploaded":
+            return {"status": "uploaded", "file_id": artifact.external_file_id}
+        if not artifact.payload:
+            artifact.status = "failed"
+            artifact.error_message = "Artifact payload is missing"
+            db.commit()
+            return {"status": "failed"}
+
+        artifact.status = "uploading"
+        artifact.error_message = ""
+        db.commit()
+        try:
+            result = get_data_lake().upload_json(
+                artifact.object_name,
+                artifact.payload,
+                {
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact.artifact_type,
+                    "external_job_id": artifact.external_job_id,
+                    "schema_version": artifact.schema_version,
+                    **(artifact.artifact_metadata or {}),
+                },
+            )
+        except DataLakeError as exc:
+            artifact.status = "failed"
+            artifact.error_message = str(exc)[:2000]
+            db.commit()
+            if self.request.retries < self.max_retries:
+                countdown = min(300, 15 * (2 ** self.request.retries))
+                raise self.retry(exc=exc, countdown=countdown)
+            return {"status": "failed", "error": artifact.error_message}
+
+        artifact.status = "uploaded"
+        artifact.external_file_id = result.external_file_id
+        artifact.web_view_link = result.web_view_link
+        artifact.checksum_sha256 = result.checksum_sha256
+        artifact.size_bytes = result.size_bytes
+        artifact.uploaded_at = datetime.now(timezone.utc)
+        artifact.error_message = ""
+        artifact.payload = None
+        db.commit()
+        return {"status": "uploaded", "file_id": result.external_file_id}
+    finally:
+        db.close()
+
+
 @celery_app.task(bind=True, name="ai_agent.generate_exam", max_retries=settings.CALLBACK_RETRY_COUNT)
 def generate_exam(self: Task, job_id: str) -> dict[str, Any]:
     db = SessionLocal()
@@ -332,6 +400,7 @@ def generate_exam(self: Task, job_id: str) -> dict[str, Any]:
             job.progress_current = int(job.progress_total or 0)
             job.progress_message = "\u0110\u00e3 ho\u00e0n t\u1ea5t t\u1ea1o c\u00e2u h\u1ecfi"
         db.commit()
+        _queue_terminal_artifact(db, job)
         return {"status": job.status, "attempts": job.attempt_count}
     finally:
         db.close()

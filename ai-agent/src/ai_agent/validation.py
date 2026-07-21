@@ -26,6 +26,15 @@ def validate_exam_payload(
     duration = _number(normalized.get("duration_minutes"))
     if duration is None or duration <= 0:
         errors.append("duration_minutes must be greater than 0")
+    expected_duration = _number(request_data.get("duration_minutes"))
+    if (
+        duration is not None
+        and expected_duration is not None
+        and duration != expected_duration
+    ):
+        errors.append(
+            f"Expected duration_minutes {expected_duration:g}, got {duration:g}"
+        )
 
     questions = normalized.get("questions")
     if not isinstance(questions, list):
@@ -143,6 +152,9 @@ def validate_question(
         if options not in (None, []):
             errors.append(f"Question {index}: true_false options must be an empty list")
     elif question_type == "short_answer":
+        options = question.get("options")
+        if options not in (None, []):
+            errors.append(f"Question {index}: short_answer options must be an empty list")
         answer = question.get("correct_answer")
         if not (
             isinstance(answer, str) and answer.strip()
@@ -150,6 +162,10 @@ def validate_question(
             isinstance(answer, list) and any(_text(item) for item in answer)
         ):
             errors.append(f"Question {index}: short_answer correct_answer is required")
+    elif question_type == "essay":
+        options = question.get("options")
+        if options not in (None, []):
+            errors.append(f"Question {index}: essay options must be an empty list")
 
     return errors
 

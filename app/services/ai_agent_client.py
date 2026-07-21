@@ -47,3 +47,36 @@ def dispatch_ai_agent_job(payload: dict[str, Any]) -> str:
         return str(data["id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise AIAgentDispatchError("AI Agent returned an invalid response") from exc
+
+
+def archive_approved_ai_dataset(payload: dict[str, Any]) -> str:
+    if not settings.AI_AGENT_URL:
+        raise AIAgentDispatchError("AI_AGENT_URL is not configured")
+    if not settings.AI_AGENT_SHARED_SECRET:
+        raise AIAgentDispatchError("AI_AGENT_SHARED_SECRET is not configured")
+
+    idempotency_key = str(payload.get("idempotency_key") or "")
+    if not idempotency_key:
+        raise AIAgentDispatchError("Dataset idempotency key is required")
+    try:
+        with httpx.Client(timeout=settings.AI_AGENT_DATASET_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                f"{settings.AI_AGENT_URL}/v1/datasets/approved",
+                headers={
+                    "Authorization": f"Bearer {settings.AI_AGENT_SHARED_SECRET}",
+                    "Idempotency-Key": idempotency_key,
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise AIAgentDispatchError(
+            f"AI Agent rejected the approved dataset with HTTP {exc.response.status_code}"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise AIAgentDispatchError(f"Unable to archive approved AI dataset: {exc}") from exc
+
+    try:
+        return str(response.json()["id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AIAgentDispatchError("AI Agent returned an invalid artifact response") from exc
