@@ -193,6 +193,9 @@ class Settings:
     )
     AI_AGENT_SHARED_SECRET: str = os.getenv("AI_AGENT_SHARED_SECRET", "").strip()
     AI_AGENT_TIMEOUT_SECONDS: float = float(os.getenv("AI_AGENT_TIMEOUT_SECONDS", "10"))
+    AI_AGENT_DATASET_TIMEOUT_SECONDS: float = float(
+        os.getenv("AI_AGENT_DATASET_TIMEOUT_SECONDS", "3")
+    )
     AI_AGENT_CALLBACK_TOLERANCE_SECONDS: int = int(
         os.getenv("AI_AGENT_CALLBACK_TOLERANCE_SECONDS", "300")
     )

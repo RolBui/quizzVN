@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -33,6 +33,7 @@ class AgentJob(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     attempts = relationship("AgentAttempt", back_populates="job", cascade="all, delete-orphan")
+    artifacts = relationship("AgentArtifact", back_populates="job", cascade="all, delete-orphan")
 
 
 class AgentAttempt(Base):
@@ -48,3 +49,37 @@ class AgentAttempt(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     job = relationship("AgentJob", back_populates="attempts")
+
+
+class AgentArtifact(Base):
+    __tablename__ = "agent_artifacts"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_agent_artifacts_idempotency_key"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    job_id = Column(
+        String(36),
+        ForeignKey("agent_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_job_id = Column(String(64), nullable=False, index=True)
+    idempotency_key = Column(String(160), nullable=False, index=True)
+    artifact_type = Column(String(30), nullable=False, index=True)
+    schema_version = Column(String(20), nullable=False, default="1.0")
+    status = Column(String(30), nullable=False, default="queued", index=True)
+    storage_provider = Column(String(30), nullable=False, default="google_drive")
+    object_name = Column(String(255), nullable=False)
+    external_file_id = Column(String(255), nullable=False, default="")
+    web_view_link = Column(Text, nullable=False, default="")
+    checksum_sha256 = Column(String(64), nullable=False, default="")
+    size_bytes = Column(BigInteger, nullable=False, default=0)
+    payload = Column(JSON, nullable=True)
+    artifact_metadata = Column(JSON, nullable=False, default=dict)
+    error_message = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    job = relationship("AgentJob", back_populates="artifacts")

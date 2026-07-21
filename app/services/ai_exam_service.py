@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Any
 from uuid import uuid4
@@ -28,6 +29,7 @@ from app.services.ai_exam_validator import (
     validate_ai_question_payload,
 )
 from app.services.ai_provider_client import AIProviderClient, AIProviderError, AIProviderResult
+from app.services.ai_agent_client import AIAgentDispatchError, archive_approved_ai_dataset
 from app.services.gemini_client import GeminiAIProviderClient
 from app.services.billing_service import (
     get_ai_usage_by_operation_key,
@@ -45,6 +47,7 @@ TEACHER_QUESTION_TYPE_TRUE_FALSE = "true_false"
 TEACHER_QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 TEACHER_QUESTION_TYPE_TEXT = "text"
 OPTION_KEYS = ("A", "B", "C", "D")
+logger = logging.getLogger(__name__)
 
 
 class AIExamGenerationError(RuntimeError):
@@ -964,6 +967,32 @@ def save_ai_exam_job_to_quiz(
     job.status = "converted"
     job.updated_at = utc_now()
     db.commit()
+
+    if settings.AI_EXECUTION_MODE == "agent":
+        try:
+            archive_approved_ai_dataset(
+                {
+                    "idempotency_key": f"approved:job-{job.id}:exam-{exam['id']}:v1",
+                    "external_job_id": str(job.id),
+                    "request_data": _build_request_data_from_job(job),
+                    "questions": [
+                        build_question_payload_from_draft(draft)
+                        for draft in approved_drafts
+                    ],
+                    "metadata": {
+                        "exam_id": str(exam["id"]),
+                        "provider": job.provider or "",
+                        "model": job.model or "",
+                        "approved_question_count": len(approved_drafts),
+                    },
+                }
+            )
+        except AIAgentDispatchError as exc:
+            logger.warning(
+                "Exam %s was saved, but its approved AI dataset was not archived: %s",
+                exam["id"],
+                exc,
+            )
 
     return {
         "quiz_id": exam["id"],

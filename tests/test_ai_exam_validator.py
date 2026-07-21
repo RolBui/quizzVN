@@ -50,6 +50,20 @@ def _payload(questions: list[dict]) -> dict:
 
 
 class AIExamValidatorTest(unittest.TestCase):
+    def test_rejects_duration_that_conflicts_with_structured_request(self) -> None:
+        payload = _payload(
+            [
+                _question("Question 1"),
+                _question("Question 2"),
+            ]
+        )
+        request_data = {**REQUEST_DATA, "duration_minutes": 45}
+
+        valid, errors = validate_ai_exam_payload(payload, request_data)
+
+        self.assertFalse(valid)
+        self.assertIn("Expected duration_minutes 45, got 15", errors)
+
     def test_valid_multiple_choice_payload(self) -> None:
         payload = _payload(
             [
