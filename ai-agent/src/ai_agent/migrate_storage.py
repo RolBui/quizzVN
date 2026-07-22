@@ -9,7 +9,12 @@ from ai_agent.database import Base
 from ai_agent import models  # noqa: F401
 
 
-TABLE_ORDER = ("agent_jobs", "agent_attempts", "agent_artifacts")
+TABLE_ORDER = (
+    "agent_jobs",
+    "agent_attempts",
+    "agent_artifacts",
+    "agent_knowledge_items",
+)
 
 
 def migrate_storage(source_url: str, target_url: str) -> dict[str, int]:
@@ -19,6 +24,9 @@ def migrate_storage(source_url: str, target_url: str) -> dict[str, int]:
     source = create_engine(source_url, pool_pre_ping=True)
     target = create_engine(target_url, pool_pre_ping=True)
     try:
+        if target.dialect.name == "postgresql":
+            with target.begin() as connection:
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         Base.metadata.create_all(target)
         _assert_target_is_empty(target)
         source_metadata = MetaData()

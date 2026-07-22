@@ -12,6 +12,7 @@ from ai_agent.artifact_service import create_job_artifact
 from ai_agent.config import settings
 from ai_agent.data_lake import DataLakeError, get_data_lake
 from ai_agent.database import SessionLocal
+from ai_agent.knowledge import build_retrieval_context, index_approved_artifact
 from ai_agent.models import AgentArtifact, AgentAttempt, AgentJob
 from ai_agent.provider import ProviderError, build_semantic_repair_prompt, get_provider
 from ai_agent.security import callback_headers
@@ -205,10 +206,17 @@ def _generate_job_payload(db, job: AgentJob) -> tuple[dict[str, Any], dict[str, 
     raw_batches: list[dict[str, Any]] = []
     generated_questions: list[dict[str, Any]] = []
     completed_count = 0
+    base_prompt = job.prompt
+    try:
+        reference_context = build_retrieval_context(db, request_data, job.prompt)
+        if reference_context:
+            base_prompt = f"{job.prompt}{reference_context}"
+    except Exception as exc:
+        logger.warning("RAG retrieval skipped for job %s: %s", job.id, exc)
 
     for batch_index, batch_data in enumerate(batch_specs, start=1):
         prompt = build_batch_prompt(
-            job.prompt,
+            base_prompt,
             batch_data,
             batch_index,
             len(batch_specs),
@@ -353,9 +361,59 @@ def archive_artifact(self: Task, artifact_id: str) -> dict[str, Any]:
         artifact.size_bytes = result.size_bytes
         artifact.uploaded_at = datetime.now(timezone.utc)
         artifact.error_message = ""
+        should_index = artifact.artifact_type == "approved" and settings.RAG_ENABLED
+        if should_index:
+            artifact.artifact_metadata = {
+                **(artifact.artifact_metadata or {}),
+                "knowledge_status": "queued",
+            }
+        else:
+            artifact.payload = None
+        db.commit()
+        if should_index:
+            index_artifact_knowledge.apply_async(args=[artifact.id], priority=0)
+        return {"status": "uploaded", "file_id": result.external_file_id}
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="ai_agent.index_artifact_knowledge", max_retries=3)
+def index_artifact_knowledge(self: Task, artifact_id: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        artifact = db.get(AgentArtifact, artifact_id)
+        if not artifact:
+            return {"status": "missing"}
+        metadata = dict(artifact.artifact_metadata or {})
+        if metadata.get("knowledge_status") in {"indexed", "skipped"}:
+            return {
+                "status": metadata["knowledge_status"],
+                "indexed_count": int(metadata.get("knowledge_item_count") or 0),
+            }
+        try:
+            indexed_count = index_approved_artifact(db, artifact)
+        except Exception as exc:
+            artifact.artifact_metadata = {
+                **metadata,
+                "knowledge_status": "retrying" if self.request.retries < self.max_retries else "failed",
+                "knowledge_error": str(exc)[:2000],
+            }
+            db.commit()
+            if self.request.retries < self.max_retries:
+                countdown = min(300, 15 * (2 ** self.request.retries))
+                raise self.retry(exc=exc, countdown=countdown)
+            return {"status": "failed", "error": str(exc)[:2000]}
+
+        knowledge_status = "indexed" if indexed_count else "skipped"
+        artifact.artifact_metadata = {
+            **metadata,
+            "knowledge_status": knowledge_status,
+            "knowledge_item_count": indexed_count,
+            "knowledge_error": "",
+        }
         artifact.payload = None
         db.commit()
-        return {"status": "uploaded", "file_id": result.external_file_id}
+        return {"status": knowledge_status, "indexed_count": indexed_count}
     finally:
         db.close()
 

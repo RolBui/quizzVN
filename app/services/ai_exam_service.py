@@ -354,6 +354,9 @@ def prepare_ai_agent_dispatch(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported AI operation")
 
     normalized_request = dict(request_data or _build_request_data_from_job(job))
+    normalized_request["owner_type"] = "teacher"
+    normalized_request["owner_id"] = str(job.teacher_id)
+    normalized_request["knowledge_visibility"] = "private"
     if operation == "generate_more":
         existing_questions = _build_existing_question_context(db, job.id)
         prompt = build_more_questions_prompt(normalized_request, existing_questions)
@@ -981,6 +984,9 @@ def save_ai_exam_job_to_quiz(
                     ],
                     "metadata": {
                         "exam_id": str(exam["id"]),
+                        "owner_type": "teacher",
+                        "owner_id": str(teacher.id),
+                        "knowledge_visibility": "private",
                         "provider": job.provider or "",
                         "model": job.model or "",
                         "approved_question_count": len(approved_drafts),
@@ -1072,6 +1078,9 @@ def serialize_ai_exam_job(job: AIExamGenerationJob) -> dict[str, Any]:
 
 def _build_request_data_from_job(job: AIExamGenerationJob) -> dict[str, Any]:
     return {
+        "owner_type": "teacher",
+        "owner_id": str(job.teacher_id),
+        "knowledge_visibility": "private",
         "subject": job.subject,
         "grade": job.grade,
         "topic": job.topic,
@@ -1103,6 +1112,9 @@ def _build_more_request_data(
     )
 
     return {
+        "owner_type": "teacher",
+        "owner_id": str(job.teacher_id),
+        "knowledge_visibility": "private",
         "subject": job.subject,
         "grade": job.grade,
         "topic": job.topic,

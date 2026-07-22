@@ -10,6 +10,7 @@ from ai_agent.artifact_service import create_approved_artifact
 from ai_agent.config import settings
 from ai_agent.data_lake import data_lake_configuration_status
 from ai_agent.database import SessionLocal, bootstrap_storage, get_db
+from ai_agent.knowledge import knowledge_configuration_status
 from ai_agent.models import AgentArtifact, AgentJob
 from ai_agent.schemas import (
     AgentJobCreate,
@@ -53,13 +54,16 @@ def health() -> dict:
     except redis.RedisError:
         pass
     data_lake_status = data_lake_configuration_status()
+    rag_status = knowledge_configuration_status()
     required_ok = database_status == "ok" and redis_status == "ok"
     data_lake_ok = data_lake_status in {"disabled", "configured"}
+    rag_ok = rag_status in {"disabled", "configured"}
     return {
-        "status": "ok" if required_ok and data_lake_ok else "degraded",
+        "status": "ok" if required_ok and data_lake_ok and rag_ok else "degraded",
         "database": database_status,
         "redis": redis_status,
         "data_lake": data_lake_status,
+        "rag": rag_status,
     }
 
 
