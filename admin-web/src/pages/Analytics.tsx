@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -29,6 +30,7 @@ import {
   type AnalyticsOverview,
   type AnalyticsPeriod,
   type AnalyticsRealtime,
+  type PaymentAnalyticsOverview,
 } from "../lib/api";
 
 const emptyRealtime: AnalyticsRealtime = {
@@ -49,6 +51,13 @@ const emptyOverview: AnalyticsOverview = {
   last_updated_at: new Date(0).toISOString(),
 };
 
+const emptyPaymentOverview: PaymentAnalyticsOverview = {
+  metrics: [],
+  cash_flow: [],
+  paid_orders: 0,
+  last_updated_at: new Date(0).toISOString(),
+};
+
 const periodOptions: { label: string; value: AnalyticsPeriod }[] = [
   { label: "7 ngày qua", value: "7d" },
   { label: "30 ngày qua", value: "30d" },
@@ -58,8 +67,8 @@ const periodOptions: { label: string; value: AnalyticsPeriod }[] = [
 const kpiOrder = [
   "unique_visitors",
   "page_views",
-  "bounce_rate",
-  "active_users",
+  "revenue",
+  "average_order_value",
 ] as const;
 
 const kpiCopy: Record<
@@ -74,14 +83,13 @@ const kpiCopy: Record<
     title: "Lượt xem trang",
     unit: "Lượt",
   },
-  bounce_rate: {
-    title: "Tỷ lệ thoát",
-    unit: "%",
+  revenue: {
+    title: "Doanh thu",
+    unit: "VNĐ",
   },
-  active_users: {
-    title: "User đang truy cập",
-    unit: "Người",
-    subtext: "Realtime",
+  average_order_value: {
+    title: "Giá trị trung bình đơn",
+    unit: "VNĐ",
   },
 };
 
@@ -103,10 +111,24 @@ const sourceLabels: Record<string, string> = {
 const sourceOrder = Object.keys(sourceLabels);
 
 function formatMetricValue(key: string, value: number) {
-  if (key === "bounce_rate") {
-    return value.toLocaleString("vi-VN", { maximumFractionDigits: 1 });
-  }
   return Math.round(value).toLocaleString("vi-VN");
+}
+
+function formatChartMoney(value: number) {
+  if (value >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toLocaleString("vi-VN", {
+      maximumFractionDigits: 1,
+    })} tỷ`;
+  }
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toLocaleString("vi-VN", {
+      maximumFractionDigits: 1,
+    })} tr`;
+  }
+  if (value >= 1_000) {
+    return `${Math.round(value / 1_000).toLocaleString("vi-VN")}k`;
+  }
+  return value.toLocaleString("vi-VN");
 }
 
 function metricByKey(metrics: AnalyticsMetric[], key: string) {
@@ -142,7 +164,8 @@ function normalizedSourceBreakdown(items: AnalyticsBreakdownItem[]) {
 
 export function Analytics() {
   const [overview, setOverview] = useState<AnalyticsOverview>(emptyOverview);
-  const [realtime, setRealtime] = useState<AnalyticsRealtime | null>(null);
+  const [paymentOverview, setPaymentOverview] =
+    useState<PaymentAnalyticsOverview>(emptyPaymentOverview);
   const [selectedPeriod, setSelectedPeriod] = useState<AnalyticsPeriod>("7d");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -152,21 +175,23 @@ export function Analytics() {
     setIsLoading(true);
     setError(null);
 
-    adminApi
-      .getAnalyticsTraffic(selectedPeriod)
-      .then((response) => {
+    Promise.all([
+      adminApi.getAnalyticsTraffic(selectedPeriod),
+      adminApi.getAnalyticsPayments(selectedPeriod),
+    ])
+      .then(([trafficResponse, paymentResponse]) => {
         if (!isMounted) {
           return;
         }
-        setOverview(response);
-        setRealtime(response.realtime);
+        setOverview(trafficResponse);
+        setPaymentOverview(paymentResponse);
       })
       .catch((err: unknown) => {
         if (!isMounted) {
           return;
         }
         setOverview(emptyOverview);
-        setRealtime(null);
+        setPaymentOverview(emptyPaymentOverview);
         setError(
           err instanceof Error
             ? err.message
@@ -184,60 +209,28 @@ export function Analytics() {
     };
   }, [selectedPeriod]);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadRealtime = () => {
-      adminApi
-        .getAnalyticsRealtime()
-        .then((response) => {
-          if (isMounted) {
-            setRealtime(response);
-          }
-        })
-        .catch(() => {
-          // Keep the latest known realtime value when polling misses a beat.
-        });
-    };
-
-    loadRealtime();
-    const intervalId = window.setInterval(loadRealtime, 10_000);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(intervalId);
-    };
-  }, []);
-
-  const realtimeData = realtime ?? overview.realtime;
-
   const kpiData = useMemo(() => {
     return kpiOrder.map((key) => {
-      const metric = metricByKey(overview.metrics, key);
+      const metric = metricByKey(
+        key === "revenue" || key === "average_order_value"
+          ? paymentOverview.metrics
+          : overview.metrics,
+        key,
+      );
       const copy = kpiCopy[key];
-      const value =
-        key === "active_users"
-          ? realtimeData.active_users
-          : Number(metric?.value ?? 0);
-      const change =
-        key === "active_users"
-          ? `${realtimeData.active_sessions.toLocaleString("vi-VN")} phiên`
-          : metric?.trend || "0%";
+      const value = Number(metric?.value ?? 0);
 
       return {
         key,
         title: copy.title,
         value: formatMetricValue(key, value),
         unit: metric?.suffix || copy.unit,
-        change,
+        change: metric?.trend || "0%",
         isPositive: metric?.is_up ?? true,
-        subtext:
-          key === "active_users"
-            ? `${realtimeData.active_window_seconds} giây gần nhất`
-            : metric?.subtext || copy.subtext || "",
+        subtext: metric?.subtext || copy.subtext || "",
       };
     });
-  }, [overview.metrics, realtimeData]);
+  }, [overview.metrics, paymentOverview.metrics]);
 
   const trafficData = overview.traffic;
   const deviceData = useMemo(() => {
@@ -268,6 +261,9 @@ export function Analytics() {
   const currentTrafficLabel =
     selectedPeriod === "year" ? "Năm nay" : "Kỳ hiện tại";
   const lastTrafficLabel = selectedPeriod === "year" ? "Năm ngoái" : "Kỳ trước";
+  const hasPaymentData = paymentOverview.cash_flow.some(
+    (point) => point.current > 0 || point.last > 0,
+  );
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -340,6 +336,87 @@ export function Analytics() {
             </div>
           );
         })}
+      </div>
+
+      <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-lg border border-surface-variant shadow-(--shadow-level-1)">
+        <div className="flex flex-col items-start gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-base font-bold text-on-surface">
+              Dòng tiền thanh toán
+            </h3>
+            <p className="mt-1 text-xs text-outline">
+              Chỉ ghi nhận các đơn đã thanh toán thành công.
+            </p>
+          </div>
+          <span className="bg-surface-container text-sm py-1.5 px-3 rounded-md text-on-surface font-medium">
+            {paymentOverview.paid_orders.toLocaleString("vi-VN")} đơn thành công
+          </span>
+        </div>
+        <div className="h-64 w-full sm:h-75">
+          {hasPaymentData ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={paymentOverview.cash_flow}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="5 5"
+                  vertical={false}
+                  stroke="var(--color-surface-variant)"
+                />
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 12, fill: "var(--color-outline)" }}
+                  dy={10}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 12, fill: "var(--color-outline)" }}
+                  tickFormatter={(value) => formatChartMoney(Number(value))}
+                />
+                <Tooltip
+                  formatter={(value, name) => [
+                    `${Math.round(Number(value ?? 0)).toLocaleString("vi-VN")} VNĐ`,
+                    String(name ?? ""),
+                  ]}
+                  contentStyle={{
+                    borderRadius: "8px",
+                    border: "none",
+                    boxShadow: "var(--shadow-level-2)",
+                  }}
+                />
+                <Legend
+                  wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
+                  iconType="square"
+                />
+                <Bar
+                  name={lastTrafficLabel}
+                  dataKey="last"
+                  fill="#A78BFA"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={22}
+                />
+                <Bar
+                  name={currentTrafficLabel}
+                  dataKey="current"
+                  fill="#10B981"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={22}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-sm text-outline">
+              {isLoading
+                ? "Đang tải dữ liệu..."
+                : "Chưa có giao dịch thanh toán thành công"}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

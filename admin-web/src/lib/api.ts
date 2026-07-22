@@ -307,6 +307,20 @@ export interface AnalyticsOverview {
   last_updated_at: string;
 }
 
+export interface PaymentCashFlowPoint {
+  name: string;
+  current: number;
+  last: number;
+  paid_orders: number;
+}
+
+export interface PaymentAnalyticsOverview {
+  metrics: AnalyticsMetric[];
+  cash_flow: PaymentCashFlowPoint[];
+  paid_orders: number;
+  last_updated_at: string;
+}
+
 export interface AdminMetric {
   key: string;
   label: string;
@@ -789,6 +803,8 @@ export const adminApi = {
     apiGet<CrmOverview>(`/admin/crm/overview?period=${period}`),
   getAnalyticsTraffic: (period: AnalyticsPeriod = "7d") =>
     apiGet<AnalyticsOverview>(`/admin/analytics/traffic?period=${period}`),
+  getAnalyticsPayments: (period: AnalyticsPeriod = "7d") =>
+    apiGet<PaymentAnalyticsOverview>(`/admin/analytics/payments?period=${period}`),
   getAnalyticsRealtime: () =>
     apiGet<AnalyticsRealtime>("/admin/analytics/realtime"),
   getTeachersOverview: () => apiGet<AdminTeacherOverview>("/admin/teachers"),

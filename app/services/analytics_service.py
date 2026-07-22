@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import utc_now
 from app.database import engine
+from app.models.billing import PaymentOrder
 from app.models.web_analytics_event import WebAnalyticsEvent
 from app.models.web_analytics_presence import WebAnalyticsPresence
 from app.schemas.analytics import TrackHeartbeatRequest, TrackPageViewRequest
@@ -17,6 +18,7 @@ SESSION_TIMEOUT_MINUTES = 30
 ACTIVE_WINDOW_SECONDS = 90
 EVENT_PAGE_VIEW = "page_view"
 EVENT_HEARTBEAT = "heartbeat"
+PAYMENT_STATUS_PAID = "paid"
 POPULAR_PAGE_LABELS = {
     "/": "Landing page",
     "/login": "Login",
@@ -519,6 +521,131 @@ def _traffic(db: Session, now: datetime, window: dict) -> list[dict]:
     if window["period"] == "year":
         return _monthly_traffic(db, now)
     return _daily_traffic(db, window)
+
+
+def _paid_order_rows(db: Session, start: datetime, end: datetime) -> list[tuple]:
+    return (
+        db.query(PaymentOrder.paid_at, PaymentOrder.amount_vnd)
+        .filter(
+            PaymentOrder.status == PAYMENT_STATUS_PAID,
+            PaymentOrder.paid_at.isnot(None),
+            PaymentOrder.paid_at >= start,
+            PaymentOrder.paid_at < end,
+        )
+        .all()
+    )
+
+
+def _payment_totals(db: Session, start: datetime, end: datetime) -> tuple[int, int]:
+    rows = _paid_order_rows(db, start, end)
+    return sum(int(amount or 0) for _, amount in rows), len(rows)
+
+
+def _daily_cash_flow(db: Session, window: dict) -> list[dict]:
+    day_count = int(window["day_count"] or 7)
+    current_start = window["current_start"]
+    previous_start = window["previous_start"]
+    current_end = current_start + timedelta(days=day_count)
+    current_amounts = [0] * day_count
+    previous_amounts = [0] * day_count
+    current_orders = [0] * day_count
+
+    rows = _paid_order_rows(db, previous_start, current_end)
+    for paid_at, amount in rows:
+        paid_at = _normalize_datetime(paid_at)
+        if current_start <= paid_at < current_end:
+            index = (paid_at.date() - current_start.date()).days
+            current_amounts[index] += int(amount or 0)
+            current_orders[index] += 1
+        elif previous_start <= paid_at < current_start:
+            index = (paid_at.date() - previous_start.date()).days
+            previous_amounts[index] += int(amount or 0)
+
+    return [
+        {
+            "name": (current_start + timedelta(days=index)).strftime("%d/%m"),
+            "current": current_amounts[index],
+            "last": previous_amounts[index],
+            "paid_orders": current_orders[index],
+        }
+        for index in range(day_count)
+    ]
+
+
+def _monthly_cash_flow(db: Session, now: datetime) -> list[dict]:
+    current_year = now.year
+    previous_year = current_year - 1
+    current_amounts = [0] * 12
+    previous_amounts = [0] * 12
+    current_orders = [0] * 12
+    start = datetime(previous_year, 1, 1, tzinfo=now.tzinfo)
+    end = datetime(current_year + 1, 1, 1, tzinfo=now.tzinfo)
+
+    rows = _paid_order_rows(db, start, end)
+    for paid_at, amount in rows:
+        paid_at = _normalize_datetime(paid_at)
+        month_index = paid_at.month - 1
+        if paid_at.year == current_year:
+            current_amounts[month_index] += int(amount or 0)
+            current_orders[month_index] += 1
+        elif paid_at.year == previous_year:
+            previous_amounts[month_index] += int(amount or 0)
+
+    return [
+        {
+            "name": f"T{month}",
+            "current": current_amounts[month - 1],
+            "last": previous_amounts[month - 1],
+            "paid_orders": current_orders[month - 1],
+        }
+        for month in range(1, 13)
+    ]
+
+
+def get_payment_analytics_overview(db: Session, period: str = "7d") -> dict:
+    now = utc_now()
+    window = _period_window(now, period)
+    current_revenue, current_orders = _payment_totals(
+        db,
+        window["current_start"],
+        window["current_end"],
+    )
+    previous_revenue, previous_orders = _payment_totals(
+        db,
+        window["previous_start"],
+        window["previous_end"],
+    )
+    current_average = current_revenue / current_orders if current_orders else 0
+    previous_average = previous_revenue / previous_orders if previous_orders else 0
+    cash_flow = (
+        _monthly_cash_flow(db, now)
+        if window["period"] == "year"
+        else _daily_cash_flow(db, window)
+    )
+
+    return {
+        "metrics": [
+            _metric(
+                "revenue",
+                "Doanh thu",
+                current_revenue,
+                previous_revenue,
+                suffix="VNĐ",
+                subtext=f"{current_orders} đơn đã thanh toán · {window['label']}",
+            ),
+            _metric(
+                "average_order_value",
+                "Giá trị trung bình đơn",
+                current_average,
+                previous_average,
+                suffix="VNĐ",
+                subtext=window["label"],
+            ),
+        ],
+        "cash_flow": cash_flow,
+        "paid_orders": current_orders,
+        "last_updated_at": now,
+    }
 
 
 def _breakdown(db: Session, column, start: datetime, end: datetime) -> list[dict]:

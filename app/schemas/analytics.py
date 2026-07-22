@@ -86,3 +86,17 @@ class AdminWebTrafficOverviewResponse(BaseModel):
     popular_pages: list[WebPopularPageSchema]
     realtime: AdminWebRealtimeResponse
     last_updated_at: datetime
+
+
+class PaymentCashFlowPointSchema(BaseModel):
+    name: str
+    current: int
+    last: int
+    paid_orders: int
+
+
+class AdminPaymentAnalyticsResponse(BaseModel):
+    metrics: list[WebTrafficMetricSchema]
+    cash_flow: list[PaymentCashFlowPointSchema]
+    paid_orders: int
+    last_updated_at: datetime
