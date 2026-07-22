@@ -31,8 +31,13 @@ AttemptRecorder = Callable[[int, str, int | None, int, str], None]
 
 
 class GeminiProvider:
-    def __init__(self, sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(
+        self,
+        sleep: Callable[[float], None] = time.sleep,
+        model: str | None = None,
+    ) -> None:
         self.sleep = sleep
+        self.model = model or settings.AI_MODEL
 
     def generate(
         self,
@@ -73,7 +78,7 @@ class GeminiProvider:
         if not settings.GEMINI_API_KEY:
             raise ProviderError("GEMINI_API_KEY is not configured")
 
-        url = GEMINI_URL.format(model=settings.AI_MODEL)
+        url = GEMINI_URL.format(model=self.model)
         request_payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -135,10 +140,126 @@ class GeminiProvider:
         raise last_error or ProviderError("Gemini request failed")
 
 
-def get_provider() -> GeminiProvider:
-    if settings.AI_PROVIDER != "gemini":
-        raise ProviderError(f"Unsupported AI provider: {settings.AI_PROVIDER}")
-    return GeminiProvider()
+class LocalOpenAIProvider:
+    def __init__(
+        self,
+        model: str,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.model = model
+        self.sleep = sleep
+
+    def generate(
+        self,
+        prompt: str,
+        record_attempt: AttemptRecorder,
+        attempt_offset: int = 0,
+    ) -> ProviderResult:
+        text, raw_response, attempts = self._request_text(
+            prompt,
+            record_attempt,
+            attempt_offset,
+        )
+        try:
+            return ProviderResult(
+                normalize_exam_payload(_parse_json(text)),
+                raw_response,
+                attempts,
+            )
+        except ProviderError:
+            repair_prompt = _repair_prompt(prompt, text)
+            repaired_text, repaired_raw, repair_attempts = self._request_text(
+                repair_prompt,
+                record_attempt,
+                attempt_offset + attempts,
+            )
+            return ProviderResult(
+                normalize_exam_payload(_parse_json(repaired_text)),
+                {"first_response": raw_response, "repair_response": repaired_raw},
+                attempts + repair_attempts,
+            )
+
+    def _request_text(
+        self,
+        prompt: str,
+        record_attempt: AttemptRecorder,
+        attempt_offset: int,
+    ) -> tuple[str, dict[str, Any], int]:
+        if not settings.LOCAL_INFERENCE_URL:
+            raise ProviderError("AI_AGENT_LOCAL_INFERENCE_URL is not configured")
+
+        headers = {"Content-Type": "application/json"}
+        if settings.LOCAL_INFERENCE_SECRET:
+            headers["Authorization"] = f"Bearer {settings.LOCAL_INFERENCE_SECRET}"
+        request_payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.45,
+            "response_format": {"type": "json_object"},
+        }
+        max_attempts = max(1, settings.PROVIDER_RETRY_COUNT + 1)
+        last_error: ProviderError | None = None
+        for index in range(max_attempts):
+            attempt_number = attempt_offset + index + 1
+            started = time.monotonic()
+            try:
+                with httpx.Client(timeout=settings.LOCAL_INFERENCE_TIMEOUT_SECONDS) as client:
+                    response = client.post(
+                        settings.LOCAL_INFERENCE_URL,
+                        headers=headers,
+                        json=request_payload,
+                    )
+                latency_ms = int((time.monotonic() - started) * 1000)
+                if response.status_code >= 400:
+                    detail = _local_provider_error(response)
+                    record_attempt(attempt_number, "failed", response.status_code, latency_ms, detail)
+                    last_error = ProviderError(detail, response.status_code)
+                    if response.status_code in RETRYABLE_STATUS_CODES and index + 1 < max_attempts:
+                        self.sleep(_retry_delay(index, response.headers.get("Retry-After")))
+                        continue
+                    raise last_error
+                raw_response = response.json()
+                text = _extract_local_text(raw_response)
+                record_attempt(attempt_number, "succeeded", response.status_code, latency_ms, "")
+                return text, raw_response, index + 1
+            except httpx.TimeoutException as exc:
+                latency_ms = int((time.monotonic() - started) * 1000)
+                detail = (
+                    "Local model timed out after "
+                    f"{settings.LOCAL_INFERENCE_TIMEOUT_SECONDS:g} seconds"
+                )
+                record_attempt(attempt_number, "failed", None, latency_ms, detail)
+                last_error = ProviderError(detail)
+                if index + 1 < max_attempts:
+                    self.sleep(_retry_delay(index, None))
+                    continue
+                raise last_error from exc
+            except httpx.HTTPError as exc:
+                latency_ms = int((time.monotonic() - started) * 1000)
+                detail = f"Local model request failed: {exc}"
+                record_attempt(attempt_number, "failed", None, latency_ms, detail)
+                last_error = ProviderError(detail)
+                if index + 1 < max_attempts:
+                    self.sleep(_retry_delay(index, None))
+                    continue
+                raise last_error from exc
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                latency_ms = int((time.monotonic() - started) * 1000)
+                detail = "Local model returned an invalid response"
+                record_attempt(attempt_number, "failed", None, latency_ms, detail)
+                raise ProviderError(detail) from exc
+        raise last_error or ProviderError("Local model request failed")
+
+
+def get_provider(provider_name: str | None = None, model: str | None = None):
+    selected = (provider_name or settings.AI_PROVIDER).strip().lower()
+    if selected == "gemini":
+        return GeminiProvider(model=model)
+    if selected == "local_openai":
+        if not model:
+            raise ProviderError("Local model name is required")
+        return LocalOpenAIProvider(model=model)
+    raise ProviderError(f"Unsupported AI provider: {selected}")
 
 
 def _retry_delay(index: int, retry_after: str | None) -> float:
@@ -161,6 +282,21 @@ def _provider_error(response: httpx.Response) -> str:
     return f"Gemini returned HTTP {response.status_code}"
 
 
+def _local_provider_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+        if isinstance(error, str) and error:
+            return error
+        if isinstance(payload, dict) and payload.get("detail"):
+            return str(payload["detail"])
+    except ValueError:
+        pass
+    return f"Local model returned HTTP {response.status_code}"
+
+
 def _extract_text(raw_response: dict[str, Any]) -> str:
     candidates = raw_response.get("candidates") or []
     parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
@@ -172,6 +308,24 @@ def _extract_text(raw_response: dict[str, Any]) -> str:
     if not text:
         raise ProviderError("Gemini returned no content")
     return text
+
+
+def _extract_local_text(raw_response: dict[str, Any]) -> str:
+    choices = raw_response.get("choices") or []
+    if not choices:
+        raise ProviderError("Local model returned no choices")
+    content = (choices[0].get("message") or {}).get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    if isinstance(content, list):
+        text = "\n".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict)
+        ).strip()
+        if text:
+            return text
+    raise ProviderError("Local model returned no content")
 
 
 def _parse_json(text: str) -> dict[str, Any]:

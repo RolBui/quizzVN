@@ -10,6 +10,7 @@ from ai_agent.tasks import (
     _callback_validation_errors,
     _deliver_with_semantic_repair,
     _generate_job_payload,
+    _shadow_metrics,
 )
 
 
@@ -110,6 +111,26 @@ class AgentCallbackTests(unittest.TestCase):
 
 
 class AgentGenerationTests(unittest.TestCase):
+    def test_shadow_metrics_compare_count_and_question_type_distribution(self) -> None:
+        primary = {
+            "questions": [
+                {"type": "multiple_choice"},
+                {"type": "true_false"},
+            ]
+        }
+        shadow = {
+            "questions": [
+                {"type": "multiple_choice"},
+                {"type": "short_answer"},
+            ]
+        }
+
+        score, metrics = _shadow_metrics(primary, shadow)
+
+        self.assertEqual(score, 0.5)
+        self.assertTrue(metrics["count_match"])
+        self.assertFalse(metrics["type_distribution_match"])
+
     @patch("ai_agent.tasks._set_progress")
     @patch("ai_agent.tasks.get_provider")
     def test_generates_large_job_in_multiple_batches(

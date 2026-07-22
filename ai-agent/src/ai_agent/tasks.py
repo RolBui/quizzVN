@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,7 +15,15 @@ from ai_agent.data_lake import DataLakeError, get_data_lake
 from ai_agent.database import SessionLocal
 from ai_agent.dataset_pipeline import export_dataset_snapshot
 from ai_agent.knowledge import build_retrieval_context, index_approved_artifact
-from ai_agent.models import AgentArtifact, AgentAttempt, AgentDatasetSnapshot, AgentJob
+from ai_agent.model_registry import create_model_run, select_model_route
+from ai_agent.models import (
+    AgentArtifact,
+    AgentAttempt,
+    AgentDatasetSnapshot,
+    AgentJob,
+    AgentModelRun,
+    AgentModelVersion,
+)
 from ai_agent.provider import ProviderError, build_semantic_repair_prompt, get_provider
 from ai_agent.security import callback_headers
 from ai_agent.validation import validate_exam_payload
@@ -197,6 +206,13 @@ def _record_provider_attempt(db, job: AgentJob):
     )
 
 
+def _provider_for_job(job: AgentJob):
+    return get_provider(
+        getattr(job, "provider", "") or settings.AI_PROVIDER,
+        getattr(job, "model", "") or settings.AI_MODEL,
+    )
+
+
 def _generate_valid_batch(
     db,
     job: AgentJob,
@@ -206,7 +222,7 @@ def _generate_valid_batch(
     completed_count: int,
     total_count: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    provider = get_provider()
+    provider = _provider_for_job(job)
     current_prompt = prompt
     previous_payload: dict[str, Any] | None = None
     raw_responses: list[dict[str, Any]] = []
@@ -323,7 +339,7 @@ def _deliver_with_semantic_repair(db, job: AgentJob) -> None:
         semantic_errors,
     )
     try:
-        repaired_result = get_provider().generate(
+        repaired_result = _provider_for_job(job).generate(
             repair_prompt,
             _record_provider_attempt(db, job),
             attempt_offset=int(job.attempt_count or 0),
@@ -361,6 +377,146 @@ def _queue_terminal_artifact(db, job: AgentJob) -> None:
             archive_artifact.apply_async(args=[artifact.id], priority=0)
     except Exception as exc:
         logger.warning("Unable to queue data lake artifact for job %s: %s", job.id, exc)
+
+
+def _complete_model_run(
+    db,
+    run: AgentModelRun,
+    status: str,
+    started: float,
+    structural_valid: bool | None,
+    score: float | None,
+    metrics: dict[str, Any] | None = None,
+    error: str = "",
+) -> None:
+    run.status = status
+    run.structural_valid = structural_valid
+    run.score = score
+    run.latency_ms = max(0, int((time.monotonic() - started) * 1000))
+    run.metrics = metrics or {}
+    run.error_message = error[:2000]
+    run.completed_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+def _generate_shadow_payload(
+    db,
+    job: AgentJob,
+    model: AgentModelVersion,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    request_data = dict(job.request_data or {})
+    batch_specs = build_batch_specs(request_data, settings.BATCH_SIZE)
+    if not batch_specs:
+        raise ProviderError("Unable to split the shadow AI request into batches")
+    provider = get_provider(model.provider, model.serving_model)
+    payloads: list[dict[str, Any]] = []
+    generated_questions: list[dict[str, Any]] = []
+    raw_batches: list[dict[str, Any]] = []
+    base_prompt = job.prompt
+    try:
+        reference_context = build_retrieval_context(db, request_data, job.prompt)
+        if reference_context:
+            base_prompt = f"{job.prompt}{reference_context}"
+    except Exception as exc:
+        logger.warning("Shadow RAG retrieval skipped for job %s: %s", job.id, exc)
+
+    for batch_index, batch_data in enumerate(batch_specs, start=1):
+        prompt = build_batch_prompt(
+            base_prompt,
+            batch_data,
+            batch_index,
+            len(batch_specs),
+            generated_questions,
+        )
+        current_prompt = prompt
+        errors: list[str] = []
+        payload: dict[str, Any] = {}
+        responses: list[dict[str, Any]] = []
+        for repair_index in range(settings.SEMANTIC_REPAIR_COUNT + 1):
+            result = provider.generate(current_prompt, lambda *_: None)
+            payload, errors = validate_exam_payload(
+                result.payload,
+                batch_data,
+                generated_questions,
+            )
+            responses.append(result.raw_response)
+            if not errors:
+                break
+            if repair_index < settings.SEMANTIC_REPAIR_COUNT:
+                current_prompt = build_semantic_repair_prompt(prompt, payload, errors)
+        if errors:
+            raise ProviderError("Shadow semantic validation failed: " + "; ".join(errors[:12]))
+        payloads.append(payload)
+        generated_questions.extend(payload.get("questions") or [])
+        raw_batches.append({"batch": batch_index, "responses": responses})
+
+    combined = aggregate_batch_payloads(payloads)
+    combined, errors = validate_exam_payload(combined, request_data)
+    if errors:
+        raise ProviderError("Shadow exam validation failed: " + "; ".join(errors[:12]))
+    return combined, {"batches": raw_batches}
+
+
+def _shadow_metrics(
+    primary: dict[str, Any] | None,
+    shadow: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
+    primary_questions = (primary or {}).get("questions") or []
+    shadow_questions = shadow.get("questions") or []
+    primary_types: dict[str, int] = {}
+    shadow_types: dict[str, int] = {}
+    for question in primary_questions:
+        kind = str(question.get("type") or "")
+        primary_types[kind] = primary_types.get(kind, 0) + 1
+    for question in shadow_questions:
+        kind = str(question.get("type") or "")
+        shadow_types[kind] = shadow_types.get(kind, 0) + 1
+    count_match = len(primary_questions) == len(shadow_questions)
+    type_match = primary_types == shadow_types
+    score = (0.5 if count_match else 0.0) + (0.5 if type_match else 0.0)
+    return score, {
+        "primary_question_count": len(primary_questions),
+        "shadow_question_count": len(shadow_questions),
+        "count_match": count_match,
+        "primary_type_distribution": primary_types,
+        "shadow_type_distribution": shadow_types,
+        "type_distribution_match": type_match,
+        "note": "Operational comparison only; semantic quality requires offline evaluation",
+    }
+
+
+@celery_app.task(name="ai_agent.run_shadow_evaluation")
+def run_shadow_evaluation(job_id: str, model_version_id: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        job = db.get(AgentJob, job_id)
+        model = db.get(AgentModelVersion, model_version_id)
+        if not job or not model:
+            return {"status": "missing"}
+        existing = (
+            db.query(AgentModelRun)
+            .filter(
+                AgentModelRun.job_id == job.id,
+                AgentModelRun.model_version_id == model.id,
+                AgentModelRun.mode == "shadow",
+            )
+            .first()
+        )
+        if existing:
+            return {"status": existing.status, "run_id": existing.id}
+        run = create_model_run(db, model, job.id, "shadow")
+        started = time.monotonic()
+        try:
+            payload, raw = _generate_shadow_payload(db, job, model)
+            score, metrics = _shadow_metrics(job.result_payload, payload)
+            metrics["raw_response_available"] = bool(raw)
+            _complete_model_run(db, run, "completed", started, True, score, metrics)
+        except Exception as exc:
+            logger.exception("Shadow model run failed for job %s", job.id)
+            _complete_model_run(db, run, "failed", started, False, 0.0, error=str(exc))
+        return {"status": run.status, "run_id": run.id}
+    finally:
+        db.close()
 
 
 @celery_app.task(bind=True, name="ai_agent.archive_artifact", max_retries=3)
@@ -476,20 +632,81 @@ def generate_exam(self: Task, job_id: str) -> dict[str, Any]:
         if job.status == "completed":
             return {"status": "completed"}
 
+        route = select_model_route(db, job.dispatch_id)
+        shadow_model_version_id = route.shadow_model_version_id
+
         if job.result_payload is None and job.status not in {"callback_pending", "failed_callback"}:
             job.status = "running"
-            job.provider = settings.AI_PROVIDER
-            job.model = settings.AI_MODEL
+            job.provider = route.provider
+            job.model = route.model
             db.commit()
+            model_run: AgentModelRun | None = None
+            model_run_started = time.monotonic()
+            if route.model_version_id:
+                routed_model = db.get(AgentModelVersion, route.model_version_id)
+                if routed_model:
+                    model_run = create_model_run(db, routed_model, job.id, route.mode)
             try:
                 job.result_payload, job.raw_response = _generate_job_payload(db, job)
+                if model_run:
+                    _complete_model_run(
+                        db,
+                        model_run,
+                        "completed",
+                        model_run_started,
+                        True,
+                        1.0,
+                        {"question_count": len(job.result_payload.get("questions") or [])},
+                    )
                 job.error_message = ""
                 job.status = "callback_pending"
                 job.stage = "callback_pending"
                 job.progress_current = int(job.progress_total or 0)
                 job.progress_message = "\u0110ang g\u1eedi k\u1ebft qu\u1ea3 v\u1ec1 QuizzVN"
             except ProviderError as exc:
-                _mark_generation_failed(job, str(exc))
+                if model_run and settings.LOCAL_FALLBACK_TO_GEMINI:
+                    _complete_model_run(
+                        db,
+                        model_run,
+                        "fallback",
+                        model_run_started,
+                        False,
+                        0.0,
+                        error=str(exc),
+                    )
+                    job.provider = settings.AI_PROVIDER
+                    job.model = settings.AI_MODEL
+                    job.attempt_count = int(job.attempt_count or 0)
+                    db.commit()
+                    try:
+                        fallback_payload, fallback_raw = _generate_job_payload(db, job)
+                        job.result_payload = fallback_payload
+                        job.raw_response = {
+                            "local_fallback_error": str(exc),
+                            "fallback_response": fallback_raw,
+                        }
+                        job.error_message = ""
+                        job.status = "callback_pending"
+                        job.stage = "callback_pending"
+                        job.progress_current = int(job.progress_total or 0)
+                        job.progress_message = "\u0110ang g\u1eedi k\u1ebft qu\u1ea3 v\u1ec1 QuizzVN"
+                    except ProviderError as fallback_exc:
+                        _mark_generation_failed(
+                            job,
+                            f"Local model failed and Gemini fallback failed: {fallback_exc}",
+                        )
+                else:
+                    if model_run:
+                        _complete_model_run(
+                            db,
+                            model_run,
+                            "failed",
+                            model_run_started,
+                            False,
+                            0.0,
+                            error=str(exc),
+                        )
+                    _mark_generation_failed(job, str(exc))
             db.commit()
 
         try:
@@ -507,6 +724,14 @@ def generate_exam(self: Task, job_id: str) -> dict[str, Any]:
             job.progress_message = "\u0110\u00e3 ho\u00e0n t\u1ea5t t\u1ea1o c\u00e2u h\u1ecfi"
         db.commit()
         _queue_terminal_artifact(db, job)
+        if job.status == "completed" and shadow_model_version_id:
+            try:
+                run_shadow_evaluation.apply_async(
+                    args=[job.id, shadow_model_version_id],
+                    priority=0,
+                )
+            except Exception as exc:
+                logger.warning("Unable to queue shadow run for job %s: %s", job.id, exc)
         return {"status": job.status, "attempts": job.attempt_count}
     finally:
         db.close()

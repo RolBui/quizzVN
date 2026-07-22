@@ -202,6 +202,77 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(second.json()["status"], "queued")
         self.assertEqual(delay.call_count, 2)
 
+    def test_model_must_pass_evaluation_before_shadow_deployment(self) -> None:
+        headers = {
+            "Authorization": "Bearer test-shared-secret",
+            "Idempotency-Key": "model-version-0000000000000001",
+        }
+        created = self.client.post(
+            "/v1/ml/models",
+            headers=headers,
+            json={
+                "name": "quizzvn-question-model",
+                "version": "1.0.0",
+                "base_model": "Qwen/Qwen2.5-3B-Instruct",
+                "serving_model": "quizzvn-question-model:1.0.0",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        model_id = created.json()["id"]
+
+        rejected = self.client.post(
+            f"/v1/ml/models/{model_id}/approve",
+            headers={"Authorization": "Bearer test-shared-secret"},
+            json={"actor": "reviewer", "reason": "premature"},
+        )
+        self.assertEqual(rejected.status_code, 409)
+
+        evaluated = self.client.post(
+            f"/v1/ml/models/{model_id}/evaluation",
+            headers={"Authorization": "Bearer test-shared-secret"},
+            json={
+                "actor": "evaluation-pipeline",
+                "report": {"structural_accuracy": 0.96, "activation_allowed": True},
+            },
+        )
+        self.assertEqual(evaluated.status_code, 200)
+        self.assertEqual(evaluated.json()["status"], "evaluation_passed")
+
+        approved = self.client.post(
+            f"/v1/ml/models/{model_id}/approve",
+            headers={"Authorization": "Bearer test-shared-secret"},
+            json={"actor": "ml-reviewer", "reason": "offline evaluation passed"},
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], "approved")
+
+        original_url = settings.LOCAL_INFERENCE_URL
+        settings.LOCAL_INFERENCE_URL = "http://model-server.local/v1/chat/completions"
+        try:
+            deployed = self.client.post(
+                f"/v1/ml/models/{model_id}/deploy",
+                headers={"Authorization": "Bearer test-shared-secret"},
+                json={
+                    "mode": "shadow",
+                    "actor": "ml-reviewer",
+                    "reason": "start shadow comparison",
+                },
+            )
+        finally:
+            settings.LOCAL_INFERENCE_URL = original_url
+
+        self.assertEqual(deployed.status_code, 200)
+        self.assertEqual(deployed.json()["status"], "shadow")
+        events = self.client.get(
+            f"/v1/ml/models/{model_id}/events",
+            headers={"Authorization": "Bearer test-shared-secret"},
+        )
+        self.assertEqual(events.status_code, 200)
+        self.assertEqual(
+            {item["event_type"] for item in events.json()},
+            {"model_registered", "evaluation_submitted", "model_approved", "model_deployed"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

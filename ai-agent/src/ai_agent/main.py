@@ -11,7 +11,22 @@ from ai_agent.config import settings
 from ai_agent.data_lake import data_lake_configuration_status
 from ai_agent.database import SessionLocal, bootstrap_storage, get_db
 from ai_agent.knowledge import knowledge_configuration_status
-from ai_agent.models import AgentArtifact, AgentDatasetSnapshot, AgentJob
+from ai_agent.model_registry import (
+    approve_model,
+    deploy_model,
+    register_model_event,
+    retire_model,
+    routing_configuration_status,
+    submit_evaluation,
+)
+from ai_agent.models import (
+    AgentArtifact,
+    AgentDatasetSnapshot,
+    AgentJob,
+    AgentModelEvent,
+    AgentModelRun,
+    AgentModelVersion,
+)
 from ai_agent.schemas import (
     AgentJobCreate,
     AgentJobResponse,
@@ -19,6 +34,14 @@ from ai_agent.schemas import (
     ArtifactResponse,
     DatasetSnapshotCreate,
     DatasetSnapshotResponse,
+    ModelApprovalRequest,
+    ModelDeploymentRequest,
+    ModelEvaluationSubmit,
+    ModelEventResponse,
+    ModelRetireRequest,
+    ModelRunResponse,
+    ModelVersionCreate,
+    ModelVersionResponse,
 )
 from ai_agent.tasks import archive_artifact, export_training_dataset, generate_exam
 
@@ -57,6 +80,7 @@ def health() -> dict:
         pass
     data_lake_status = data_lake_configuration_status()
     rag_status = knowledge_configuration_status()
+    model_routing_status = routing_configuration_status()
     required_ok = database_status == "ok" and redis_status == "ok"
     data_lake_ok = data_lake_status in {"disabled", "configured"}
     rag_ok = rag_status in {"disabled", "configured"}
@@ -66,6 +90,7 @@ def health() -> dict:
         "redis": redis_status,
         "data_lake": data_lake_status,
         "rag": rag_status,
+        "model_routing": model_routing_status,
         "ml_dataset": "configured" if settings.ML_DATASET_ROOT else "missing_path",
     }
 
@@ -300,3 +325,238 @@ def get_ml_dataset_snapshot(
             detail="ML dataset snapshot not found",
         )
     return snapshot
+
+
+def _get_model_version(db: Session, model_id: str) -> AgentModelVersion:
+    model = db.get(AgentModelVersion, model_id)
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Model version not found",
+        )
+    return model
+
+
+def _model_transition_error(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+@app.post(
+    "/v1/ml/models",
+    response_model=ModelVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_model_version(
+    payload: ModelVersionCreate,
+    _: None = Depends(require_internal_auth),
+    idempotency_key: str = Header(default="", alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    if len(idempotency_key) < 16 or len(idempotency_key) > 160:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid idempotency key",
+        )
+    existing = (
+        db.query(AgentModelVersion)
+        .filter(AgentModelVersion.idempotency_key == idempotency_key)
+        .first()
+    )
+    if existing:
+        return existing
+
+    if payload.dataset_snapshot_id:
+        snapshot = db.get(AgentDatasetSnapshot, payload.dataset_snapshot_id)
+        if not snapshot:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Dataset snapshot not found",
+            )
+        if snapshot.status != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Dataset snapshot must be completed before model registration",
+            )
+
+    model = AgentModelVersion(
+        idempotency_key=idempotency_key,
+        name=payload.name.strip(),
+        version=payload.version.strip(),
+        provider=payload.provider,
+        base_model=payload.base_model.strip(),
+        serving_model=payload.serving_model.strip(),
+        adapter_uri=payload.adapter_uri.strip(),
+        adapter_checksum=payload.adapter_checksum.strip(),
+        dataset_snapshot_id=payload.dataset_snapshot_id,
+        training_report=payload.training_report,
+        evaluation_threshold=(
+            payload.evaluation_threshold
+            if payload.evaluation_threshold is not None
+            else settings.MODEL_MIN_EVALUATION_SCORE
+        ),
+    )
+    db.add(model)
+    try:
+        db.flush()
+        register_model_event(
+            db,
+            model,
+            "model_registered",
+            "",
+            "registered",
+            "training-pipeline",
+            {"dataset_snapshot_id": payload.dataset_snapshot_id},
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        duplicate = (
+            db.query(AgentModelVersion)
+            .filter(
+                (AgentModelVersion.idempotency_key == idempotency_key)
+                | (
+                    (AgentModelVersion.name == payload.name.strip())
+                    & (AgentModelVersion.version == payload.version.strip())
+                )
+            )
+            .first()
+        )
+        if duplicate:
+            return duplicate
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Model version already exists",
+        ) from exc
+    db.refresh(model)
+    return model
+
+
+@app.get("/v1/ml/models", response_model=list[ModelVersionResponse])
+def list_model_versions(
+    model_status: str = "",
+    limit: int = 50,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> list[AgentModelVersion]:
+    query = db.query(AgentModelVersion)
+    if model_status.strip():
+        query = query.filter(AgentModelVersion.status == model_status.strip())
+    return (
+        query.order_by(AgentModelVersion.created_at.desc())
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+@app.get("/v1/ml/models/{model_id}", response_model=ModelVersionResponse)
+def get_model_version(
+    model_id: str,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    return _get_model_version(db, model_id)
+
+
+@app.post("/v1/ml/models/{model_id}/evaluation", response_model=ModelVersionResponse)
+def evaluate_model_version(
+    model_id: str,
+    payload: ModelEvaluationSubmit,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    try:
+        return submit_evaluation(
+            db,
+            _get_model_version(db, model_id),
+            payload.report,
+            payload.actor,
+        )
+    except ValueError as exc:
+        raise _model_transition_error(exc) from exc
+
+
+@app.post("/v1/ml/models/{model_id}/approve", response_model=ModelVersionResponse)
+def approve_model_version(
+    model_id: str,
+    payload: ModelApprovalRequest,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    try:
+        return approve_model(
+            db,
+            _get_model_version(db, model_id),
+            payload.actor,
+            payload.reason,
+        )
+    except ValueError as exc:
+        raise _model_transition_error(exc) from exc
+
+
+@app.post("/v1/ml/models/{model_id}/deploy", response_model=ModelVersionResponse)
+def deploy_model_version(
+    model_id: str,
+    payload: ModelDeploymentRequest,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    try:
+        return deploy_model(
+            db,
+            _get_model_version(db, model_id),
+            payload.mode,
+            payload.actor,
+            payload.reason,
+            payload.routing_weight,
+        )
+    except ValueError as exc:
+        raise _model_transition_error(exc) from exc
+
+
+@app.post("/v1/ml/models/{model_id}/retire", response_model=ModelVersionResponse)
+def retire_model_version(
+    model_id: str,
+    payload: ModelRetireRequest,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentModelVersion:
+    return retire_model(
+        db,
+        _get_model_version(db, model_id),
+        payload.actor,
+        payload.reason,
+    )
+
+
+@app.get("/v1/ml/models/{model_id}/runs", response_model=list[ModelRunResponse])
+def list_model_runs(
+    model_id: str,
+    limit: int = 50,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> list[AgentModelRun]:
+    _get_model_version(db, model_id)
+    return (
+        db.query(AgentModelRun)
+        .filter(AgentModelRun.model_version_id == model_id)
+        .order_by(AgentModelRun.created_at.desc())
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+@app.get("/v1/ml/models/{model_id}/events", response_model=list[ModelEventResponse])
+def list_model_events(
+    model_id: str,
+    limit: int = 100,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> list[AgentModelEvent]:
+    _get_model_version(db, model_id)
+    return (
+        db.query(AgentModelEvent)
+        .filter(AgentModelEvent.model_version_id == model_id)
+        .order_by(AgentModelEvent.created_at.desc())
+        .limit(min(max(limit, 1), 500))
+        .all()
+    )
