@@ -241,6 +241,10 @@ def _build_candidate(
             "owner_type": scope["owner_type"],
             "owner_id": scope["owner_id"],
             "visibility": scope["visibility"],
+            "training_consent": (
+                metadata.get("training_consent") is True
+                or request_data.get("training_consent") is True
+            ),
         },
     }
 

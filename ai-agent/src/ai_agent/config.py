@@ -80,5 +80,38 @@ class Settings:
         True,
     )
 
+    ML_DATASET_ROOT = (
+        os.getenv("AI_AGENT_ML_DATASET_ROOT", "/data/ml-datasets").strip()
+        or "/data/ml-datasets"
+    )
+    ML_MIN_QUALITY_SCORE = max(
+        0.0,
+        min(float(os.getenv("AI_AGENT_ML_MIN_QUALITY_SCORE", "0.75")), 1.0),
+    )
+    ML_PRIVATE_OPT_IN_ENABLED = _as_bool(
+        "AI_AGENT_ML_PRIVATE_OPT_IN_ENABLED",
+        False,
+    )
+    ML_VALIDATION_PERCENT = max(
+        0,
+        min(int(os.getenv("AI_AGENT_ML_VALIDATION_PERCENT", "10")), 30),
+    )
+    ML_TEST_PERCENT = max(
+        0,
+        min(int(os.getenv("AI_AGENT_ML_TEST_PERCENT", "10")), 30),
+    )
+    ML_BASE_MODEL = (
+        os.getenv("AI_AGENT_ML_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct").strip()
+        or "Qwen/Qwen2.5-3B-Instruct"
+    )
+    ML_OUTPUT_ROOT = (
+        os.getenv("AI_AGENT_ML_OUTPUT_ROOT", "/data/ml-models").strip()
+        or "/data/ml-models"
+    )
+    ML_EVALUATION_THRESHOLD = max(
+        0.0,
+        min(float(os.getenv("AI_AGENT_ML_EVALUATION_THRESHOLD", "0.90")), 1.0),
+    )
+
 
 settings = Settings()

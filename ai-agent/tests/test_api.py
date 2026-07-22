@@ -147,6 +147,61 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(first.json()["artifact_type"], "approved")
         self.assertEqual(delay.call_count, 1)
 
+    def test_ml_dataset_snapshot_is_idempotent_and_queued(self) -> None:
+        payload = {
+            "name": "approved-system-v1",
+            "include_private_opt_in": False,
+            "min_quality_score": 0.8,
+        }
+        headers = {
+            "Authorization": "Bearer test-shared-secret",
+            "Idempotency-Key": "ml-dataset-0000000000000001",
+        }
+        with patch("ai_agent.main.export_training_dataset.apply_async") as delay:
+            first = self.client.post("/v1/ml/datasets", json=payload, headers=headers)
+            second = self.client.post("/v1/ml/datasets", json=payload, headers=headers)
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(first.json()["status"], "queued")
+        delay.assert_called_once()
+
+    def test_ml_dataset_snapshot_rejects_private_export_when_disabled(self) -> None:
+        original_private_enabled = settings.ML_PRIVATE_OPT_IN_ENABLED
+        settings.ML_PRIVATE_OPT_IN_ENABLED = False
+        try:
+            response = self.client.post(
+                "/v1/ml/datasets",
+                json={"name": "private-v1", "include_private_opt_in": True},
+                headers={
+                    "Authorization": "Bearer test-shared-secret",
+                    "Idempotency-Key": "ml-private-0000000000000001",
+                },
+            )
+        finally:
+            settings.ML_PRIVATE_OPT_IN_ENABLED = original_private_enabled
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_ml_dataset_snapshot_retries_dispatch_failure_idempotently(self) -> None:
+        payload = {"name": "retry-system-v1"}
+        headers = {
+            "Authorization": "Bearer test-shared-secret",
+            "Idempotency-Key": "ml-dataset-retry-000000000001",
+        }
+        with patch(
+            "ai_agent.main.export_training_dataset.apply_async",
+            side_effect=[RuntimeError("queue offline"), None],
+        ) as delay:
+            first = self.client.post("/v1/ml/datasets", json=payload, headers=headers)
+            second = self.client.post("/v1/ml/datasets", json=payload, headers=headers)
+
+        self.assertEqual(first.status_code, 503)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(second.json()["status"], "queued")
+        self.assertEqual(delay.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
