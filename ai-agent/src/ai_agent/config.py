@@ -54,5 +54,31 @@ class Settings:
         or "QuizzVN AI Dataset"
     )
 
+    RAG_ENABLED = _as_bool("AI_AGENT_RAG_ENABLED", False)
+    EMBEDDING_MODEL = (
+        os.getenv("AI_AGENT_EMBEDDING_MODEL", "gemini-embedding-2").strip()
+        or "gemini-embedding-2"
+    )
+    EMBEDDING_DIMENSIONS = max(
+        128,
+        min(int(os.getenv("AI_AGENT_EMBEDDING_DIMENSIONS", "768")), 3072),
+    )
+    EMBEDDING_TIMEOUT_SECONDS = float(
+        os.getenv("AI_AGENT_EMBEDDING_TIMEOUT_SECONDS", "30")
+    )
+    RAG_TOP_K = max(1, min(int(os.getenv("AI_AGENT_RAG_TOP_K", "6")), 20))
+    RAG_MIN_SIMILARITY = max(
+        0.0,
+        min(float(os.getenv("AI_AGENT_RAG_MIN_SIMILARITY", "0.72")), 1.0),
+    )
+    RAG_MAX_CONTEXT_CHARS = max(
+        1000,
+        min(int(os.getenv("AI_AGENT_RAG_MAX_CONTEXT_CHARS", "6000")), 20000),
+    )
+    RAG_INCLUDE_SYSTEM_KNOWLEDGE = _as_bool(
+        "AI_AGENT_RAG_INCLUDE_SYSTEM_KNOWLEDGE",
+        True,
+    )
+
 
 settings = Settings()

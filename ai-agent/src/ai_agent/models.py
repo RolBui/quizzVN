@@ -1,10 +1,15 @@
 from uuid import uuid4
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from ai_agent.config import settings
 from ai_agent.database import Base
+
+
+KnowledgeVectorType = VECTOR(settings.EMBEDDING_DIMENSIONS)
 
 
 class AgentJob(Base):
@@ -83,3 +88,45 @@ class AgentArtifact(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     job = relationship("AgentJob", back_populates="artifacts")
+
+
+class AgentKnowledgeItem(Base):
+    __tablename__ = "agent_knowledge_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_type",
+            "owner_id",
+            "content_hash",
+            "embedding_model",
+            name="uq_agent_knowledge_owner_content_model",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    source_artifact_id = Column(
+        String(36),
+        ForeignKey("agent_artifacts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_job_id = Column(String(64), nullable=False, index=True)
+    owner_type = Column(String(30), nullable=False, index=True)
+    owner_id = Column(String(64), nullable=False, index=True)
+    visibility = Column(String(20), nullable=False, default="private", index=True)
+    status = Column(String(20), nullable=False, default="approved", index=True)
+    content_hash = Column(String(64), nullable=False, index=True)
+    embedding_model = Column(String(100), nullable=False)
+    embedding_dimensions = Column(Integer, nullable=False)
+    question_type = Column(String(40), nullable=False, default="", index=True)
+    subject = Column(String(160), nullable=False, default="", index=True)
+    grade = Column(String(100), nullable=False, default="", index=True)
+    difficulty = Column(String(50), nullable=False, default="", index=True)
+    topic = Column(String(255), nullable=False, default="", index=True)
+    content = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False, default=list)
+    correct_answer = Column(JSON, nullable=True)
+    explanation = Column(Text, nullable=False, default="")
+    source_metadata = Column(JSON, nullable=False, default=dict)
+    embedding = Column(KnowledgeVectorType, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

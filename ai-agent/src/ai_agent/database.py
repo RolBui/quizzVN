@@ -34,8 +34,12 @@ if is_sqlite:
 def bootstrap_storage() -> None:
     from ai_agent import models  # noqa: F401
 
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
     _ensure_agent_job_columns()
+    _ensure_vector_index()
 
 
 def _ensure_agent_job_columns() -> None:
@@ -51,6 +55,19 @@ def _ensure_agent_job_columns() -> None:
         for name, definition in columns.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE agent_jobs ADD COLUMN {name} {definition}"))
+
+
+def _ensure_vector_index() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_knowledge_embedding_hnsw "
+                "ON agent_knowledge_items USING hnsw (embedding vector_cosine_ops) "
+                "WITH (m = 16, ef_construction = 64)"
+            )
+        )
 
 
 def get_db():
