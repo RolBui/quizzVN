@@ -35,7 +35,11 @@ from app.schemas.admin import (
     UpdateAdminUserProfileRequest,
     VerifyAdminInvitationOtpRequest,
 )
-from app.schemas.analytics import AdminWebRealtimeResponse, AdminWebTrafficOverviewResponse
+from app.schemas.analytics import (
+    AdminPaymentAnalyticsResponse,
+    AdminWebRealtimeResponse,
+    AdminWebTrafficOverviewResponse,
+)
 from app.schemas.common import MessageResponse
 from app.services.admin_service import (
     create_admin_account,
@@ -68,7 +72,11 @@ from app.services.admin_service import (
     update_admin_student_profile,
     update_admin_teacher_profile,
 )
-from app.services.analytics_service import get_web_realtime_overview, get_web_traffic_overview
+from app.services.analytics_service import (
+    get_payment_analytics_overview,
+    get_web_realtime_overview,
+    get_web_traffic_overview,
+)
 from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -799,6 +807,16 @@ def get_analytics_realtime(
 ) -> AdminWebRealtimeResponse:
     _ = current_admin
     return get_web_realtime_overview(db)
+
+
+@router.get("/analytics/payments", response_model=AdminPaymentAnalyticsResponse)
+def get_analytics_payments(
+    period: str = Query("7d"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminPaymentAnalyticsResponse:
+    _ = current_admin
+    return get_payment_analytics_overview(db, period)
 
 
 @router.get("/teachers", response_model=AdminTeacherOverviewResponse)
