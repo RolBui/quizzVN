@@ -15,6 +15,9 @@ TABLE_ORDER = (
     "agent_artifacts",
     "agent_knowledge_items",
     "agent_dataset_snapshots",
+    "agent_model_versions",
+    "agent_model_events",
+    "agent_model_runs",
 )
 
 

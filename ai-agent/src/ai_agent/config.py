@@ -113,5 +113,20 @@ class Settings:
         min(float(os.getenv("AI_AGENT_ML_EVALUATION_THRESHOLD", "0.90")), 1.0),
     )
 
+    MODEL_ROUTING_ENABLED = _as_bool("AI_AGENT_MODEL_ROUTING_ENABLED", False)
+    LOCAL_INFERENCE_URL = os.getenv("AI_AGENT_LOCAL_INFERENCE_URL", "").strip()
+    LOCAL_INFERENCE_SECRET = os.getenv("AI_AGENT_LOCAL_INFERENCE_SECRET", "").strip()
+    LOCAL_INFERENCE_TIMEOUT_SECONDS = float(
+        os.getenv("AI_AGENT_LOCAL_INFERENCE_TIMEOUT_SECONDS", "180")
+    )
+    LOCAL_FALLBACK_TO_GEMINI = _as_bool(
+        "AI_AGENT_LOCAL_FALLBACK_TO_GEMINI",
+        True,
+    )
+    MODEL_MIN_EVALUATION_SCORE = max(
+        0.0,
+        min(float(os.getenv("AI_AGENT_MODEL_MIN_EVALUATION_SCORE", "0.90")), 1.0),
+    )
+
 
 settings = Settings()

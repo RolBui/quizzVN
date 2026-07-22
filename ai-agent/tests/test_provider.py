@@ -4,7 +4,7 @@ from unittest.mock import patch
 import httpx
 
 from ai_agent.config import settings
-from ai_agent.provider import GeminiProvider, ProviderError
+from ai_agent.provider import GeminiProvider, LocalOpenAIProvider, ProviderError
 
 
 class FakeResponse:
@@ -19,6 +19,7 @@ class FakeResponse:
 
 class FakeClient:
     responses = []
+    last_request = None
 
     def __init__(self, *args, **kwargs) -> None:
         pass
@@ -30,6 +31,7 @@ class FakeClient:
         return False
 
     def post(self, *args, **kwargs):
+        self.__class__.last_request = {"args": args, "kwargs": kwargs}
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
@@ -133,6 +135,75 @@ class GeminiProviderTests(unittest.TestCase):
         )
 
         self.assertIs(result.payload["questions"][0]["correct_answer"], True)
+
+
+class LocalOpenAIProviderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.original = {
+            "LOCAL_INFERENCE_URL": settings.LOCAL_INFERENCE_URL,
+            "LOCAL_INFERENCE_SECRET": settings.LOCAL_INFERENCE_SECRET,
+            "PROVIDER_RETRY_COUNT": settings.PROVIDER_RETRY_COUNT,
+        }
+        settings.LOCAL_INFERENCE_URL = "http://local-model/v1/chat/completions"
+        settings.LOCAL_INFERENCE_SECRET = "local-secret"
+        settings.PROVIDER_RETRY_COUNT = 1
+
+    def tearDown(self) -> None:
+        for key, value in self.original.items():
+            setattr(settings, key, value)
+
+    @patch("ai_agent.provider.httpx.Client", FakeClient)
+    def test_sends_openai_compatible_request_with_authentication(self) -> None:
+        FakeClient.responses = [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {"message": {"content": '{"questions": []}'}}
+                    ]
+                },
+            )
+        ]
+
+        result = LocalOpenAIProvider(
+            "quizzvn-question-model:1.0.0",
+            sleep=lambda _: None,
+        ).generate("prompt", lambda *_: None)
+
+        request = FakeClient.last_request["kwargs"]
+        self.assertEqual(result.payload, {"questions": []})
+        self.assertEqual(
+            request["headers"]["Authorization"],
+            "Bearer local-secret",
+        )
+        self.assertEqual(
+            request["json"]["model"],
+            "quizzvn-question-model:1.0.0",
+        )
+        self.assertEqual(request["json"]["response_format"], {"type": "json_object"})
+
+    @patch("ai_agent.provider.httpx.Client", FakeClient)
+    def test_retries_retryable_local_model_error(self) -> None:
+        FakeClient.responses = [
+            FakeResponse(503, {"detail": "model loading"}),
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {"message": {"content": '{"questions": []}'}}
+                    ]
+                },
+            ),
+        ]
+        attempts = []
+
+        result = LocalOpenAIProvider(
+            "quizzvn-question-model:1.0.0",
+            sleep=lambda _: None,
+        ).generate("prompt", lambda *values: attempts.append(values))
+
+        self.assertEqual(result.payload, {"questions": []})
+        self.assertEqual([item[1] for item in attempts], ["failed", "succeeded"])
 
 
 if __name__ == "__main__":

@@ -157,3 +157,89 @@ class AgentDatasetSnapshot(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgentModelVersion(Base):
+    __tablename__ = "agent_model_versions"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_agent_model_versions_idempotency_key"),
+        UniqueConstraint("name", "version", name="uq_agent_model_versions_name_version"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    idempotency_key = Column(String(160), nullable=False, index=True)
+    name = Column(String(120), nullable=False, index=True)
+    version = Column(String(80), nullable=False)
+    provider = Column(String(40), nullable=False, default="local_openai")
+    base_model = Column(String(255), nullable=False)
+    serving_model = Column(String(255), nullable=False)
+    adapter_uri = Column(Text, nullable=False, default="")
+    adapter_checksum = Column(String(64), nullable=False, default="")
+    dataset_snapshot_id = Column(
+        String(36),
+        ForeignKey("agent_dataset_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    status = Column(String(30), nullable=False, default="registered", index=True)
+    training_report = Column(JSON, nullable=False, default=dict)
+    evaluation_report = Column(JSON, nullable=False, default=dict)
+    evaluation_score = Column(Float, nullable=True)
+    evaluation_threshold = Column(Float, nullable=False, default=0.9)
+    routing_weight = Column(Integer, nullable=False, default=0)
+    approved_by = Column(String(160), nullable=False, default="")
+    approval_reason = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    evaluated_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgentModelEvent(Base):
+    __tablename__ = "agent_model_events"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    model_version_id = Column(
+        String(36),
+        ForeignKey("agent_model_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String(50), nullable=False, index=True)
+    from_status = Column(String(30), nullable=False, default="")
+    to_status = Column(String(30), nullable=False, default="")
+    actor = Column(String(160), nullable=False, default="system")
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentModelRun(Base):
+    __tablename__ = "agent_model_runs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    model_version_id = Column(
+        String(36),
+        ForeignKey("agent_model_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id = Column(
+        String(36),
+        ForeignKey("agent_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    mode = Column(String(20), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="queued", index=True)
+    provider = Column(String(40), nullable=False, default="local_openai")
+    model = Column(String(255), nullable=False)
+    structural_valid = Column(Boolean, nullable=True)
+    score = Column(Float, nullable=True)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    metrics = Column(JSON, nullable=False, default=dict)
+    error_message = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
