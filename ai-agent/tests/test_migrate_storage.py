@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, func, select
 
 from ai_agent.database import Base
 from ai_agent.migrate_storage import migrate_storage
-from ai_agent.models import AgentAttempt, AgentJob
+from ai_agent.models import AgentAttempt, AgentDatasetSnapshot, AgentJob
 
 
 class StorageMigrationTests(unittest.TestCase):
@@ -40,6 +40,15 @@ class StorageMigrationTests(unittest.TestCase):
                     "status": "completed",
                 },
             )
+            connection.execute(
+                AgentDatasetSnapshot.__table__.insert(),
+                {
+                    "id": "snapshot-1",
+                    "idempotency_key": "snapshot-idempotency-key",
+                    "name": "Training snapshot",
+                    "status": "completed",
+                },
+            )
         source.dispose()
 
     def tearDown(self) -> None:
@@ -57,13 +66,18 @@ class StorageMigrationTests(unittest.TestCase):
                 attempt_count = connection.execute(
                     select(func.count()).select_from(AgentAttempt.__table__)
                 ).scalar_one()
+                snapshot_count = connection.execute(
+                    select(func.count()).select_from(AgentDatasetSnapshot.__table__)
+                ).scalar_one()
         finally:
             target.dispose()
 
         self.assertEqual(counts["agent_jobs"], 1)
         self.assertEqual(counts["agent_attempts"], 1)
+        self.assertEqual(counts["agent_dataset_snapshots"], 1)
         self.assertEqual(job_count, 1)
         self.assertEqual(attempt_count, 1)
+        self.assertEqual(snapshot_count, 1)
 
     def test_refuses_to_merge_into_nonempty_database(self) -> None:
         migrate_storage(self.source_url, self.target_url)

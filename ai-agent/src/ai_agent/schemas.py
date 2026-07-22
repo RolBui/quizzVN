@@ -60,3 +60,33 @@ class ArtifactResponse(BaseModel):
     uploaded_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class DatasetSnapshotCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    include_private_opt_in: bool = False
+    min_quality_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class DatasetSnapshotResponse(BaseModel):
+    id: str
+    idempotency_key: str
+    name: str
+    status: str
+    min_quality_score: float
+    include_private_opt_in: bool
+    source_count: int
+    accepted_count: int
+    rejected_count: int
+    train_count: int
+    validation_count: int
+    test_count: int
+    output_dir: str
+    manifest: dict[str, Any]
+    checksum_sha256: str
+    error_message: str
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}

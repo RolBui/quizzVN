@@ -12,14 +12,62 @@ from ai_agent.artifact_service import create_job_artifact
 from ai_agent.config import settings
 from ai_agent.data_lake import DataLakeError, get_data_lake
 from ai_agent.database import SessionLocal
+from ai_agent.dataset_pipeline import export_dataset_snapshot
 from ai_agent.knowledge import build_retrieval_context, index_approved_artifact
-from ai_agent.models import AgentArtifact, AgentAttempt, AgentJob
+from ai_agent.models import AgentArtifact, AgentAttempt, AgentDatasetSnapshot, AgentJob
 from ai_agent.provider import ProviderError, build_semantic_repair_prompt, get_provider
 from ai_agent.security import callback_headers
 from ai_agent.validation import validate_exam_payload
 
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="ai_agent.export_training_dataset")
+def export_training_dataset(snapshot_id: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        snapshot = db.get(AgentDatasetSnapshot, snapshot_id)
+        if not snapshot:
+            return {"status": "missing"}
+        if snapshot.status == "completed":
+            return {
+                "status": "completed",
+                "accepted_count": snapshot.accepted_count,
+            }
+
+        snapshot.status = "running"
+        snapshot.error_message = ""
+        db.commit()
+        try:
+            result = export_dataset_snapshot(db, snapshot)
+        except Exception as exc:
+            snapshot.status = "failed"
+            snapshot.error_message = str(exc)[:2000]
+            db.commit()
+            logger.exception("Unable to export ML dataset snapshot %s", snapshot.id)
+            return {"status": "failed", "error": snapshot.error_message}
+
+        snapshot.status = "completed"
+        snapshot.source_count = result["source"]
+        snapshot.accepted_count = result["accepted"]
+        snapshot.rejected_count = result["rejected"]
+        snapshot.train_count = result["train"]
+        snapshot.validation_count = result["validation"]
+        snapshot.test_count = result["test"]
+        snapshot.output_dir = result["output_dir"]
+        snapshot.manifest = result["manifest"]
+        snapshot.checksum_sha256 = result["checksum_sha256"]
+        snapshot.completed_at = datetime.now(timezone.utc)
+        snapshot.error_message = ""
+        db.commit()
+        return {
+            "status": "completed",
+            "accepted_count": snapshot.accepted_count,
+            "output_dir": snapshot.output_dir,
+        }
+    finally:
+        db.close()
 
 
 def _record_attempt(db, job: AgentJob, number: int, state: str, http_status, latency_ms: int, error: str) -> None:

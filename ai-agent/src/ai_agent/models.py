@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -129,4 +129,31 @@ class AgentKnowledgeItem(Base):
     source_metadata = Column(JSON, nullable=False, default=dict)
     embedding = Column(KnowledgeVectorType, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgentDatasetSnapshot(Base):
+    __tablename__ = "agent_dataset_snapshots"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_agent_dataset_snapshots_idempotency_key"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    idempotency_key = Column(String(160), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    status = Column(String(30), nullable=False, default="queued", index=True)
+    min_quality_score = Column(Float, nullable=False, default=0.75)
+    include_private_opt_in = Column(Boolean, nullable=False, default=False)
+    source_count = Column(Integer, nullable=False, default=0)
+    accepted_count = Column(Integer, nullable=False, default=0)
+    rejected_count = Column(Integer, nullable=False, default=0)
+    train_count = Column(Integer, nullable=False, default=0)
+    validation_count = Column(Integer, nullable=False, default=0)
+    test_count = Column(Integer, nullable=False, default=0)
+    output_dir = Column(Text, nullable=False, default="")
+    manifest = Column(JSON, nullable=False, default=dict)
+    checksum_sha256 = Column(String(64), nullable=False, default="")
+    error_message = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

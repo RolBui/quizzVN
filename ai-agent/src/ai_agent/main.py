@@ -11,14 +11,16 @@ from ai_agent.config import settings
 from ai_agent.data_lake import data_lake_configuration_status
 from ai_agent.database import SessionLocal, bootstrap_storage, get_db
 from ai_agent.knowledge import knowledge_configuration_status
-from ai_agent.models import AgentArtifact, AgentJob
+from ai_agent.models import AgentArtifact, AgentDatasetSnapshot, AgentJob
 from ai_agent.schemas import (
     AgentJobCreate,
     AgentJobResponse,
     ApprovedDatasetCreate,
     ArtifactResponse,
+    DatasetSnapshotCreate,
+    DatasetSnapshotResponse,
 )
-from ai_agent.tasks import archive_artifact, generate_exam
+from ai_agent.tasks import archive_artifact, export_training_dataset, generate_exam
 
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0")
@@ -64,6 +66,7 @@ def health() -> dict:
         "redis": redis_status,
         "data_lake": data_lake_status,
         "rag": rag_status,
+        "ml_dataset": "configured" if settings.ML_DATASET_ROOT else "missing_path",
     }
 
 
@@ -200,3 +203,100 @@ def get_artifact(
     if not artifact:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
     return artifact
+
+
+@app.post(
+    "/v1/ml/datasets",
+    response_model=DatasetSnapshotResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_ml_dataset_snapshot(
+    payload: DatasetSnapshotCreate,
+    _: None = Depends(require_internal_auth),
+    idempotency_key: str = Header(default="", alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> AgentDatasetSnapshot:
+    if len(idempotency_key) < 16 or len(idempotency_key) > 160:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid idempotency key",
+        )
+    if payload.include_private_opt_in and not settings.ML_PRIVATE_OPT_IN_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private training data export is disabled",
+        )
+
+    existing = (
+        db.query(AgentDatasetSnapshot)
+        .filter(AgentDatasetSnapshot.idempotency_key == idempotency_key)
+        .first()
+    )
+    if existing:
+        if existing.status == "dispatch_failed":
+            existing.status = "queued"
+            existing.error_message = ""
+            db.commit()
+            try:
+                export_training_dataset.apply_async(args=[existing.id], priority=0)
+            except Exception as exc:
+                existing.status = "dispatch_failed"
+                existing.error_message = str(exc)[:2000]
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ML dataset queue unavailable",
+                ) from exc
+        return existing
+
+    snapshot = AgentDatasetSnapshot(
+        idempotency_key=idempotency_key,
+        name=payload.name.strip(),
+        status="queued",
+        min_quality_score=(
+            payload.min_quality_score
+            if payload.min_quality_score is not None
+            else settings.ML_MIN_QUALITY_SCORE
+        ),
+        include_private_opt_in=payload.include_private_opt_in,
+    )
+    db.add(snapshot)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(AgentDatasetSnapshot)
+            .filter(AgentDatasetSnapshot.idempotency_key == idempotency_key)
+            .first()
+        )
+        if existing:
+            return existing
+        raise
+    db.refresh(snapshot)
+    try:
+        export_training_dataset.apply_async(args=[snapshot.id], priority=0)
+    except Exception as exc:
+        snapshot.status = "dispatch_failed"
+        snapshot.error_message = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ML dataset queue unavailable",
+        ) from exc
+    return snapshot
+
+
+@app.get("/v1/ml/datasets/{snapshot_id}", response_model=DatasetSnapshotResponse)
+def get_ml_dataset_snapshot(
+    snapshot_id: str,
+    _: None = Depends(require_internal_auth),
+    db: Session = Depends(get_db),
+) -> AgentDatasetSnapshot:
+    snapshot = db.get(AgentDatasetSnapshot, snapshot_id)
+    if not snapshot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="ML dataset snapshot not found",
+        )
+    return snapshot

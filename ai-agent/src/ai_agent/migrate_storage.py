@@ -14,6 +14,7 @@ TABLE_ORDER = (
     "agent_attempts",
     "agent_artifacts",
     "agent_knowledge_items",
+    "agent_dataset_snapshots",
 )
 
 
