@@ -14,6 +14,7 @@ class User(Base):
     full_name = Column(String, nullable=False)
     username = Column(String, nullable=False, unique=True)
     email = Column(String, nullable=False, unique=True)
+    student_code = Column(String(20), nullable=True, unique=True, index=True)
     password_hash = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)

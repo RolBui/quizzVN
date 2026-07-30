@@ -46,6 +46,7 @@ class TeacherStudentSchema(BaseModel):
     full_name: str
     username: str
     email: str
+    student_code: str
     phone: str | None = None
     avatar_url: str | None = None
     gender: str | None = None

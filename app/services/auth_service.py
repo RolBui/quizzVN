@@ -45,6 +45,9 @@ ADMIN_PERMISSION_KEYS = ("teachers", "students", "admins", "classes", "exams", "
 ADMIN_PASSWORD_SETUP_PURPOSE = "admin_password_setup"
 logger = logging.getLogger(__name__)
 USER_STATUSES = ("active", "inactive", "blocked", "disabled", "deleted")
+STUDENT_ROLE_NAME = "student"
+STUDENT_CODE_SEQUENCE_WIDTH = 3
+STUDENT_CODE_LOCK_NAMESPACE = 7_390_000
 
 
 def _resolve_token_expires_at(token: dict):
@@ -79,6 +82,7 @@ def bootstrap_auth_storage() -> None:
     PasswordSetupToken.__table__.create(bind=engine, checkfirst=True)
     _ensure_admin_invitation_columns()
     _ensure_admin_permissions_column()
+    _ensure_student_code_column()
     _ensure_user_status_constraint()
 
     db = SessionLocal()
@@ -90,6 +94,7 @@ def bootstrap_auth_storage() -> None:
             *SELECTABLE_ROLE_NAMES,
         ):
             get_or_create_role(db, role_name)
+        _backfill_student_codes(db)
         db.commit()
     finally:
         db.close()
@@ -117,6 +122,87 @@ def _ensure_admin_permissions_column() -> None:
     """
     with engine.begin() as connection:
         connection.execute(text(statement))
+
+
+def _ensure_student_code_column() -> None:
+    statement = """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS student_code VARCHAR(20);
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_student_code
+        ON users (student_code)
+        WHERE student_code IS NOT NULL;
+    """
+    with engine.begin() as connection:
+        connection.execute(text(statement))
+
+
+def _student_code_year(value: datetime | None = None) -> int:
+    source = value or utc_now()
+    return source.year % 100
+
+
+def _next_student_code(existing_codes: list[str], year: int) -> str:
+    prefix = f"{year:02d}"
+    pattern = re.compile(
+        rf"^{re.escape(prefix)}(\d{{{STUDENT_CODE_SEQUENCE_WIDTH},}})$"
+    )
+    highest_sequence = 0
+
+    for code in existing_codes:
+        match = pattern.fullmatch(code)
+        if match:
+            highest_sequence = max(highest_sequence, int(match.group(1)))
+
+    sequence = highest_sequence + 1
+    return f"{prefix}{sequence:0{STUDENT_CODE_SEQUENCE_WIDTH}d}"
+
+
+def assign_student_code(
+    db: Session,
+    user: User,
+    issued_at: datetime | None = None,
+) -> str:
+    if user.student_code:
+        return user.student_code
+
+    year = _student_code_year(issued_at)
+    prefix = f"{year:02d}"
+    bind = db.get_bind()
+
+    if bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": STUDENT_CODE_LOCK_NAMESPACE + year},
+        )
+
+    existing_codes = [
+        code
+        for (code,) in (
+            db.query(User.student_code)
+            .filter(User.student_code.like(f"{prefix}%"))
+            .all()
+        )
+        if code
+    ]
+    user.student_code = _next_student_code(existing_codes, year)
+    db.flush()
+    return user.student_code
+
+
+def _backfill_student_codes(db: Session) -> None:
+    students = (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .filter(
+            Role.name == STUDENT_ROLE_NAME,
+            User.student_code.is_(None),
+        )
+        .order_by(User.created_at.asc(), User.id.asc())
+        .all()
+    )
+
+    for student in students:
+        assign_student_code(db, student, student.created_at)
 
 
 def _ensure_admin_invitation_columns() -> None:
@@ -367,6 +453,7 @@ def serialize_user(user: User, profile: UserProfile | None = None) -> dict:
         "full_name": user.full_name,
         "username": user.username,
         "email": user.email,
+        "student_code": user.student_code,
         "phone": user.phone,
         "avatar_url": user.avatar_url,
         "auth_type": user.auth_type,
@@ -678,6 +765,8 @@ def complete_user_onboarding(
     user.full_name = full_name
     user.is_first_login = False
     user.updated_at = utc_now()
+    if role_name == STUDENT_ROLE_NAME:
+        assign_student_code(db, user)
 
     db.commit()
     db.refresh(user)

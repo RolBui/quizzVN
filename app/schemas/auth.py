@@ -26,6 +26,7 @@ class UserSchema(BaseModel):
     full_name: str
     username: str
     email: str
+    student_code: str | None = None
     phone: str | None = None
     avatar_url: str | None = None
     auth_type: str
