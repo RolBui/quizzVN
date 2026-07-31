@@ -29,7 +29,8 @@ class JoinClassRequest(BaseModel):
 
 class JoinClassResponse(BaseModel):
     message: str
-    classroom: StudentClassSchema
+    classroom: StudentClassSchema | None = None
+    class_info: "StudentDashboardClassSchema | None" = None
 
 
 class StudentDocumentSchema(BaseModel):
@@ -209,3 +210,71 @@ class SubmitAttemptResponse(BaseModel):
 
 class AttemptResultResponse(BaseModel):
     result: AttemptResultSchema
+
+
+class StudentInProgressResponse(BaseModel):
+    attempt_id: str | int
+    exam_id: str | int
+    title: str
+    subject_name: str = "Chưa phân loại"
+    chapter_name: str = "Tổng hợp"
+    completed_questions: int = 0
+    total_questions: int = 0
+    progress_percentage: float = 0.0
+
+
+class StudentDashboardMetricsResponse(BaseModel):
+    pending_exams_count: int = 0
+    pending_exams_diff: str = "+0 so với tuần trước"
+    average_score: float = 0.0
+    score_diff: str = "+0.0 điểm"
+    study_time_seconds: int = 0
+    study_time_display: str = "0m"
+    study_time_diff: str = "+0m so với tuần trước"
+    streak_days: int = 0
+    streak_text: str = "Ngày liên tiếp"
+
+
+class StudentActivityDaySchema(BaseModel):
+    day: str
+    date: str
+    tests_completed: int = 0
+    study_minutes: int = 0
+    is_highlight: bool | None = None
+
+
+class StudentActivityChartResponse(BaseModel):
+    daily_activities: list[StudentActivityDaySchema]
+    comparison_note: str = ""
+
+
+class StudentSubjectProgressSchema(BaseModel):
+    subject_id: str | int
+    name: str
+    progress: int = 0
+    color: str = "#8B5CF6"
+
+
+class StudentDashboardClassSchema(BaseModel):
+    id: str | int
+    name: str
+    academic_year: str = "Năm học 2024 - 2025"
+    member_count: int = 0
+    status: str = "Đang học"
+
+
+class StudentRecommendedExamSchema(BaseModel):
+    id: str | int
+    title: str
+    subject_name: str = "Tổng hợp"
+    question_count: int = 0
+    difficulty: str = "Trung bình"
+
+
+class StudentRecentActivitySchema(BaseModel):
+    id: str | int
+    action_type: str
+    title: str
+    time_ago: str = "Vừa xong"
+    created_at: datetime | str
+
