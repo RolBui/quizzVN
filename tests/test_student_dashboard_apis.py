@@ -137,6 +137,18 @@ class StudentDashboardApiTests(unittest.TestCase):
         self.assertEqual(len(data["daily_activities"]), 7)
 
     def test_get_dashboard_subject_progress(self):
+        attempt = ExamAttempt(
+            exam_id=self.exam.id,
+            user_id=self.student.id,
+            status="submitted",
+            score=9.0,
+            total_points=10.0,
+            started_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(timezone.utc),
+        )
+        self.db.add(attempt)
+        self.db.commit()
+
         res = self.client.get("/student/dashboard/subject-progress")
         self.assertEqual(res.status_code, 200)
         data = res.json()
