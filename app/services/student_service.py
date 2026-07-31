@@ -1013,16 +1013,21 @@ def get_student_dashboard_metrics(db: Session, student: User) -> dict:
         streak += 1
         check_date -= timedelta(days=1)
 
+    pending_diff = f"+{pending_count} đề mới" if pending_count > 0 else "Không có đề cần làm"
+    score_diff_text = f"Đã làm {len(completed_attempts)} bài thi" if completed_attempts else "Chưa có kết quả"
+    time_diff_text = f"{display_time} tuần này" if total_seconds > 0 else "Chưa có phút học"
+    streak_label = f"{streak} ngày liên tiếp" if streak > 0 else "0 ngày liên tiếp"
+
     return {
         "pending_exams_count": pending_count,
-        "pending_exams_diff": "+2 so với tuần trước",
+        "pending_exams_diff": pending_diff,
         "average_score": avg_score,
-        "score_diff": "+0.6 điểm",
+        "score_diff": score_diff_text,
         "study_time_seconds": total_seconds,
         "study_time_display": display_time,
-        "study_time_diff": "+45m so với tuần trước",
+        "study_time_diff": time_diff_text,
         "streak_days": streak,
-        "streak_text": "Ngày liên tiếp",
+        "streak_text": streak_label,
     }
 
 
@@ -1048,6 +1053,7 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
         .all()
     )
 
+    total_tests_week = 0
     for i in range(7):
         curr_date = start_date + timedelta(days=i)
         day_str = day_names[i]
@@ -1057,6 +1063,7 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
             if a.submitted_at and (_normalize_exam_datetime(a.submitted_at).date() == curr_date)
         ]
         tests_completed = len(day_attempts)
+        total_tests_week += tests_completed
         study_sec = 0
         for a in day_attempts:
             sub_at = _normalize_exam_datetime(a.submitted_at)
@@ -1078,20 +1085,49 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
 
         activities.append(item)
 
+    comp_note = (
+        f"Bạn đã hoàn thành {total_tests_week} bài thi tuần này."
+        if total_tests_week > 0
+        else "Bạn chưa có hoạt động làm bài nào tuần này. Hãy bắt đầu ngay!"
+    )
+
     return {
         "daily_activities": activities,
-        "comparison_note": "Hôm nay bạn đã làm nhiều hơn 20% so với trung bình tuần.",
+        "comparison_note": comp_note,
     }
 
 
 def get_student_subject_progress(db: Session, student: User) -> list:
-    return [
-        {"subject_id": "sub-1", "name": "Toán", "progress": 72, "color": "#8B5CF6"},
-        {"subject_id": "sub-2", "name": "Ngữ văn", "progress": 54, "color": "#FF5E84"},
-        {"subject_id": "sub-3", "name": "Tiếng Anh", "progress": 81, "color": "#F59E0B"},
-        {"subject_id": "sub-4", "name": "Vật lý", "progress": 36, "color": "#10B981"},
-        {"subject_id": "sub-5", "name": "Hóa học", "progress": 62, "color": "#3B82F6"},
-    ]
+    completed_attempts = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.exam))
+        .filter(ExamAttempt.user_id == student.id, ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED)
+        .all()
+    )
+
+    if not completed_attempts:
+        return []
+
+    subject_scores: dict[str, list[float]] = {}
+    for att in completed_attempts:
+        if att.exam:
+            subj_name = att.exam.grade or "Môn học"
+            if att.total_points and float(att.total_points) > 0 and att.score is not None:
+                pct = (float(att.score) / float(att.total_points)) * 100
+                subject_scores.setdefault(subj_name, []).append(pct)
+
+    colors = ["#8B5CF6", "#FF5E84", "#F59E0B", "#10B981", "#3B82F6"]
+    result = []
+    for idx, (s_name, s_pcts) in enumerate(subject_scores.items()):
+        avg_pct = round(sum(s_pcts) / len(s_pcts), 1)
+        result.append({
+            "subject_id": f"sub-{idx+1}",
+            "name": s_name,
+            "progress": avg_pct,
+            "color": colors[idx % len(colors)],
+        })
+
+    return result
 
 
 def get_student_dashboard_classes(db: Session, student: User, limit: int = 6) -> list:
