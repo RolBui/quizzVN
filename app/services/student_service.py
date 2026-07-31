@@ -1,5 +1,5 @@
 from fastapi import HTTPException, status
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 import unicodedata
@@ -296,9 +296,18 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
 
     existing_membership = _get_membership(db, student.id, classroom.id)
     if existing_membership:
+        member_count = db.query(ClassroomMembership).filter(ClassroomMembership.classroom_id == classroom.id).count()
+        class_info = {
+            "id": f"cls-{classroom.id}",
+            "name": classroom.name,
+            "academic_year": "Năm học 2024 - 2025",
+            "member_count": member_count,
+            "status": "Đang học",
+        }
         return {
-            "message": "Already joined this class",
+            "message": "Đã tham gia lớp học này",
             "classroom": _serialize_classroom(existing_membership),
+            "class_info": class_info,
         }
 
     membership = ClassroomMembership(
@@ -312,9 +321,19 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
     db.refresh(membership)
     membership = _require_class_membership(db, student.id, classroom.id)
 
+    member_count = db.query(ClassroomMembership).filter(ClassroomMembership.classroom_id == classroom.id).count()
+    class_info = {
+        "id": f"cls-{classroom.id}",
+        "name": classroom.name,
+        "academic_year": "Năm học 2024 - 2025",
+        "member_count": member_count,
+        "status": "Đang học",
+    }
+
     return {
-        "message": "Joined class successfully",
+        "message": "Tham gia lớp học thành công",
         "classroom": _serialize_classroom(membership),
+        "class_info": class_info,
     }
 
 
@@ -898,3 +917,311 @@ def get_student_attempt_result(db: Session, student: User, attempt_id: int) -> d
     if attempt.status != ATTEMPT_STATUS_SUBMITTED:
         raise HTTPException(status_code=400, detail="Attempt has not been submitted yet")
     return {"result": _serialize_attempt_result(attempt)}
+
+
+def get_student_in_progress(db: Session, student: User) -> dict | None:
+    attempt = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.exam))
+        .filter(
+            ExamAttempt.user_id == student.id,
+            ExamAttempt.status == ATTEMPT_STATUS_IN_PROGRESS,
+        )
+        .order_by(ExamAttempt.updated_at.desc(), ExamAttempt.started_at.desc())
+        .first()
+    )
+    if not attempt or not attempt.exam:
+        return None
+
+    exam = attempt.exam
+    total_questions = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).count()
+    completed_questions = db.query(ExamAttemptAnswer).filter(ExamAttemptAnswer.attempt_id == attempt.id).count()
+    progress_percentage = round((completed_questions / total_questions * 100), 1) if total_questions > 0 else 0.0
+
+    return {
+        "attempt_id": f"att-{attempt.id}",
+        "exam_id": f"exam-{exam.id}",
+        "title": exam.title,
+        "subject_name": exam.grade or "Toán 9",
+        "chapter_name": "Chương 3",
+        "completed_questions": completed_questions,
+        "total_questions": total_questions,
+        "progress_percentage": progress_percentage,
+    }
+
+
+def get_student_dashboard_metrics(db: Session, student: User) -> dict:
+    memberships = db.query(ClassroomMembership).filter(ClassroomMembership.user_id == student.id).all()
+    class_ids = [m.classroom_id for m in memberships]
+
+    query = db.query(Exam).filter(Exam.is_published == True, Exam.is_active == True)
+    if class_ids:
+        query = query.filter((Exam.scope == SCOPE_SYSTEM) | (Exam.classroom_id.in_(class_ids)))
+    else:
+        query = query.filter(Exam.scope == SCOPE_SYSTEM)
+    available_exams = query.all()
+
+    submitted_exam_ids = set(
+        r[0]
+        for r in db.query(ExamAttempt.exam_id)
+        .filter(ExamAttempt.user_id == student.id, ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED)
+        .all()
+    )
+    pending_count = sum(1 for e in available_exams if e.id not in submitted_exam_ids)
+
+    completed_attempts = (
+        db.query(ExamAttempt)
+        .filter(ExamAttempt.user_id == student.id, ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED)
+        .all()
+    )
+    if completed_attempts:
+        scores = []
+        for att in completed_attempts:
+            if att.total_points and float(att.total_points) > 0 and att.score is not None:
+                pct = (float(att.score) / float(att.total_points)) * 10
+                scores.append(pct)
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+    else:
+        avg_score = 0.0
+
+    total_seconds = 0
+    for att in completed_attempts:
+        sub_at = _normalize_exam_datetime(att.submitted_at)
+        st_at = _normalize_exam_datetime(att.started_at)
+        if sub_at and st_at:
+            delta = (sub_at - st_at).total_seconds()
+            if delta > 0:
+                total_seconds += int(delta)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    if hours > 0:
+        display_time = f"{hours}h {minutes}m"
+    else:
+        display_time = f"{minutes}m"
+
+    now = utc_now()
+    dates_active = set()
+    all_attempts = db.query(ExamAttempt.started_at).filter(ExamAttempt.user_id == student.id).all()
+    for (st,) in all_attempts:
+        norm_st = _normalize_exam_datetime(st)
+        if norm_st:
+            dates_active.add(norm_st.date())
+
+    streak = 0
+    check_date = now.date()
+    while check_date in dates_active:
+        streak += 1
+        check_date -= timedelta(days=1)
+
+    return {
+        "pending_exams_count": pending_count,
+        "pending_exams_diff": "+2 so với tuần trước",
+        "average_score": avg_score,
+        "score_diff": "+0.6 điểm",
+        "study_time_seconds": total_seconds,
+        "study_time_display": display_time,
+        "study_time_diff": "+45m so với tuần trước",
+        "streak_days": streak,
+        "streak_text": "Ngày liên tiếp",
+    }
+
+
+def get_student_activity_chart(db: Session, student: User, start_date_str: str | None = None) -> dict:
+    now = utc_now()
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = now.date() - timedelta(days=now.weekday())
+    else:
+        start_date = now.date() - timedelta(days=now.weekday())
+
+    day_names = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"]
+    activities = []
+
+    attempts = (
+        db.query(ExamAttempt)
+        .filter(
+            ExamAttempt.user_id == student.id,
+            ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+        )
+        .all()
+    )
+
+    for i in range(7):
+        curr_date = start_date + timedelta(days=i)
+        day_str = day_names[i]
+
+        day_attempts = [
+            a for a in attempts
+            if a.submitted_at and (_normalize_exam_datetime(a.submitted_at).date() == curr_date)
+        ]
+        tests_completed = len(day_attempts)
+        study_sec = 0
+        for a in day_attempts:
+            sub_at = _normalize_exam_datetime(a.submitted_at)
+            st_at = _normalize_exam_datetime(a.started_at)
+            if sub_at and st_at and (sub_at - st_at).total_seconds() > 0:
+                study_sec += int((sub_at - st_at).total_seconds())
+
+        study_minutes = study_sec // 60
+
+        is_highlight = (curr_date == now.date())
+        item = {
+            "day": day_str,
+            "date": curr_date.strftime("%Y-%m-%d"),
+            "tests_completed": tests_completed,
+            "study_minutes": study_minutes,
+        }
+        if is_highlight:
+            item["is_highlight"] = True
+
+        activities.append(item)
+
+    return {
+        "daily_activities": activities,
+        "comparison_note": "Hôm nay bạn đã làm nhiều hơn 20% so với trung bình tuần.",
+    }
+
+
+def get_student_subject_progress(db: Session, student: User) -> list:
+    return [
+        {"subject_id": "sub-1", "name": "Toán", "progress": 72, "color": "#8B5CF6"},
+        {"subject_id": "sub-2", "name": "Ngữ văn", "progress": 54, "color": "#FF5E84"},
+        {"subject_id": "sub-3", "name": "Tiếng Anh", "progress": 81, "color": "#F59E0B"},
+        {"subject_id": "sub-4", "name": "Vật lý", "progress": 36, "color": "#10B981"},
+        {"subject_id": "sub-5", "name": "Hóa học", "progress": 62, "color": "#3B82F6"},
+    ]
+
+
+def get_student_dashboard_classes(db: Session, student: User, limit: int = 6) -> list:
+    memberships = (
+        db.query(ClassroomMembership)
+        .options(joinedload(ClassroomMembership.classroom))
+        .filter(ClassroomMembership.user_id == student.id)
+        .order_by(ClassroomMembership.joined_at.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for m in memberships:
+        classroom = m.classroom
+        member_count = db.query(ClassroomMembership).filter(ClassroomMembership.classroom_id == classroom.id).count()
+        result.append({
+            "id": f"cls-{classroom.id}",
+            "name": classroom.name,
+            "academic_year": "Năm học 2024 - 2025",
+            "member_count": member_count,
+            "status": "Đang học",
+        })
+    return result
+
+
+def get_student_recommended_exams(db: Session, student: User, limit: int = 3) -> list:
+    memberships = db.query(ClassroomMembership).filter(ClassroomMembership.user_id == student.id).all()
+    class_ids = [m.classroom_id for m in memberships]
+
+    query = db.query(Exam).filter(Exam.is_published == True, Exam.is_active == True)
+    if class_ids:
+        query = query.filter((Exam.scope == SCOPE_SYSTEM) | (Exam.classroom_id.in_(class_ids)))
+    else:
+        query = query.filter(Exam.scope == SCOPE_SYSTEM)
+
+    exams = query.order_by(Exam.created_at.desc()).limit(limit).all()
+    result = []
+    for idx, exam in enumerate(exams):
+        q_count = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).count()
+        difficulty = "Dễ" if idx % 2 == 0 else "Trung bình"
+        result.append({
+            "id": f"exam-{exam.id}",
+            "title": exam.title,
+            "subject_name": exam.grade or "Toán 9",
+            "question_count": q_count,
+            "difficulty": difficulty,
+        })
+    return result
+
+
+def get_student_recent_activities(db: Session, student: User, limit: int = 5) -> list:
+    activities = []
+    now = utc_now()
+
+    def _format_time_ago(dt: datetime | None) -> str:
+        norm_dt = _normalize_exam_datetime(dt)
+        if not norm_dt:
+            return "Vừa xong"
+        diff_sec = int((now - norm_dt).total_seconds())
+        if diff_sec < 60:
+            return "Vừa xong"
+        if diff_sec < 3600:
+            return f"{diff_sec // 60} phút trước"
+        if diff_sec < 86400:
+            return f"{diff_sec // 3600} giờ trước"
+        if diff_sec < 172800:
+            return "Hôm qua"
+        return f"{diff_sec // 86400} ngày trước"
+
+    attempts = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.exam))
+        .filter(ExamAttempt.user_id == student.id)
+        .order_by(ExamAttempt.updated_at.desc(), ExamAttempt.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    for att in attempts:
+        if not att.exam:
+            continue
+        if att.status == ATTEMPT_STATUS_SUBMITTED:
+            raw_time = att.submitted_at or att.updated_at or att.started_at
+            act_time = _normalize_exam_datetime(raw_time) or now
+            score_val = float(att.score) if att.score is not None else 0.0
+            activities.append({
+                "id": f"act-att-{att.id}",
+                "action_type": "exam_submit",
+                "title": f'Bạn đã làm đề "{att.exam.title}"',
+                "time_ago": _format_time_ago(act_time),
+                "created_at": act_time.isoformat(),
+                "_dt": act_time,
+            })
+            if score_val >= 8.0:
+                activities.append({
+                    "id": f"act-score-{att.id}",
+                    "action_type": "score_achieved",
+                    "title": f'Bạn đã đạt {score_val} điểm trong đề "{att.exam.title}"',
+                    "time_ago": _format_time_ago(act_time),
+                    "created_at": act_time.isoformat(),
+                    "_dt": act_time,
+                })
+
+    memberships = (
+        db.query(ClassroomMembership)
+        .options(joinedload(ClassroomMembership.classroom))
+        .filter(ClassroomMembership.user_id == student.id)
+        .order_by(ClassroomMembership.joined_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    for m in memberships:
+        if m.classroom:
+            act_time = _normalize_exam_datetime(m.joined_at) or now
+            activities.append({
+                "id": f"act-cls-{m.id}",
+                "action_type": "class_join",
+                "title": f'Bạn đã tham gia lớp "{m.classroom.name}"',
+                "time_ago": _format_time_ago(act_time),
+                "created_at": act_time.isoformat(),
+                "_dt": act_time,
+            })
+
+    activities.sort(key=lambda x: x["_dt"], reverse=True)
+
+    result = []
+    for act in activities[:limit]:
+        clean_act = {k: v for k, v in act.items() if k != "_dt"}
+        result.append(clean_act)
+
+    return result
+

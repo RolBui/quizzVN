@@ -10,16 +10,30 @@ from app.schemas.student import (
     SaveAttemptAnswersRequest,
     SaveAttemptAnswersResponse,
     StartAttemptResponse,
+    StudentActivityChartResponse,
     StudentClassListResponse,
+    StudentDashboardClassSchema,
+    StudentDashboardMetricsResponse,
     StudentDocumentListResponse,
     StudentExamDetailSchema,
     StudentExamListResponse,
     StudentExamResultListResponse,
+    StudentInProgressResponse,
+    StudentRecentActivitySchema,
+    StudentRecommendedExamSchema,
+    StudentSubjectProgressSchema,
     SubmitAttemptResponse,
 )
 from app.services.student_service import (
+    get_student_activity_chart,
     get_student_attempt_result,
+    get_student_dashboard_classes,
+    get_student_dashboard_metrics,
     get_student_exam_detail,
+    get_student_in_progress,
+    get_student_recent_activities,
+    get_student_recommended_exams,
+    get_student_subject_progress,
     join_student_class,
     list_student_classes,
     list_student_documents,
@@ -31,6 +45,67 @@ from app.services.student_service import (
 )
 
 router = APIRouter(prefix="/student", tags=["Student"])
+
+
+@router.get("/dashboard/in-progress", response_model=StudentInProgressResponse | None)
+def get_dashboard_in_progress(
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+):
+    return get_student_in_progress(db, current_student)
+
+
+@router.get("/dashboard/metrics", response_model=StudentDashboardMetricsResponse)
+def get_dashboard_metrics(
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentDashboardMetricsResponse:
+    return get_student_dashboard_metrics(db, current_student)
+
+
+@router.get("/dashboard/activity-chart", response_model=StudentActivityChartResponse)
+def get_dashboard_activity_chart(
+    start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentActivityChartResponse:
+    return get_student_activity_chart(db, current_student, start_date)
+
+
+@router.get("/dashboard/subject-progress", response_model=list[StudentSubjectProgressSchema])
+def get_dashboard_subject_progress(
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+):
+    return get_student_subject_progress(db, current_student)
+
+
+@router.get("/dashboard/classes", response_model=list[StudentDashboardClassSchema])
+def get_dashboard_classes(
+    limit: int = Query(default=6, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+):
+    return get_student_dashboard_classes(db, current_student, limit)
+
+
+@router.get("/dashboard/recommended-exams", response_model=list[StudentRecommendedExamSchema])
+def get_dashboard_recommended_exams(
+    limit: int = Query(default=3, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+):
+    return get_student_recommended_exams(db, current_student, limit)
+
+
+@router.get("/dashboard/recent-activities", response_model=list[StudentRecentActivitySchema])
+def get_dashboard_recent_activities(
+    limit: int = Query(default=5, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+):
+    return get_student_recent_activities(db, current_student, limit)
+
 
 
 @router.get("/classes", response_model=StudentClassListResponse)
