@@ -27,11 +27,13 @@ STUDENT_ROLE_NAME = "student"
 SCOPE_SYSTEM = "system"
 SCOPE_CLASS = "class"
 QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
+QUESTION_TYPE_MULTIPLE_CHOICE = "multiple_choice"
 QUESTION_TYPE_TRUE_FALSE = "true_false"
+QUESTION_TYPE_FILL_IN_BLANK = "fill_in_blank"
 QUESTION_TYPE_SHORT_ANSWER = "short_answer"
 QUESTION_TYPE_TEXT = "text"
-SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
-TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
+SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_MULTIPLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
+TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_FILL_IN_BLANK, QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 ATTEMPT_STATUS_SUBMITTED = "submitted"
 PASSING_SCORE_PERCENT = 50.0
 DEFAULT_EXAM_GRADE = "Chưa phân loại"
@@ -997,6 +999,8 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
         normalized_options = []
         if question_type == QUESTION_TYPE_SINGLE_CHOICE:
             normalized_options = _normalize_single_choice_options(question, index)
+        elif question_type == QUESTION_TYPE_MULTIPLE_CHOICE:
+            normalized_options = _normalize_multiple_choice_options(question, index)
         elif question_type == QUESTION_TYPE_TRUE_FALSE:
             normalized_options = _normalize_true_false_options(question, index)
         elif _is_text_answer_question_type(question_type):
@@ -1072,7 +1076,9 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
 def _normalize_question_type(question_type: str | None) -> str:
     if question_type in {
         QUESTION_TYPE_SINGLE_CHOICE,
+        QUESTION_TYPE_MULTIPLE_CHOICE,
         QUESTION_TYPE_TRUE_FALSE,
+        QUESTION_TYPE_FILL_IN_BLANK,
         QUESTION_TYPE_SHORT_ANSWER,
         QUESTION_TYPE_TEXT,
     }:
@@ -1121,6 +1127,45 @@ def _normalize_single_choice_options(question: dict, index: int) -> list[dict]:
                 "option_text": option_text,
                 "image_url": option_image_url,
                 "is_correct": option["is_correct"],
+            }
+        )
+
+    return normalized_options
+
+
+def _normalize_multiple_choice_options(question: dict, index: int) -> list[dict]:
+    options = question.get("options") or []
+    if len(options) < 2:
+        raise HTTPException(status_code=400, detail=f"Question {index} must have at least 2 options")
+
+    correct_options = [option for option in options if option.get("is_correct")]
+    if len(correct_options) < 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Question {index} must have at least 1 correct option",
+        )
+
+    normalized_options = []
+    for option_index, option in enumerate(options, start=1):
+        option_key = str(option.get("option_key") or f"OPT_{option_index}").strip()
+        option_text = (option.get("option_text") or "").strip()
+        option_image_url = (option.get("image_url") or "").strip() or None
+        if not option_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {index} option {option_index} key is required",
+            )
+        if not option_text and not option_image_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question {index} option {option_index} must include option_text or image_url",
+            )
+        normalized_options.append(
+            {
+                "option_key": option_key,
+                "option_text": option_text,
+                "image_url": option_image_url,
+                "is_correct": bool(option.get("is_correct")),
             }
         )
 

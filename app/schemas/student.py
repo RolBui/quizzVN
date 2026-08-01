@@ -6,7 +6,14 @@ from pydantic import BaseModel
 
 StudentScope = Literal["system", "class"]
 AttemptStatus = Literal["in_progress", "submitted"]
-StudentQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
+StudentQuestionType = Literal[
+    "single_choice",
+    "multiple_choice",
+    "true_false",
+    "fill_in_blank",
+    "short_answer",
+    "text",
+]
 
 
 class StudentClassSchema(BaseModel):
@@ -156,6 +163,7 @@ class StartAttemptResponse(BaseModel):
 class AttemptAnswerInput(BaseModel):
     question_id: int
     selected_option_id: int | None = None
+    selected_option_ids: list[int] | None = None
     answer_text: str | None = None
 
 
@@ -175,6 +183,7 @@ class AttemptResultAnswerSchema(BaseModel):
     explanation: str | None = None
     question_image_url: str | None = None
     selected_option_id: int | None = None
+    selected_option_ids: list[int] | None = None
     selected_option_text: str | None = None
     selected_option_image_url: str | None = None
     submitted_answer_text: str | None = None

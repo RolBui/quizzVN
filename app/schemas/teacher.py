@@ -5,7 +5,14 @@ from pydantic import BaseModel, Field
 
 
 TeacherScope = Literal["system", "class"]
-TeacherQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
+TeacherQuestionType = Literal[
+    "single_choice",
+    "multiple_choice",
+    "true_false",
+    "fill_in_blank",
+    "short_answer",
+    "text",
+]
 TeacherAttemptStatus = Literal["in_progress", "submitted"]
 
 
