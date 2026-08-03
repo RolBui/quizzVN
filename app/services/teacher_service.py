@@ -639,7 +639,8 @@ def delete_teacher_class_document(
 
 def _get_exam_total_points(exam: Exam) -> float:
     computed_total = sum((question.points or 0) for question in exam.questions)
-    return computed_total if computed_total > 0 else exam.total_points
+    raw_total = computed_total if computed_total > 0 else (exam.total_points or 0)
+    return round(float(raw_total), 2)
 
 
 def _serialize_exam_grade(value: str | None) -> str:
