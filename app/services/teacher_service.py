@@ -779,7 +779,7 @@ def list_teacher_exams(
             .options(joinedload(Exam.created_by).joinedload(User.role))
             .options(joinedload(Exam.questions))
             .options(joinedload(Exam.attempts))
-            .filter(Exam.created_by_user_id == teacher.id)
+            .filter(Exam.scope == SCOPE_SYSTEM, Exam.created_by_user_id == teacher.id)
         )
     else:
         query = (
