@@ -14,6 +14,7 @@ TeacherQuestionType = Literal[
     "text",
 ]
 TeacherAttemptStatus = Literal["in_progress", "submitted"]
+ExamPointMode = Literal["auto", "manual"]
 
 
 class TeacherClassSchema(BaseModel):
@@ -254,6 +255,8 @@ class CreateTeacherExamRequest(BaseModel):
     end_time: datetime | None = None
     is_published: bool = False
     is_active: bool = False
+    total_points: float = Field(default=10, gt=0, le=10)
+    point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput]
 
 
@@ -269,6 +272,8 @@ class UpdateTeacherExamRequest(BaseModel):
     end_time: datetime | None = None
     is_published: bool | None = None
     is_active: bool | None = None
+    total_points: float | None = Field(default=None, gt=0, le=10)
+    point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput] | None = None
 
 
@@ -282,6 +287,8 @@ class UpdateTeacherClassExamRequest(BaseModel):
     end_time: datetime | None = None
     is_published: bool | None = None
     is_active: bool | None = None
+    total_points: float | None = Field(default=None, gt=0, le=10)
+    point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput] | None = None
 
 

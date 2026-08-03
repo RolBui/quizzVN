@@ -360,6 +360,8 @@ def post_teacher_system_exam(
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
+        payload.total_points,
+        payload.point_mode,
     )
 
 
@@ -385,6 +387,8 @@ def post_teacher_class_exam(
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
+        payload.total_points,
+        payload.point_mode,
     )
 
 
@@ -414,6 +418,8 @@ def put_teacher_class_exam(
         payload.is_published,
         payload.is_active,
         questions,
+        payload.total_points,
+        payload.point_mode,
     )
 
 
@@ -443,6 +449,8 @@ def put_teacher_exam(
         payload.is_published,
         payload.is_active,
         questions,
+        payload.total_points,
+        payload.point_mode,
     )
 
 

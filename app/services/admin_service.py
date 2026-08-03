@@ -41,6 +41,7 @@ from app.services.auth_service import (
 from app.services.email_templates import render_action_email, render_notice_email, render_otp_email
 from app.services.email_verification_service import send_email
 from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
+from app.services.exam_scoring import apply_exam_scoring
 from app.services.media_service import delete_document_file, upload_document_file
 from app.services.teacher_service import (
     SCOPE_CLASS,
@@ -1082,6 +1083,8 @@ def create_admin_exam(
     is_published: bool,
     is_active: bool,
     questions: list[dict],
+    total_points: float = 10.0,
+    point_mode: str = "auto",
 ) -> dict:
     normalized_title = title.strip()
     if not normalized_title:
@@ -1101,6 +1104,11 @@ def create_admin_exam(
 
     normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
     normalized_questions = _validate_exam_questions(questions)
+    apply_exam_scoring(
+        normalized_questions,
+        total_points=total_points,
+        point_mode=point_mode,
+    )
 
     exam = Exam(
         created_by_user_id=current_admin.id,

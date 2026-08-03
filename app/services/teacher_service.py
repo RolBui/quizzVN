@@ -1,7 +1,9 @@
+import re
 import secrets
 import string
 import unicodedata
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -20,6 +22,7 @@ from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
 from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
+from app.services.exam_scoring import apply_exam_scoring
 from app.services.media_service import delete_document_file, upload_document_file
 
 TEACHER_ROLE_NAME = "teacher"
@@ -1004,7 +1007,19 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
         elif question_type == QUESTION_TYPE_TRUE_FALSE:
             normalized_options = _normalize_true_false_options(question, index)
         elif _is_text_answer_question_type(question_type):
-            accepted_answers = question.get("accepted_answers") or []
+            accepted_answers = list(question.get("accepted_answers") or [])
+            if not accepted_answers and question_type == QUESTION_TYPE_FILL_IN_BLANK:
+                raw_brackets = re.findall(r"\[(.*?)\]", prompt)
+                for bracket in raw_brackets:
+                    cleaned_bracket = bracket.strip()
+                    if not cleaned_bracket:
+                        continue
+                    upper_b = cleaned_bracket.upper()
+                    if upper_b in {"FILL", "READ"} or upper_b.startswith("READ-"):
+                        continue
+                    parts = [p.strip() for p in cleaned_bracket.split("|") if p.strip()]
+                    accepted_answers.extend(parts)
+
             if not accepted_answers:
                 raise HTTPException(
                     status_code=400,
@@ -1047,8 +1062,8 @@ def _validate_exam_questions(questions: list[dict]) -> list[dict]:
     return normalized_questions
 
 
-def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
-    total_points = 0.0
+def _replace_exam_questions(exam: Exam, questions: list[dict]) -> Decimal:
+    total_points = Decimal("0.00")
     exam.questions.clear()
     for question in questions:
         exam_question = ExamQuestion(
@@ -1069,7 +1084,7 @@ def _replace_exam_questions(exam: Exam, questions: list[dict]) -> float:
                 )
             )
         exam.questions.append(exam_question)
-        total_points += question["points"]
+        total_points += Decimal(str(question["points"]))
     return total_points
 
 
@@ -1252,6 +1267,8 @@ def create_teacher_exam(
     is_published: bool,
     is_active: bool,
     questions: list[dict],
+    total_points: float = 10.0,
+    point_mode: str = "auto",
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
     normalized_title = title.strip()
@@ -1262,6 +1279,11 @@ def create_teacher_exam(
 
     normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
     normalized_questions = _validate_exam_questions(questions)
+    apply_exam_scoring(
+        normalized_questions,
+        total_points=total_points,
+        point_mode=point_mode,
+    )
 
     exam = Exam(
         created_by_user_id=teacher.id,
@@ -1309,6 +1331,8 @@ def update_teacher_exam(
     is_published: bool | None,
     is_active: bool | None,
     questions: list[dict] | None,
+    total_points: float | None = None,
+    point_mode: str = "auto",
 ) -> dict:
     exam = _get_teacher_exam(db, teacher, exam_id)
     target_scope = scope or exam.scope
@@ -1357,6 +1381,12 @@ def update_teacher_exam(
     exam.scope = target_scope
     exam.classroom_id = classroom.id if classroom else None
 
+    if total_points is not None and questions is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="total_points requires questions",
+        )
+
     if questions is not None:
         if exam.attempts:
             raise HTTPException(
@@ -1364,6 +1394,11 @@ def update_teacher_exam(
                 detail="Cannot replace questions after students have started attempts",
             )
         normalized_questions = _validate_exam_questions(questions)
+        apply_exam_scoring(
+            normalized_questions,
+            total_points=total_points if total_points is not None else 10.0,
+            point_mode=point_mode,
+        )
         exam.total_points = _replace_exam_questions(exam, normalized_questions)
 
     exam.updated_at = utc_now()
@@ -1393,6 +1428,8 @@ def update_teacher_class_exam(
     is_published: bool | None,
     is_active: bool | None,
     questions: list[dict] | None,
+    total_points: float | None = None,
+    point_mode: str = "auto",
 ) -> dict:
     _get_teacher_class_exam(db, teacher, class_id, exam_id)
     return update_teacher_exam(
@@ -1413,6 +1450,8 @@ def update_teacher_class_exam(
         is_published,
         is_active,
         questions,
+        total_points,
+        point_mode,
     )
 
 

@@ -962,6 +962,8 @@ def post_admin_exam(
         payload.is_published,
         payload.is_active,
         [question.model_dump() for question in payload.questions],
+        payload.total_points,
+        payload.point_mode,
     )
 
 
