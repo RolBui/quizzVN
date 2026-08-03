@@ -772,19 +772,24 @@ def list_teacher_exams(
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
 
-    query = (
-        db.query(Exam)
-        .options(joinedload(Exam.classroom))
-        .options(joinedload(Exam.created_by).joinedload(User.role))
-        .options(joinedload(Exam.questions))
-        .options(joinedload(Exam.attempts))
-        .filter(Exam.scope == scope)
-    )
-
     if scope == SCOPE_SYSTEM:
-        query = query.filter(Exam.classroom_id.is_(None), Exam.created_by_user_id == teacher.id)
+        query = (
+            db.query(Exam)
+            .options(joinedload(Exam.classroom))
+            .options(joinedload(Exam.created_by).joinedload(User.role))
+            .options(joinedload(Exam.questions))
+            .options(joinedload(Exam.attempts))
+            .filter(Exam.created_by_user_id == teacher.id)
+        )
     else:
-        query = query.filter(Exam.classroom_id == classroom.id)
+        query = (
+            db.query(Exam)
+            .options(joinedload(Exam.classroom))
+            .options(joinedload(Exam.created_by).joinedload(User.role))
+            .options(joinedload(Exam.questions))
+            .options(joinedload(Exam.attempts))
+            .filter(Exam.scope == scope, Exam.classroom_id == classroom.id)
+        )
 
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
