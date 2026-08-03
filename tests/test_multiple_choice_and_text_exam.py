@@ -146,6 +146,11 @@ class MultipleChoiceAndTextExamTests(unittest.TestCase):
         data = res.json()
         self.assertEqual(data["exam"]["title"], "Đề thi Soạn văn bản Ôn tập Tiếng Anh")
         self.assertEqual(len(data["exam"]["questions"]), 5)
+        self.assertEqual(data["exam"]["total_points"], 10.0)
+        self.assertEqual(
+            sum(question["points"] for question in data["exam"]["questions"]),
+            10.0,
+        )
 
         exam_id = data["exam"]["id"]
 
@@ -191,7 +196,8 @@ class MultipleChoiceAndTextExamTests(unittest.TestCase):
         self.assertEqual(res_submit.status_code, 200)
         result_data = res_submit.json()["result"]
 
-        self.assertEqual(result_data["score"], 50.0)
+        self.assertEqual(result_data["score"], 10.0)
+        self.assertEqual(result_data["total_points"], 10.0)
         self.assertEqual(result_data["correct_answers_count"], 5)
 
 

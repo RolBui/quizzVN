@@ -276,6 +276,7 @@ class AdminExamOverviewResponse(BaseModel):
 
 AdminQuestionType = Literal["single_choice", "true_false", "short_answer", "text"]
 AdminExamScope = Literal["system", "class"]
+AdminExamPointMode = Literal["auto", "manual"]
 
 
 class AdminExamOptionInput(BaseModel):
@@ -308,6 +309,8 @@ class CreateAdminExamRequest(BaseModel):
     end_time: datetime | None = None
     is_published: bool = False
     is_active: bool = False
+    total_points: float = Field(default=10, gt=0, le=10)
+    point_mode: AdminExamPointMode = "auto"
     questions: list[AdminExamQuestionInput]
 
 
