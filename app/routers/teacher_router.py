@@ -8,6 +8,7 @@ from app.schemas.teacher import (
     AddTeacherStudentRequest,
     CreateTeacherClassRequest,
     CreateTeacherExamRequest,
+    TeacherAssignmentType,
     TeacherClassListResponse,
     TeacherClassResponse,
     TeacherDocumentListResponse,
@@ -273,10 +274,11 @@ def delete_teacher_document_route(
 def get_teacher_system_exams(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    assignment_type: TeacherAssignmentType | None = Query(default=None),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
-    return list_teacher_exams(db, current_teacher, "system", None, limit, offset)
+    return list_teacher_exams(db, current_teacher, "system", None, limit, offset, assignment_type)
 
 
 @router.get("/classes/{class_id}/exams", response_model=TeacherExamListResponse)
@@ -284,10 +286,11 @@ def get_teacher_class_exams(
     class_id: int,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    assignment_type: TeacherAssignmentType | None = Query(default=None),
     db: Session = Depends(get_db),
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
-    return list_teacher_exams(db, current_teacher, "class", class_id, limit, offset)
+    return list_teacher_exams(db, current_teacher, "class", class_id, limit, offset, assignment_type)
 
 
 @router.get("/classes/{class_id}/exams/{exam_id}", response_model=TeacherExamDetailSchema)
@@ -362,6 +365,8 @@ def post_teacher_system_exam(
         [question.model_dump() for question in payload.questions],
         payload.total_points,
         payload.point_mode,
+        payload.assignment_type,
+        payload.max_attempts,
     )
 
 
@@ -389,6 +394,8 @@ def post_teacher_class_exam(
         [question.model_dump() for question in payload.questions],
         payload.total_points,
         payload.point_mode,
+        payload.assignment_type,
+        payload.max_attempts,
     )
 
 
@@ -420,6 +427,10 @@ def put_teacher_class_exam(
         questions,
         payload.total_points,
         payload.point_mode,
+        payload.assignment_type,
+        payload.max_attempts,
+        "assignment_type" in payload.model_fields_set,
+        "max_attempts" in payload.model_fields_set,
     )
 
 
@@ -451,6 +462,10 @@ def put_teacher_exam(
         questions,
         payload.total_points,
         payload.point_mode,
+        payload.assignment_type,
+        payload.max_attempts,
+        "assignment_type" in payload.model_fields_set,
+        "max_attempts" in payload.model_fields_set,
     )
 
 

@@ -22,6 +22,8 @@ class Exam(Base):
     total_points = Column(Numeric(10, 4, asdecimal=False), nullable=False, default=0)
     is_published = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    assignment_type = Column(String(20), nullable=False, default="exam")
+    max_attempts = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -1,6 +1,6 @@
-from fastapi import HTTPException, status
+﻿from fastapi import HTTPException, status
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 import json
 import unicodedata
@@ -32,7 +32,19 @@ QUESTION_TYPE_TEXT = "text"
 SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_MULTIPLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
 TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_FILL_IN_BLANK, QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 PASSING_SCORE_PERCENT = 50.0
-DEFAULT_EXAM_GRADE = "Chưa phân loại"
+DEFAULT_EXAM_GRADE = "ChÆ°a phÃ¢n loáº¡i"
+
+
+ASSIGNMENT_TYPE_TEST = "test"
+ASSIGNMENT_TYPE_EXAM = "exam"
+ASSIGNMENT_TYPES = {ASSIGNMENT_TYPE_TEST, ASSIGNMENT_TYPE_EXAM}
+
+
+def _normalize_assignment_type(value: str | None) -> str:
+    normalized = (value or ASSIGNMENT_TYPE_EXAM).strip().lower()
+    if normalized not in ASSIGNMENT_TYPES:
+        raise HTTPException(status_code=400, detail="assignment_type must be test or exam")
+    return normalized
 
 
 def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
@@ -79,7 +91,7 @@ def _ensure_student_learning_columns() -> None:
         "UPDATE learning_documents SET content = COALESCE(content, '')",
         "ALTER TABLE learning_documents ALTER COLUMN content SET DEFAULT ''",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
-        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'Chưa phân loại'",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'ChÆ°a phÃ¢n loáº¡i'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",
@@ -89,10 +101,52 @@ def _ensure_student_learning_columns() -> None:
         "ALTER TABLE exams ALTER COLUMN total_points TYPE NUMERIC(10, 4) USING total_points::numeric",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(20)",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS max_attempts INTEGER",
+        """
+        UPDATE exams
+        SET assignment_type = CASE
+            WHEN scope = 'class'
+             AND (
+                LOWER(COALESCE(title, '')) LIKE '%kiá»ƒm tra%'
+                OR LOWER(COALESCE(title, '')) LIKE '%kiem tra%'
+             )
+            THEN 'test'
+            ELSE 'exam'
+        END
+        WHERE assignment_type IS NULL OR assignment_type NOT IN ('test', 'exam')
+        """,
+        "UPDATE exams SET max_attempts = 1 WHERE assignment_type = 'test' AND max_attempts IS NULL",
+        "ALTER TABLE exams ALTER COLUMN assignment_type SET DEFAULT 'exam'",
+        "ALTER TABLE exams ALTER COLUMN assignment_type SET NOT NULL",
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_exams_assignment_type'
+            ) THEN
+                ALTER TABLE exams
+                ADD CONSTRAINT ck_exams_assignment_type
+                CHECK (assignment_type IN ('test', 'exam'));
+            END IF;
+        END $$
+        """,
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_exams_max_attempts'
+            ) THEN
+                ALTER TABLE exams
+                ADD CONSTRAINT ck_exams_max_attempts
+                CHECK (max_attempts IS NULL OR max_attempts >= 1);
+            END IF;
+        END $$
+        """,
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "UPDATE exams SET scope = COALESCE(scope, 'system')",
-        "UPDATE exams SET grade = COALESCE(NULLIF(BTRIM(grade), ''), 'Chưa phân loại')",
+        "UPDATE exams SET grade = COALESCE(NULLIF(BTRIM(grade), ''), 'ChÆ°a phÃ¢n loáº¡i')",
         "UPDATE exams SET duration_minutes = COALESCE(duration_minutes, 30)",
         "UPDATE exams SET total_points = COALESCE(total_points, 0)",
         "UPDATE exams SET is_published = COALESCE(is_published, FALSE)",
@@ -316,12 +370,12 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
         class_info = {
             "id": f"cls-{classroom.id}",
             "name": classroom.name,
-            "academic_year": "Năm học 2024 - 2025",
+            "academic_year": "NÄƒm há»c 2024 - 2025",
             "member_count": member_count,
-            "status": "Đang học",
+            "status": "Äang há»c",
         }
         return {
-            "message": "Đã tham gia lớp học này",
+            "message": "ÄÃ£ tham gia lá»›p há»c nÃ y",
             "classroom": _serialize_classroom(existing_membership),
             "class_info": class_info,
         }
@@ -341,13 +395,13 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
     class_info = {
         "id": f"cls-{classroom.id}",
         "name": classroom.name,
-        "academic_year": "Năm học 2024 - 2025",
+        "academic_year": "NÄƒm há»c 2024 - 2025",
         "member_count": member_count,
-        "status": "Đang học",
+        "status": "Äang há»c",
     }
 
     return {
-        "message": "Tham gia lớp học thành công",
+        "message": "Tham gia lá»›p há»c thÃ nh cÃ´ng",
         "classroom": _serialize_classroom(membership),
         "class_info": class_info,
     }
@@ -427,6 +481,8 @@ def _serialize_exam_summary(exam: Exam, is_ai_generated: bool = False) -> dict:
         "question_count": len(exam.questions),
         **build_exam_creator_metadata(exam.created_by, is_ai_generated=is_ai_generated),
         "is_active": exam.is_active,
+        "assignment_type": getattr(exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
+        "max_attempts": exam.max_attempts,
     }
 
 
@@ -457,6 +513,7 @@ def _serialize_attempt_history_item(attempt: ExamAttempt) -> dict:
         "attempt_id": attempt.id,
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
+        "assignment_type": getattr(attempt.exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
         "exam_description": attempt.exam.description,
         "exam_grade": _serialize_exam_grade(attempt.exam.grade),
         "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
@@ -510,6 +567,7 @@ def list_student_exams(
     classroom_id: int | None,
     limit: int = 50,
     offset: int = 0,
+    assignment_type: str | None = None,
 ) -> dict:
     _validate_scope(scope, classroom_id)
 
@@ -527,6 +585,9 @@ def list_student_exams(
 
     if scope == SCOPE_SYSTEM:
         query = query.filter(Exam.classroom_id.is_(None))
+
+    if assignment_type is not None:
+        query = query.filter(Exam.assignment_type == _normalize_assignment_type(assignment_type))
 
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
@@ -680,6 +741,7 @@ def _serialize_attempt_summary(attempt: ExamAttempt) -> dict:
     return {
         "id": attempt.id,
         "exam_id": attempt.exam_id,
+        "assignment_type": getattr(attempt.exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
         "status": attempt.status,
         "score": attempt.score,
         "total_points": attempt.total_points,
@@ -700,9 +762,9 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
     start_time = _normalize_exam_datetime(exam.start_time)
     end_time = _normalize_exam_datetime(exam.end_time)
     if start_time and now < start_time:
-        raise HTTPException(status_code=400, detail="Bài thi chưa đến thời gian làm.")
+        raise HTTPException(status_code=400, detail="BÃ i thi chÆ°a Ä‘áº¿n thá»i gian lÃ m.")
     if end_time and now >= end_time:
-        raise HTTPException(status_code=400, detail="Bài thi đã hết thời gian làm.")
+        raise HTTPException(status_code=400, detail="BÃ i thi Ä‘Ã£ háº¿t thá»i gian lÃ m.")
 
     existing_attempt = (
         db.query(ExamAttempt)
@@ -721,6 +783,21 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
             "message": "Existing in-progress attempt returned",
             "attempt": _serialize_attempt_summary(existing_attempt),
         }
+
+    max_attempts = getattr(exam, "max_attempts", None)
+    if max_attempts is not None:
+        submitted_attempt_count = int(
+            db.query(func.count(ExamAttempt.id))
+            .filter(
+                ExamAttempt.exam_id == exam.id,
+                ExamAttempt.user_id == student.id,
+                ExamAttempt.status == ATTEMPT_STATUS_SUBMITTED,
+            )
+            .scalar()
+            or 0
+        )
+        if submitted_attempt_count >= max_attempts:
+            raise HTTPException(status_code=409, detail="Báº¡n Ä‘Ã£ sá»­ dá»¥ng háº¿t sá»‘ láº§n lÃ m bÃ i.")
 
     attempt = ExamAttempt(
         exam_id=exam.id,
@@ -925,6 +1002,7 @@ def _serialize_attempt_result(attempt: ExamAttempt) -> dict:
         "attempt_id": attempt.id,
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
+        "assignment_type": getattr(attempt.exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
         "exam_grade": _serialize_exam_grade(attempt.exam.grade),
         "exam_image_url": attempt.exam.image_url or _get_exam_preview_image_url(attempt.exam),
         "status": attempt.status,
@@ -1003,8 +1081,8 @@ def get_student_in_progress(db: Session, student: User) -> dict | None:
         "attempt_id": f"att-{attempt.id}",
         "exam_id": f"exam-{exam.id}",
         "title": exam.title,
-        "subject_name": exam.grade or "Toán 9",
-        "chapter_name": "Chương 3",
+        "subject_name": exam.grade or "ToÃ¡n 9",
+        "chapter_name": "ChÆ°Æ¡ng 3",
         "completed_questions": completed_questions,
         "total_questions": total_questions,
         "progress_percentage": progress_percentage,
@@ -1074,10 +1152,10 @@ def get_student_dashboard_metrics(db: Session, student: User) -> dict:
         streak += 1
         check_date -= timedelta(days=1)
 
-    pending_diff = f"+{pending_count} đề mới" if pending_count > 0 else "Không có đề cần làm"
-    score_diff_text = f"Đã làm {len(completed_attempts)} bài thi" if completed_attempts else "Chưa có kết quả"
-    time_diff_text = f"{display_time} tuần này" if total_seconds > 0 else "Chưa có phút học"
-    streak_label = f"{streak} ngày liên tiếp" if streak > 0 else "0 ngày liên tiếp"
+    pending_diff = f"+{pending_count} Ä‘á» má»›i" if pending_count > 0 else "KhÃ´ng cÃ³ Ä‘á» cáº§n lÃ m"
+    score_diff_text = f"ÄÃ£ lÃ m {len(completed_attempts)} bÃ i thi" if completed_attempts else "ChÆ°a cÃ³ káº¿t quáº£"
+    time_diff_text = f"{display_time} tuáº§n nÃ y" if total_seconds > 0 else "ChÆ°a cÃ³ phÃºt há»c"
+    streak_label = f"{streak} ngÃ y liÃªn tiáº¿p" if streak > 0 else "0 ngÃ y liÃªn tiáº¿p"
 
     return {
         "pending_exams_count": pending_count,
@@ -1102,7 +1180,7 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
     else:
         start_date = now.date() - timedelta(days=now.weekday())
 
-    day_names = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"]
+    day_names = ["Thá»© 2", "Thá»© 3", "Thá»© 4", "Thá»© 5", "Thá»© 6", "Thá»© 7", "CN"]
     activities = []
 
     attempts = (
@@ -1147,9 +1225,9 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
         activities.append(item)
 
     comp_note = (
-        f"Bạn đã hoàn thành {total_tests_week} bài thi tuần này."
+        f"Báº¡n Ä‘Ã£ hoÃ n thÃ nh {total_tests_week} bÃ i thi tuáº§n nÃ y."
         if total_tests_week > 0
-        else "Bạn chưa có hoạt động làm bài nào tuần này. Hãy bắt đầu ngay!"
+        else "Báº¡n chÆ°a cÃ³ hoáº¡t Ä‘á»™ng lÃ m bÃ i nÃ o tuáº§n nÃ y. HÃ£y báº¯t Ä‘áº§u ngay!"
     )
 
     return {
@@ -1172,7 +1250,7 @@ def get_student_subject_progress(db: Session, student: User) -> list:
     subject_scores: dict[str, list[float]] = {}
     for att in completed_attempts:
         if att.exam:
-            subj_name = att.exam.grade or "Môn học"
+            subj_name = att.exam.grade or "MÃ´n há»c"
             if att.total_points and float(att.total_points) > 0 and att.score is not None:
                 pct = (float(att.score) / float(att.total_points)) * 100
                 subject_scores.setdefault(subj_name, []).append(pct)
@@ -1207,9 +1285,9 @@ def get_student_dashboard_classes(db: Session, student: User, limit: int = 6) ->
         result.append({
             "id": f"cls-{classroom.id}",
             "name": classroom.name,
-            "academic_year": "Năm học 2024 - 2025",
+            "academic_year": "NÄƒm há»c 2024 - 2025",
             "member_count": member_count,
-            "status": "Đang học",
+            "status": "Äang há»c",
         })
     return result
 
@@ -1228,11 +1306,11 @@ def get_student_recommended_exams(db: Session, student: User, limit: int = 3) ->
     result = []
     for idx, exam in enumerate(exams):
         q_count = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).count()
-        difficulty = "Dễ" if idx % 2 == 0 else "Trung bình"
+        difficulty = "Dá»…" if idx % 2 == 0 else "Trung bÃ¬nh"
         result.append({
             "id": f"exam-{exam.id}",
             "title": exam.title,
-            "subject_name": exam.grade or "Toán 9",
+            "subject_name": exam.grade or "ToÃ¡n 9",
             "question_count": q_count,
             "difficulty": difficulty,
         })
@@ -1246,17 +1324,17 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
     def _format_time_ago(dt: datetime | None) -> str:
         norm_dt = _normalize_exam_datetime(dt)
         if not norm_dt:
-            return "Vừa xong"
+            return "Vá»«a xong"
         diff_sec = int((now - norm_dt).total_seconds())
         if diff_sec < 60:
-            return "Vừa xong"
+            return "Vá»«a xong"
         if diff_sec < 3600:
-            return f"{diff_sec // 60} phút trước"
+            return f"{diff_sec // 60} phÃºt trÆ°á»›c"
         if diff_sec < 86400:
-            return f"{diff_sec // 3600} giờ trước"
+            return f"{diff_sec // 3600} giá» trÆ°á»›c"
         if diff_sec < 172800:
-            return "Hôm qua"
-        return f"{diff_sec // 86400} ngày trước"
+            return "HÃ´m qua"
+        return f"{diff_sec // 86400} ngÃ y trÆ°á»›c"
 
     attempts = (
         db.query(ExamAttempt)
@@ -1277,7 +1355,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
             activities.append({
                 "id": f"act-att-{att.id}",
                 "action_type": "exam_submit",
-                "title": f'Bạn đã làm đề "{att.exam.title}"',
+                "title": f'Báº¡n Ä‘Ã£ lÃ m Ä‘á» "{att.exam.title}"',
                 "time_ago": _format_time_ago(act_time),
                 "created_at": act_time.isoformat(),
                 "_dt": act_time,
@@ -1286,7 +1364,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
                 activities.append({
                     "id": f"act-score-{att.id}",
                     "action_type": "score_achieved",
-                    "title": f'Bạn đã đạt {score_val} điểm trong đề "{att.exam.title}"',
+                    "title": f'Báº¡n Ä‘Ã£ Ä‘áº¡t {score_val} Ä‘iá»ƒm trong Ä‘á» "{att.exam.title}"',
                     "time_ago": _format_time_ago(act_time),
                     "created_at": act_time.isoformat(),
                     "_dt": act_time,
@@ -1307,7 +1385,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
             activities.append({
                 "id": f"act-cls-{m.id}",
                 "action_type": "class_join",
-                "title": f'Bạn đã tham gia lớp "{m.classroom.name}"',
+                "title": f'Báº¡n Ä‘Ã£ tham gia lá»›p "{m.classroom.name}"',
                 "time_ago": _format_time_ago(act_time),
                 "created_at": act_time.isoformat(),
                 "_dt": act_time,

@@ -201,5 +201,68 @@ class MultipleChoiceAndTextExamTests(unittest.TestCase):
         self.assertEqual(result_data["correct_answers_count"], 5)
 
 
+    def test_assignment_type_test_requires_schedule_and_max_attempts_is_enforced(self):
+        base_question = {
+            "prompt": "2 + 2 = ?",
+            "question_type": "single_choice",
+            "points": 10,
+            "order_index": 1,
+            "options": [
+                {"option_key": "A", "option_text": "3", "is_correct": False},
+                {"option_key": "B", "option_text": "4", "is_correct": True},
+            ],
+        }
+        missing_schedule_payload = {
+            "title": "Quick test",
+            "grade": "Math",
+            "duration_minutes": 15,
+            "assignment_type": "test",
+            "questions": [base_question],
+        }
+
+        res_missing_schedule = self.client.post("/teacher/system/exams", json=missing_schedule_payload)
+        self.assertEqual(res_missing_schedule.status_code, 400)
+
+        exam_payload = {
+            "title": "Limited exam",
+            "grade": "Math",
+            "duration_minutes": 15,
+            "assignment_type": "exam",
+            "max_attempts": 1,
+            "is_published": True,
+            "is_active": True,
+            "questions": [base_question],
+        }
+        res_create = self.client.post("/teacher/system/exams", json=exam_payload)
+        self.assertEqual(res_create.status_code, 200)
+        exam = res_create.json()["exam"]
+        self.assertEqual(exam["assignment_type"], "exam")
+        self.assertEqual(exam["max_attempts"], 1)
+
+        res_start = self.client.post(f"/student/exams/{exam['id']}/attempts")
+        self.assertEqual(res_start.status_code, 200)
+        first_attempt_id = res_start.json()["attempt"]["id"]
+
+        correct_option_id = [
+            option["id"]
+            for option in exam["questions"][0]["options"]
+            if option["is_correct"]
+        ][0]
+        res_save = self.client.put(
+            f"/student/attempts/{first_attempt_id}/answers",
+            json={"answers": [{"question_id": exam["questions"][0]["id"], "selected_option_id": correct_option_id}]},
+        )
+        self.assertEqual(res_save.status_code, 200)
+        res_submit = self.client.post(f"/student/attempts/{first_attempt_id}/submit")
+        self.assertEqual(res_submit.status_code, 200)
+        self.assertEqual(res_submit.json()["result"]["assignment_type"], "exam")
+
+        res_retry = self.client.post(f"/student/exams/{exam['id']}/attempts")
+        self.assertEqual(res_retry.status_code, 409)
+
 if __name__ == "__main__":
     unittest.main()
+
+
+
+

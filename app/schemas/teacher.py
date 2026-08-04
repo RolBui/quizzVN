@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 TeacherScope = Literal["system", "class"]
+TeacherAssignmentType = Literal["test", "exam"]
 TeacherQuestionType = Literal[
     "single_choice",
     "multiple_choice",
@@ -133,6 +134,8 @@ class TeacherExamSummarySchema(BaseModel):
     duration_minutes: int
     start_time: datetime | None = None
     end_time: datetime | None = None
+    assignment_type: TeacherAssignmentType
+    max_attempts: int | None = None
     total_points: float
     question_count: int
     attempt_count: int
@@ -170,6 +173,7 @@ class TeacherExamResultListItemSchema(BaseModel):
     student_name: str
     student_email: str
     student_avatar_url: str | None = None
+    assignment_type: TeacherAssignmentType
     score: float
     total_points: float
     score_percent: float
@@ -208,6 +212,7 @@ class TeacherExamAttemptResultSchema(BaseModel):
     attempt_id: int
     exam_id: int
     exam_title: str
+    assignment_type: TeacherAssignmentType
     status: TeacherAttemptStatus
     student_id: int
     student_name: str
@@ -258,6 +263,8 @@ class CreateTeacherExamRequest(BaseModel):
     total_points: float = Field(default=10, gt=0, le=10)
     point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput]
+    assignment_type: TeacherAssignmentType = "exam"
+    max_attempts: int | None = Field(default=None, ge=1)
 
 
 class UpdateTeacherExamRequest(BaseModel):
@@ -275,6 +282,8 @@ class UpdateTeacherExamRequest(BaseModel):
     total_points: float | None = Field(default=None, gt=0, le=10)
     point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput] | None = None
+    assignment_type: TeacherAssignmentType | None = None
+    max_attempts: int | None = Field(default=None, ge=1)
 
 
 class UpdateTeacherClassExamRequest(BaseModel):
@@ -290,6 +299,8 @@ class UpdateTeacherClassExamRequest(BaseModel):
     total_points: float | None = Field(default=None, gt=0, le=10)
     point_mode: ExamPointMode = "auto"
     questions: list[TeacherExamQuestionInput] | None = None
+    assignment_type: TeacherAssignmentType | None = None
+    max_attempts: int | None = Field(default=None, ge=1)
 
 
 class TeacherExamResponse(BaseModel):
