@@ -1451,7 +1451,7 @@ def update_teacher_exam(
 
     if total_points is not None and questions is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="total_points requires questions",
         )
 
@@ -1571,3 +1571,106 @@ def set_teacher_exam_visibility(
         "message": "Exam published successfully" if is_published else "Exam set to private successfully",
         "exam": _serialize_exam_detail(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id)),
     }
+
+
+def assign_teacher_exam(
+    db: Session,
+    teacher: User,
+    exam_id: int,
+    classroom_id: int,
+    assignment_type: str = ASSIGNMENT_TYPE_EXAM,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    duration_minutes: int | None = None,
+    max_attempts: int | None = None,
+    is_published: bool = True,
+    duplicate: bool = True,
+) -> dict:
+    original_exam = _get_teacher_exam(db, teacher, exam_id)
+    classroom = _validate_scope_for_teacher(db, teacher, SCOPE_CLASS, classroom_id)
+
+    effective_duration = duration_minutes if duration_minutes is not None else original_exam.duration_minutes
+    effective_start_time = start_time if start_time is not None else original_exam.start_time
+    effective_end_time = end_time if end_time is not None else original_exam.end_time
+    effective_max_attempts = max_attempts if max_attempts is not None else original_exam.max_attempts
+
+    (
+        normalized_assignment_type,
+        normalized_start_time,
+        normalized_end_time,
+        normalized_max_attempts,
+    ) = _validate_assignment_settings(
+        assignment_type,
+        effective_start_time,
+        effective_end_time,
+        effective_max_attempts,
+    )
+
+    if duplicate:
+        new_exam = Exam(
+            created_by_user_id=teacher.id,
+            title=original_exam.title,
+            description=original_exam.description,
+            grade=original_exam.grade,
+            image_url=original_exam.image_url,
+            scope=SCOPE_CLASS,
+            classroom_id=classroom.id,
+            duration_minutes=effective_duration,
+            start_time=normalized_start_time,
+            end_time=normalized_end_time,
+            total_points=original_exam.total_points,
+            is_published=is_published,
+            is_active=True,
+            assignment_type=normalized_assignment_type,
+            max_attempts=normalized_max_attempts,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(new_exam)
+        db.flush()
+
+        for q in original_exam.questions:
+            new_question = ExamQuestion(
+                exam_id=new_exam.id,
+                question_type=q.question_type,
+                order_index=q.order_index,
+                prompt=q.prompt,
+                explanation=q.explanation,
+                image_url=q.image_url,
+                points=q.points,
+            )
+            db.add(new_question)
+            db.flush()
+
+            for opt in q.options:
+                new_opt = ExamQuestionOption(
+                    question_id=new_question.id,
+                    option_key=opt.option_key,
+                    option_text=opt.option_text,
+                    image_url=opt.image_url,
+                    is_correct=opt.is_correct,
+                )
+                db.add(new_opt)
+
+        db.commit()
+        db.refresh(new_exam)
+        target_exam = _get_teacher_exam(db, teacher, new_exam.id)
+    else:
+        original_exam.scope = SCOPE_CLASS
+        original_exam.classroom_id = classroom.id
+        original_exam.assignment_type = normalized_assignment_type
+        original_exam.start_time = normalized_start_time
+        original_exam.end_time = normalized_end_time
+        original_exam.duration_minutes = effective_duration
+        original_exam.max_attempts = normalized_max_attempts
+        original_exam.is_published = is_published
+        original_exam.updated_at = utc_now()
+        db.commit()
+        db.refresh(original_exam)
+        target_exam = _get_teacher_exam(db, teacher, original_exam.id)
+
+    return {
+        "message": "Exam assigned to class successfully",
+        "exam": _serialize_exam_detail(target_exam, is_ai_generated=_is_ai_generated_exam(db, target_exam.id)),
+    }
+
