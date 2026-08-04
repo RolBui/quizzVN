@@ -42,6 +42,35 @@ PASSING_SCORE_PERCENT = 50.0
 DEFAULT_EXAM_GRADE = "Chưa phân loại"
 
 
+ASSIGNMENT_TYPE_TEST = "test"
+ASSIGNMENT_TYPE_EXAM = "exam"
+ASSIGNMENT_TYPES = {ASSIGNMENT_TYPE_TEST, ASSIGNMENT_TYPE_EXAM}
+
+
+def _normalize_assignment_type(value: str | None) -> str:
+    normalized = (value or ASSIGNMENT_TYPE_EXAM).strip().lower()
+    if normalized not in ASSIGNMENT_TYPES:
+        raise HTTPException(status_code=400, detail="assignment_type must be test or exam")
+    return normalized
+
+
+def _validate_assignment_settings(
+    assignment_type: str | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
+    max_attempts: int | None,
+) -> tuple[str, datetime | None, datetime | None, int | None]:
+    normalized_assignment_type = _normalize_assignment_type(assignment_type)
+    normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
+    if max_attempts is not None and max_attempts < 1:
+        raise HTTPException(status_code=400, detail="max_attempts must be greater than or equal to 1")
+    if normalized_assignment_type == ASSIGNMENT_TYPE_TEST:
+        if not normalized_start_time or not normalized_end_time:
+            raise HTTPException(status_code=400, detail="Bài kiểm tra phải có thời gian bắt đầu và kết thúc")
+        return normalized_assignment_type, normalized_start_time, normalized_end_time, max_attempts or 1
+    return normalized_assignment_type, normalized_start_time, normalized_end_time, max_attempts
+
+
 def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -690,6 +719,8 @@ def _serialize_exam_summary(exam: Exam, is_ai_generated: bool = False) -> dict:
         **build_exam_creator_metadata(exam.created_by, is_ai_generated=is_ai_generated),
         "is_published": exam.is_published,
         "is_active": exam.is_active,
+        "assignment_type": getattr(exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
+        "max_attempts": exam.max_attempts,
         "created_at": exam.created_at,
         "updated_at": exam.updated_at,
     }
@@ -770,6 +801,7 @@ def list_teacher_exams(
     classroom_id: int | None,
     limit: int = 50,
     offset: int = 0,
+    assignment_type: str | None = None,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
 
@@ -791,6 +823,9 @@ def list_teacher_exams(
             .options(joinedload(Exam.attempts))
             .filter(Exam.scope == scope, Exam.classroom_id == classroom.id)
         )
+
+    if assignment_type is not None:
+        query = query.filter(Exam.assignment_type == _normalize_assignment_type(assignment_type))
 
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
@@ -910,6 +945,7 @@ def _serialize_teacher_attempt_list_item(attempt: ExamAttempt) -> dict:
     return {
         "attempt_id": attempt.id,
         **_serialize_attempt_student(attempt),
+        "assignment_type": getattr(attempt.exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
         "score": score,
         "total_points": total_points,
         "score_percent": score_percent,
@@ -975,6 +1011,7 @@ def _serialize_teacher_attempt_result(attempt: ExamAttempt) -> dict:
         "attempt_id": attempt.id,
         "exam_id": attempt.exam.id,
         "exam_title": attempt.exam.title,
+        "assignment_type": getattr(attempt.exam, "assignment_type", ASSIGNMENT_TYPE_EXAM),
         "status": attempt.status,
         **_serialize_attempt_student(attempt),
         "score": score,
@@ -1275,6 +1312,8 @@ def create_teacher_exam(
     questions: list[dict],
     total_points: float = 10.0,
     point_mode: str = "auto",
+    assignment_type: str = ASSIGNMENT_TYPE_EXAM,
+    max_attempts: int | None = None,
 ) -> dict:
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
     normalized_title = title.strip()
@@ -1283,7 +1322,12 @@ def create_teacher_exam(
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
 
-    normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
+    normalized_assignment_type, normalized_start_time, normalized_end_time, normalized_max_attempts = _validate_assignment_settings(
+        assignment_type,
+        start_time,
+        end_time,
+        max_attempts,
+    )
     normalized_questions = _validate_exam_questions(questions)
     apply_exam_scoring(
         normalized_questions,
@@ -1305,6 +1349,8 @@ def create_teacher_exam(
         total_points=0.0,
         is_published=is_published,
         is_active=is_active,
+        assignment_type=normalized_assignment_type,
+        max_attempts=normalized_max_attempts,
         created_at=utc_now(),
         updated_at=utc_now(),
     )
@@ -1339,6 +1385,10 @@ def update_teacher_exam(
     questions: list[dict] | None,
     total_points: float | None = None,
     point_mode: str = "auto",
+    assignment_type: str | None = None,
+    max_attempts: int | None = None,
+    update_assignment_type: bool = False,
+    update_max_attempts: bool = False,
 ) -> dict:
     exam = _get_teacher_exam(db, teacher, exam_id)
     target_scope = scope or exam.scope
@@ -1368,16 +1418,6 @@ def update_teacher_exam(
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes
 
-    if update_start_time or update_end_time:
-        normalized_start_time, normalized_end_time = _validate_exam_schedule(
-            start_time if update_start_time else exam.start_time,
-            end_time if update_end_time else exam.end_time,
-        )
-        if update_start_time:
-            exam.start_time = normalized_start_time
-        if update_end_time:
-            exam.end_time = normalized_end_time
-
     if is_published is not None:
         exam.is_published = is_published
 
@@ -1386,6 +1426,28 @@ def update_teacher_exam(
 
     exam.scope = target_scope
     exam.classroom_id = classroom.id if classroom else None
+
+    effective_assignment_type = (
+        assignment_type if update_assignment_type else getattr(exam, "assignment_type", ASSIGNMENT_TYPE_EXAM)
+    )
+    effective_start_time = start_time if update_start_time else exam.start_time
+    effective_end_time = end_time if update_end_time else exam.end_time
+    effective_max_attempts = max_attempts if update_max_attempts else getattr(exam, "max_attempts", None)
+    (
+        normalized_assignment_type,
+        normalized_start_time,
+        normalized_end_time,
+        normalized_max_attempts,
+    ) = _validate_assignment_settings(
+        effective_assignment_type,
+        effective_start_time,
+        effective_end_time,
+        effective_max_attempts,
+    )
+    exam.assignment_type = normalized_assignment_type
+    exam.start_time = normalized_start_time
+    exam.end_time = normalized_end_time
+    exam.max_attempts = normalized_max_attempts
 
     if total_points is not None and questions is None:
         raise HTTPException(
@@ -1436,6 +1498,10 @@ def update_teacher_class_exam(
     questions: list[dict] | None,
     total_points: float | None = None,
     point_mode: str = "auto",
+    assignment_type: str | None = None,
+    max_attempts: int | None = None,
+    update_assignment_type: bool = False,
+    update_max_attempts: bool = False,
 ) -> dict:
     _get_teacher_class_exam(db, teacher, class_id, exam_id)
     return update_teacher_exam(
@@ -1458,6 +1524,10 @@ def update_teacher_class_exam(
         questions,
         total_points,
         point_mode,
+        assignment_type,
+        max_attempts,
+        update_assignment_type,
+        update_max_attempts,
     )
 
 

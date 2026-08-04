@@ -11,6 +11,7 @@ from app.schemas.student import (
     SaveAttemptAnswersResponse,
     StartAttemptResponse,
     StudentActivityChartResponse,
+    StudentAssignmentType,
     StudentClassListResponse,
     StudentDashboardClassSchema,
     StudentDashboardMetricsResponse,
@@ -146,10 +147,11 @@ def get_class_documents(
 def get_system_exams(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    assignment_type: StudentAssignmentType | None = Query(default=None),
     db: Session = Depends(get_db),
     current_student=Depends(get_current_student),
 ) -> StudentExamListResponse:
-    return list_student_exams(db, current_student, "system", None, limit, offset)
+    return list_student_exams(db, current_student, "system", None, limit, offset, assignment_type)
 
 
 @router.get("/classes/{class_id}/exams", response_model=StudentExamListResponse)
@@ -157,10 +159,11 @@ def get_class_exams(
     class_id: int,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    assignment_type: StudentAssignmentType | None = Query(default=None),
     db: Session = Depends(get_db),
     current_student=Depends(get_current_student),
 ) -> StudentExamListResponse:
-    return list_student_exams(db, current_student, "class", class_id, limit, offset)
+    return list_student_exams(db, current_student, "class", class_id, limit, offset, assignment_type)
 
 
 @router.get("/results", response_model=StudentExamResultListResponse)

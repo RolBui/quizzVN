@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 
 StudentScope = Literal["system", "class"]
+StudentAssignmentType = Literal["test", "exam"]
 AttemptStatus = Literal["in_progress", "submitted"]
 StudentQuestionType = Literal[
     "single_choice",
@@ -88,6 +89,8 @@ class StudentExamSummarySchema(BaseModel):
     duration_minutes: int
     start_time: datetime | None = None
     end_time: datetime | None = None
+    assignment_type: StudentAssignmentType
+    max_attempts: int | None = None
     total_points: float
     question_count: int
     creator_id: int | None = None
@@ -124,6 +127,7 @@ class StudentExamResultListItemSchema(BaseModel):
     exam_description: str | None = None
     exam_grade: str
     exam_image_url: str | None = None
+    assignment_type: StudentAssignmentType
     scope: StudentScope
     classroom_id: int | None = None
     classroom_name: str | None = None
@@ -145,6 +149,7 @@ class StudentExamResultListResponse(BaseModel):
 class AttemptSummarySchema(BaseModel):
     id: int
     exam_id: int
+    assignment_type: StudentAssignmentType
     status: AttemptStatus
     score: float | None = None
     total_points: float
@@ -200,6 +205,7 @@ class AttemptResultSchema(BaseModel):
     attempt_id: int
     exam_id: int
     exam_title: str
+    assignment_type: StudentAssignmentType
     exam_grade: str
     exam_image_url: str | None = None
     status: AttemptStatus
