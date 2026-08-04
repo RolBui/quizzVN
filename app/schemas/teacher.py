@@ -303,6 +303,17 @@ class UpdateTeacherClassExamRequest(BaseModel):
     max_attempts: int | None = Field(default=None, ge=1)
 
 
+class AssignTeacherExamRequest(BaseModel):
+    classroom_id: int
+    assignment_type: TeacherAssignmentType = "exam"
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    max_attempts: int | None = Field(default=None, ge=1)
+    is_published: bool = True
+    duplicate: bool = True
+
+
 class TeacherExamResponse(BaseModel):
     message: str
     exam: TeacherExamDetailSchema

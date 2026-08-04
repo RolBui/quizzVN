@@ -6,6 +6,7 @@ from app.dependencies.auth import get_current_teacher
 from app.schemas.common import MessageResponse
 from app.schemas.teacher import (
     AddTeacherStudentRequest,
+    AssignTeacherExamRequest,
     CreateTeacherClassRequest,
     CreateTeacherExamRequest,
     TeacherAssignmentType,
@@ -29,6 +30,7 @@ from app.schemas.teacher import (
 from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 from app.services.teacher_service import (
     add_student_to_teacher_class,
+    assign_teacher_exam,
     create_teacher_class,
     create_teacher_exam,
     create_teacher_uploaded_document,
@@ -494,3 +496,26 @@ def private_teacher_exam(
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamResponse:
     return set_teacher_exam_visibility(db, current_teacher, exam_id, False)
+
+
+@router.post("/exams/{exam_id}/assign", response_model=TeacherExamResponse)
+def assign_teacher_exam_route(
+    exam_id: int,
+    payload: AssignTeacherExamRequest,
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamResponse:
+    return assign_teacher_exam(
+        db,
+        current_teacher,
+        exam_id,
+        payload.classroom_id,
+        payload.assignment_type,
+        payload.start_time,
+        payload.end_time,
+        payload.duration_minutes,
+        payload.max_attempts,
+        payload.is_published,
+        payload.duplicate,
+    )
+

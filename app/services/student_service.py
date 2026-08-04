@@ -1,6 +1,7 @@
-﻿from fastapi import HTTPException, status
+from fastapi import HTTPException, status
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
+
 from sqlalchemy.orm import Session, joinedload
 import json
 import unicodedata
@@ -601,6 +602,136 @@ def list_student_exams(
         "limit": limit,
         "offset": offset,
     }
+
+
+def explore_student_exams(
+    db: Session,
+    student: User,
+    search: str | None = None,
+    grade: str | None = None,
+    assignment_type: str | None = None,
+    sort: str = "newest",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """
+    Khám phá đề thi công khai từ hệ thống hoặc từ giáo viên công khai.
+    Học sinh có thể tìm kiếm, lọc và làm ngay các đề thi này.
+    """
+    query = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions))
+        .filter(
+            Exam.is_published.is_(True),
+            Exam.is_active.is_(True),
+            Exam.scope == SCOPE_SYSTEM,
+        )
+    )
+
+    if search:
+        normalized_search = search.strip()
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            query = query.filter(
+                (Exam.title.ilike(pattern)) | (Exam.description.ilike(pattern))
+            )
+
+    if grade:
+        normalized_grade = grade.strip()
+        if normalized_grade:
+            query = query.filter(Exam.grade.ilike(f"%{normalized_grade}%"))
+
+    if assignment_type is not None:
+        query = query.filter(
+            Exam.assignment_type == _normalize_assignment_type(assignment_type)
+        )
+
+    total = int(query.count())
+
+    if sort == "oldest":
+        query = query.order_by(Exam.created_at.asc())
+    elif sort == "popular":
+        # Sắp xếp theo số lần làm bài (attempts) nhiều nhất
+        query = query.outerjoin(ExamAttempt, ExamAttempt.exam_id == Exam.id).group_by(Exam.id).order_by(func.count(ExamAttempt.id).desc(), Exam.created_at.desc())
+    else:
+        # newest (mặc định)
+        query = query.order_by(Exam.created_at.desc())
+
+    exams = query.offset(offset).limit(limit).all()
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, [exam.id for exam in exams])
+
+    return {
+        "items": [
+            _serialize_exam_summary(exam, is_ai_generated=exam.id in ai_generated_exam_ids)
+            for exam in exams
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def list_student_all_documents(
+    db: Session,
+    student: User,
+    classroom_id: int | None = None,
+    search: str | None = None,
+) -> dict:
+    """
+    Lấy toàn bộ tài liệu học tập công khai mà học sinh được phép xem:
+    - Tài liệu hệ thống (scope='system', is_published=True)
+    - Tài liệu lớp học (scope='class') của các lớp mà học sinh đã tham gia
+    Hỗ trợ lọc theo lớp cụ thể và tìm kiếm từ khóa.
+    """
+    # Lấy danh sách classroom_id mà học sinh đang tham gia
+    joined_classroom_ids = [
+        row.classroom_id
+        for row in db.query(ClassroomMembership.classroom_id)
+        .filter(ClassroomMembership.user_id == student.id)
+        .all()
+    ]
+
+    if classroom_id is not None:
+        # Nếu lọc theo lớp cụ thể, kiểm tra xem học sinh có trong lớp đó không
+        if classroom_id not in joined_classroom_ids:
+            raise HTTPException(status_code=403, detail="You are not a member of this class")
+        # Chỉ lấy tài liệu lớp đó
+        conditions = and_(
+            LearningDocument.scope == SCOPE_CLASS,
+            LearningDocument.classroom_id == classroom_id,
+            LearningDocument.is_published.is_(True),
+        )
+    else:
+        # Lấy tất cả: tài liệu hệ thống + tài liệu các lớp đang học
+        conditions = and_(
+            LearningDocument.is_published.is_(True),
+            or_(
+                LearningDocument.scope == SCOPE_SYSTEM,
+                and_(
+                    LearningDocument.scope == SCOPE_CLASS,
+                    LearningDocument.classroom_id.in_(joined_classroom_ids),
+                ),
+            ),
+        )
+
+    query = (
+        db.query(LearningDocument)
+        .options(joinedload(LearningDocument.classroom))
+        .filter(conditions)
+    )
+
+    if search:
+        normalized_search = search.strip()
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            query = query.filter(
+                (LearningDocument.title.ilike(pattern)) | (LearningDocument.summary.ilike(pattern))
+            )
+
+    documents = query.order_by(LearningDocument.created_at.desc()).all()
+    return {"items": [_serialize_document(doc) for doc in documents]}
 
 
 def list_student_exam_results(

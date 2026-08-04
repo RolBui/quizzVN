@@ -19,6 +19,7 @@ from app.schemas.student import (
     StudentExamDetailSchema,
     StudentExamListResponse,
     StudentExamResultListResponse,
+    StudentExploreSort,
     StudentInProgressResponse,
     StudentRecentActivitySchema,
     StudentRecommendedExamSchema,
@@ -26,6 +27,7 @@ from app.schemas.student import (
     SubmitAttemptResponse,
 )
 from app.services.student_service import (
+    explore_student_exams,
     get_student_activity_chart,
     get_student_attempt_result,
     get_student_dashboard_classes,
@@ -38,6 +40,7 @@ from app.services.student_service import (
     join_student_class,
     list_student_classes,
     list_student_documents,
+    list_student_all_documents,
     list_student_exams,
     list_student_exam_results,
     save_student_attempt_answers,
@@ -124,6 +127,44 @@ def post_join_class(
     current_student=Depends(get_current_student),
 ) -> JoinClassResponse:
     return join_student_class(db, current_student, payload.join_code)
+
+
+@router.get("/documents", response_model=StudentDocumentListResponse)
+def get_student_documents(
+    classroom_id: int | None = Query(default=None),
+    search: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentDocumentListResponse:
+    return list_student_all_documents(
+        db=db,
+        student=current_student,
+        classroom_id=classroom_id,
+        search=search,
+    )
+
+
+@router.get("/exams/explore", response_model=StudentExamListResponse)
+def explore_exams(
+    search: str | None = Query(default=None),
+    grade: str | None = Query(default=None),
+    assignment_type: StudentAssignmentType | None = Query(default=None),
+    sort: StudentExploreSort = Query(default="newest"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> StudentExamListResponse:
+    return explore_student_exams(
+        db=db,
+        student=current_student,
+        search=search,
+        grade=grade,
+        assignment_type=assignment_type,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/system/documents", response_model=StudentDocumentListResponse)

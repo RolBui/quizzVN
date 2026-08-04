@@ -293,3 +293,5 @@ class StudentRecentActivitySchema(BaseModel):
     time_ago: str = "Vừa xong"
     created_at: datetime | str
 
+
+StudentExploreSort = Literal["newest", "oldest", "popular"]
