@@ -684,8 +684,8 @@ def _normalize_exam_grade(value: str | None) -> str:
     normalized = (value or "").strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="grade is required")
-    if len(normalized) > 50:
-        raise HTTPException(status_code=400, detail="grade must be at most 50 characters")
+    if len(normalized) > 150:
+        raise HTTPException(status_code=400, detail="grade must be at most 150 characters")
     return normalized
 
 
