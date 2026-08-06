@@ -33,7 +33,7 @@ QUESTION_TYPE_TEXT = "text"
 SELECTION_QUESTION_TYPES = {QUESTION_TYPE_SINGLE_CHOICE, QUESTION_TYPE_MULTIPLE_CHOICE, QUESTION_TYPE_TRUE_FALSE}
 TEXT_ANSWER_QUESTION_TYPES = {QUESTION_TYPE_FILL_IN_BLANK, QUESTION_TYPE_SHORT_ANSWER, QUESTION_TYPE_TEXT}
 PASSING_SCORE_PERCENT = 50.0
-DEFAULT_EXAM_GRADE = "ChÆ°a phÃ¢n loáº¡i"
+DEFAULT_EXAM_GRADE = "Chưa phân loại"
 
 
 ASSIGNMENT_TYPE_TEST = "test"
@@ -92,7 +92,7 @@ def _ensure_student_learning_columns() -> None:
         "UPDATE learning_documents SET content = COALESCE(content, '')",
         "ALTER TABLE learning_documents ALTER COLUMN content SET DEFAULT ''",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
-        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'ChÆ°a phÃ¢n loáº¡i'",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'Chưa phân loại'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",
@@ -109,7 +109,7 @@ def _ensure_student_learning_columns() -> None:
         SET assignment_type = CASE
             WHEN scope = 'class'
              AND (
-                LOWER(COALESCE(title, '')) LIKE '%kiá»ƒm tra%'
+                LOWER(COALESCE(title, '')) LIKE '%kiểm tra%'
                 OR LOWER(COALESCE(title, '')) LIKE '%kiem tra%'
              )
             THEN 'test'
@@ -147,7 +147,7 @@ def _ensure_student_learning_columns() -> None:
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP",
         "UPDATE exams SET scope = COALESCE(scope, 'system')",
-        "UPDATE exams SET grade = COALESCE(NULLIF(BTRIM(grade), ''), 'ChÆ°a phÃ¢n loáº¡i')",
+        "UPDATE exams SET grade = COALESCE(NULLIF(BTRIM(grade), ''), 'Chưa phân loại')",
         "UPDATE exams SET duration_minutes = COALESCE(duration_minutes, 30)",
         "UPDATE exams SET total_points = COALESCE(total_points, 0)",
         "UPDATE exams SET is_published = COALESCE(is_published, FALSE)",
@@ -371,12 +371,12 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
         class_info = {
             "id": f"cls-{classroom.id}",
             "name": classroom.name,
-            "academic_year": "NÄƒm há»c 2024 - 2025",
+            "academic_year": "Năm học 2024 - 2025",
             "member_count": member_count,
-            "status": "Äang há»c",
+            "status": "Đang học",
         }
         return {
-            "message": "ÄÃ£ tham gia lá»›p há»c nÃ y",
+            "message": "Đã tham gia lớp học này",
             "classroom": _serialize_classroom(existing_membership),
             "class_info": class_info,
         }
@@ -396,13 +396,13 @@ def join_student_class(db: Session, student: User, join_code: str) -> dict:
     class_info = {
         "id": f"cls-{classroom.id}",
         "name": classroom.name,
-        "academic_year": "NÄƒm há»c 2024 - 2025",
+        "academic_year": "Năm học 2024 - 2025",
         "member_count": member_count,
-        "status": "Äang há»c",
+        "status": "Đang học",
     }
 
     return {
-        "message": "Tham gia lá»›p há»c thÃ nh cÃ´ng",
+        "message": "Tham gia lớp học thành công",
         "classroom": _serialize_classroom(membership),
         "class_info": class_info,
     }
@@ -893,9 +893,9 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
     start_time = _normalize_exam_datetime(exam.start_time)
     end_time = _normalize_exam_datetime(exam.end_time)
     if start_time and now < start_time:
-        raise HTTPException(status_code=400, detail="BÃ i thi chÆ°a Ä‘áº¿n thá»i gian lÃ m.")
+        raise HTTPException(status_code=400, detail="Bài thi chưa đến thời gian làm.")
     if end_time and now >= end_time:
-        raise HTTPException(status_code=400, detail="BÃ i thi Ä‘Ã£ háº¿t thá»i gian lÃ m.")
+        raise HTTPException(status_code=400, detail="Bài thi đã hết thời gian làm.")
 
     existing_attempt = (
         db.query(ExamAttempt)
@@ -928,7 +928,7 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
             or 0
         )
         if submitted_attempt_count >= max_attempts:
-            raise HTTPException(status_code=409, detail="Báº¡n Ä‘Ã£ sá»­ dá»¥ng háº¿t sá»‘ láº§n lÃ m bÃ i.")
+            raise HTTPException(status_code=409, detail="Bạn đã sử dụng hết số lần làm bài.")
 
     attempt = ExamAttempt(
         exam_id=exam.id,
@@ -1212,8 +1212,8 @@ def get_student_in_progress(db: Session, student: User) -> dict | None:
         "attempt_id": f"att-{attempt.id}",
         "exam_id": f"exam-{exam.id}",
         "title": exam.title,
-        "subject_name": exam.grade or "ToÃ¡n 9",
-        "chapter_name": "ChÆ°Æ¡ng 3",
+        "subject_name": exam.grade or "Toán 9",
+        "chapter_name": "Chương 3",
         "completed_questions": completed_questions,
         "total_questions": total_questions,
         "progress_percentage": progress_percentage,
@@ -1283,10 +1283,10 @@ def get_student_dashboard_metrics(db: Session, student: User) -> dict:
         streak += 1
         check_date -= timedelta(days=1)
 
-    pending_diff = f"+{pending_count} Ä‘á» má»›i" if pending_count > 0 else "KhÃ´ng cÃ³ Ä‘á» cáº§n lÃ m"
-    score_diff_text = f"ÄÃ£ lÃ m {len(completed_attempts)} bÃ i thi" if completed_attempts else "ChÆ°a cÃ³ káº¿t quáº£"
-    time_diff_text = f"{display_time} tuáº§n nÃ y" if total_seconds > 0 else "ChÆ°a cÃ³ phÃºt há»c"
-    streak_label = f"{streak} ngÃ y liÃªn tiáº¿p" if streak > 0 else "0 ngÃ y liÃªn tiáº¿p"
+    pending_diff = f"+{pending_count} đề mới" if pending_count > 0 else "Không có đề cần làm"
+    score_diff_text = f"Đã làm {len(completed_attempts)} bài thi" if completed_attempts else "Chưa có kết quả"
+    time_diff_text = f"{display_time} tuần này" if total_seconds > 0 else "Chưa có phút học"
+    streak_label = f"{streak} ngày liên tiếp" if streak > 0 else "0 ngày liên tiếp"
 
     return {
         "pending_exams_count": pending_count,
@@ -1311,7 +1311,7 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
     else:
         start_date = now.date() - timedelta(days=now.weekday())
 
-    day_names = ["Thá»© 2", "Thá»© 3", "Thá»© 4", "Thá»© 5", "Thá»© 6", "Thá»© 7", "CN"]
+    day_names = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"]
     activities = []
 
     attempts = (
@@ -1356,9 +1356,9 @@ def get_student_activity_chart(db: Session, student: User, start_date_str: str |
         activities.append(item)
 
     comp_note = (
-        f"Báº¡n Ä‘Ã£ hoÃ n thÃ nh {total_tests_week} bÃ i thi tuáº§n nÃ y."
+        f"Bạn đã hoàn thành {total_tests_week} bài thi tuần này."
         if total_tests_week > 0
-        else "Báº¡n chÆ°a cÃ³ hoáº¡t Ä‘á»™ng lÃ m bÃ i nÃ o tuáº§n nÃ y. HÃ£y báº¯t Ä‘áº§u ngay!"
+        else "Bạn chưa có hoạt động làm bài nào tuần này. Hãy bắt đầu ngay!"
     )
 
     return {
@@ -1381,7 +1381,7 @@ def get_student_subject_progress(db: Session, student: User) -> list:
     subject_scores: dict[str, list[float]] = {}
     for att in completed_attempts:
         if att.exam:
-            subj_name = att.exam.grade or "MÃ´n há»c"
+            subj_name = att.exam.grade or "Môn học"
             if att.total_points and float(att.total_points) > 0 and att.score is not None:
                 pct = (float(att.score) / float(att.total_points)) * 100
                 subject_scores.setdefault(subj_name, []).append(pct)
@@ -1416,9 +1416,9 @@ def get_student_dashboard_classes(db: Session, student: User, limit: int = 6) ->
         result.append({
             "id": f"cls-{classroom.id}",
             "name": classroom.name,
-            "academic_year": "NÄƒm há»c 2024 - 2025",
+            "academic_year": "Năm học 2024 - 2025",
             "member_count": member_count,
-            "status": "Äang há»c",
+            "status": "Đang học",
         })
     return result
 
@@ -1437,11 +1437,11 @@ def get_student_recommended_exams(db: Session, student: User, limit: int = 3) ->
     result = []
     for idx, exam in enumerate(exams):
         q_count = db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).count()
-        difficulty = "Dá»…" if idx % 2 == 0 else "Trung bÃ¬nh"
+        difficulty = "Dễ" if idx % 2 == 0 else "Trung bình"
         result.append({
             "id": f"exam-{exam.id}",
             "title": exam.title,
-            "subject_name": exam.grade or "ToÃ¡n 9",
+            "subject_name": exam.grade or "Toán 9",
             "question_count": q_count,
             "difficulty": difficulty,
         })
@@ -1455,17 +1455,17 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
     def _format_time_ago(dt: datetime | None) -> str:
         norm_dt = _normalize_exam_datetime(dt)
         if not norm_dt:
-            return "Vá»«a xong"
+            return "Vừa xong"
         diff_sec = int((now - norm_dt).total_seconds())
         if diff_sec < 60:
-            return "Vá»«a xong"
+            return "Vừa xong"
         if diff_sec < 3600:
-            return f"{diff_sec // 60} phÃºt trÆ°á»›c"
+            return f"{diff_sec // 60} phút trước"
         if diff_sec < 86400:
-            return f"{diff_sec // 3600} giá» trÆ°á»›c"
+            return f"{diff_sec // 3600} giờ trước"
         if diff_sec < 172800:
-            return "HÃ´m qua"
-        return f"{diff_sec // 86400} ngÃ y trÆ°á»›c"
+            return "Hôm qua"
+        return f"{diff_sec // 86400} ngày trước"
 
     attempts = (
         db.query(ExamAttempt)
@@ -1486,7 +1486,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
             activities.append({
                 "id": f"act-att-{att.id}",
                 "action_type": "exam_submit",
-                "title": f'Báº¡n Ä‘Ã£ lÃ m Ä‘á» "{att.exam.title}"',
+                "title": f'Bạn đã làm đề "{att.exam.title}"',
                 "time_ago": _format_time_ago(act_time),
                 "created_at": act_time.isoformat(),
                 "_dt": act_time,
@@ -1495,7 +1495,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
                 activities.append({
                     "id": f"act-score-{att.id}",
                     "action_type": "score_achieved",
-                    "title": f'Báº¡n Ä‘Ã£ Ä‘áº¡t {score_val} Ä‘iá»ƒm trong Ä‘á» "{att.exam.title}"',
+                    "title": f'Bạn đã đạt {score_val} điểm trong đề "{att.exam.title}"',
                     "time_ago": _format_time_ago(act_time),
                     "created_at": act_time.isoformat(),
                     "_dt": act_time,
@@ -1516,7 +1516,7 @@ def get_student_recent_activities(db: Session, student: User, limit: int = 5) ->
             activities.append({
                 "id": f"act-cls-{m.id}",
                 "action_type": "class_join",
-                "title": f'Báº¡n Ä‘Ã£ tham gia lá»›p "{m.classroom.name}"',
+                "title": f'Bạn đã tham gia lớp "{m.classroom.name}"',
                 "time_ago": _format_time_ago(act_time),
                 "created_at": act_time.isoformat(),
                 "_dt": act_time,

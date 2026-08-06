@@ -782,10 +782,10 @@ def get_web_traffic_overview(db: Session, period: str = "7d") -> dict:
             _metric("sessions", "Phiên truy cập", current_sessions, previous_sessions, subtext=window["label"]),
             _metric(
                 "active_users",
-                "NgÆ°á»i dÃ¹ng Ä‘ang truy cáº­p",
+                "Người dùng đang truy cập",
                 realtime["active_users"],
                 realtime["active_users"],
-                subtext=f"{ACTIVE_WINDOW_SECONDS} giÃ¢y gáº§n nháº¥t",
+                subtext=f"{ACTIVE_WINDOW_SECONDS} giây gần nhất",
             ),
             _metric(
                 "bounce_rate",
