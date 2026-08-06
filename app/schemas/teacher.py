@@ -253,7 +253,7 @@ class TeacherExamQuestionInput(BaseModel):
 class CreateTeacherExamRequest(BaseModel):
     title: str
     description: str | None = None
-    grade: str = Field(min_length=1, max_length=50)
+    grade: str = Field(min_length=1, max_length=150)
     image_url: str | None = None
     duration_minutes: int = Field(default=30, ge=1)
     start_time: datetime | None = None
@@ -270,7 +270,7 @@ class CreateTeacherExamRequest(BaseModel):
 class UpdateTeacherExamRequest(BaseModel):
     title: str | None = None
     description: str | None = None
-    grade: str | None = Field(default=None, min_length=1, max_length=50)
+    grade: str | None = Field(default=None, min_length=1, max_length=150)
     image_url: str | None = None
     scope: TeacherScope | None = None
     classroom_id: int | None = None
@@ -289,7 +289,7 @@ class UpdateTeacherExamRequest(BaseModel):
 class UpdateTeacherClassExamRequest(BaseModel):
     title: str | None = None
     description: str | None = None
-    grade: str | None = Field(default=None, min_length=1, max_length=50)
+    grade: str | None = Field(default=None, min_length=1, max_length=150)
     image_url: str | None = None
     duration_minutes: int | None = Field(default=None, ge=1)
     start_time: datetime | None = None
