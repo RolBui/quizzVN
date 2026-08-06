@@ -51,6 +51,9 @@ from app.services.teacher_service import (
     _serialize_exam_detail,
     _validate_exam_questions,
     _validate_exam_schedule,
+    _validate_assignment_settings,
+    _normalize_assignment_type,
+    ASSIGNMENT_TYPE_EXAM,
 )
 
 ATTEMPT_STATUS_SUBMITTED = "submitted"
@@ -1085,6 +1088,8 @@ def create_admin_exam(
     questions: list[dict],
     total_points: float = 10.0,
     point_mode: str = "auto",
+    assignment_type: str = "exam",
+    max_attempts: int | None = None,
 ) -> dict:
     normalized_title = title.strip()
     if not normalized_title:
@@ -1102,7 +1107,14 @@ def create_admin_exam(
         if not classroom:
             raise HTTPException(status_code=404, detail="Classroom not found")
 
-    normalized_start_time, normalized_end_time = _validate_exam_schedule(start_time, end_time)
+    (
+        normalized_assignment_type,
+        normalized_start_time,
+        normalized_end_time,
+        normalized_max_attempts,
+    ) = _validate_assignment_settings(
+        assignment_type, start_time, end_time, max_attempts
+    )
     normalized_questions = _validate_exam_questions(questions)
     apply_exam_scoring(
         normalized_questions,
@@ -1124,6 +1136,8 @@ def create_admin_exam(
         total_points=0.0,
         is_published=is_published,
         is_active=is_active,
+        assignment_type=normalized_assignment_type,
+        max_attempts=normalized_max_attempts,
         created_at=utc_now(),
         updated_at=utc_now(),
     )
@@ -1159,6 +1173,298 @@ def delete_admin_exam(
     _delete_exams_where(db, "id = :exam_id", {"exam_id": exam_id})
     db.commit()
     return {"message": "Exam deleted successfully"}
+
+
+def get_admin_exam_detail(db: Session, exam_id: int) -> dict:
+    exam = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(Exam.attempts))
+        .filter(Exam.id == exam_id)
+        .first()
+    )
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    return _serialize_exam_detail(exam, is_ai_generated=False)
+
+
+def update_admin_exam(
+    db: Session,
+    exam_id: int,
+    title: str | None,
+    description: str | None,
+    grade: str | None,
+    image_url: str | None,
+    scope: str | None,
+    classroom_id: int | None,
+    duration_minutes: int | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
+    update_start_time: bool,
+    update_end_time: bool,
+    is_published: bool | None,
+    is_active: bool | None,
+    questions: list[dict] | None,
+    total_points: float | None = None,
+    point_mode: str = "auto",
+    assignment_type: str | None = None,
+    max_attempts: int | None = None,
+    update_assignment_type: bool = False,
+    update_max_attempts: bool = False,
+) -> dict:
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    target_scope = scope or exam.scope
+    if target_scope == SCOPE_SYSTEM:
+        target_classroom_id = None
+    elif classroom_id is not None:
+        target_classroom_id = classroom_id
+    else:
+        target_classroom_id = exam.classroom_id
+
+    classroom = None
+    if target_scope == SCOPE_CLASS:
+        if target_classroom_id is None:
+            raise HTTPException(status_code=400, detail="classroom_id is required for class exam")
+        classroom = db.query(Classroom).filter(Classroom.id == target_classroom_id).first()
+        if not classroom:
+            raise HTTPException(status_code=404, detail="Classroom not found")
+
+    if title is not None:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        exam.title = normalized_title
+
+    if description is not None:
+        exam.description = description.strip() if description else None
+
+    if grade is not None:
+        exam.grade = _normalize_exam_grade(grade)
+
+    if image_url is not None:
+        exam.image_url = image_url.strip() or None
+
+    if duration_minutes is not None:
+        exam.duration_minutes = duration_minutes
+
+    if is_published is not None:
+        exam.is_published = is_published
+
+    if is_active is not None:
+        exam.is_active = is_active
+
+    exam.scope = target_scope
+    exam.classroom_id = classroom.id if classroom else None
+
+    effective_assignment_type = (
+        assignment_type if update_assignment_type else getattr(exam, "assignment_type", ASSIGNMENT_TYPE_EXAM)
+    )
+    effective_start_time = start_time if update_start_time else exam.start_time
+    effective_end_time = end_time if update_end_time else exam.end_time
+    effective_max_attempts = max_attempts if update_max_attempts else getattr(exam, "max_attempts", None)
+    (
+        normalized_assignment_type,
+        normalized_start_time,
+        normalized_end_time,
+        normalized_max_attempts,
+    ) = _validate_assignment_settings(
+        effective_assignment_type,
+        effective_start_time,
+        effective_end_time,
+        effective_max_attempts,
+    )
+    exam.assignment_type = normalized_assignment_type
+    exam.start_time = normalized_start_time
+    exam.end_time = normalized_end_time
+    exam.max_attempts = normalized_max_attempts
+
+    if total_points is not None and questions is None:
+        raise HTTPException(
+            status_code=400,
+            detail="total_points requires questions",
+        )
+
+    if questions is not None:
+        if exam.attempts:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot replace questions after students have started attempts",
+            )
+        normalized_questions = _validate_exam_questions(questions)
+        apply_exam_scoring(
+            normalized_questions,
+            total_points=total_points if total_points is not None else 10.0,
+            point_mode=point_mode,
+        )
+        exam.total_points = _replace_exam_questions(exam, normalized_questions)
+
+    exam.updated_at = utc_now()
+    db.commit()
+    db.refresh(exam)
+    
+    updated_exam = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(Exam.attempts))
+        .filter(Exam.id == exam.id)
+        .first()
+    )
+    return {
+        "message": "Exam updated successfully",
+        "exam": _serialize_exam_detail(updated_exam or exam, is_ai_generated=False),
+    }
+
+
+def set_admin_exam_visibility(
+    db: Session,
+    exam_id: int,
+    is_published: bool,
+) -> dict:
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    exam.is_published = is_published
+    exam.updated_at = utc_now()
+    db.commit()
+    db.refresh(exam)
+    
+    detail_exam = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(Exam.attempts))
+        .filter(Exam.id == exam.id)
+        .first()
+    )
+    return {
+        "message": "Exam published successfully" if is_published else "Exam set to private successfully",
+        "exam": _serialize_exam_detail(detail_exam or exam, is_ai_generated=False),
+    }
+
+
+def assign_admin_exam(
+    db: Session,
+    exam_id: int,
+    classroom_id: int,
+    assignment_type: str = ASSIGNMENT_TYPE_EXAM,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    duration_minutes: int | None = None,
+    max_attempts: int | None = None,
+    is_published: bool = True,
+    duplicate: bool = True,
+) -> dict:
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    (
+        normalized_assignment_type,
+        normalized_start_time,
+        normalized_end_time,
+        normalized_max_attempts,
+    ) = _validate_assignment_settings(
+        assignment_type, start_time, end_time, max_attempts
+    )
+
+    if duplicate:
+        # Clone exam
+        new_exam = Exam(
+            created_by_user_id=exam.created_by_user_id,
+            title=exam.title,
+            description=exam.description,
+            grade=exam.grade,
+            image_url=exam.image_url,
+            scope=SCOPE_CLASS,
+            classroom_id=classroom.id,
+            duration_minutes=duration_minutes if duration_minutes is not None else exam.duration_minutes,
+            start_time=normalized_start_time,
+            end_time=normalized_end_time,
+            total_points=exam.total_points,
+            is_published=is_published,
+            is_active=exam.is_active,
+            assignment_type=normalized_assignment_type,
+            max_attempts=normalized_max_attempts,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        db.add(new_exam)
+        db.flush()
+
+        # Clone questions and options
+        for q in exam.questions:
+            new_q = ExamQuestion(
+                exam_id=new_exam.id,
+                question_type=q.question_type,
+                order_index=q.order_index,
+                prompt=q.prompt,
+                explanation=q.explanation,
+                image_url=q.image_url,
+                points=q.points,
+            )
+            db.add(new_q)
+            db.flush()
+            for opt in q.options:
+                new_opt = ExamQuestionOption(
+                    question_id=new_q.id,
+                    option_key=opt.option_key,
+                    option_text=opt.option_text,
+                    image_url=opt.image_url,
+                    is_correct=opt.is_correct,
+                )
+                db.add(new_opt)
+
+        db.commit()
+        db.refresh(new_exam)
+        assigned_exam = (
+            db.query(Exam)
+            .options(joinedload(Exam.classroom))
+            .options(joinedload(Exam.created_by).joinedload(User.role))
+            .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+            .options(joinedload(Exam.attempts))
+            .filter(Exam.id == new_exam.id)
+            .first()
+        )
+    else:
+        # Modify in place
+        exam.scope = SCOPE_CLASS
+        exam.classroom_id = classroom.id
+        if duration_minutes is not None:
+            exam.duration_minutes = duration_minutes
+        exam.start_time = normalized_start_time
+        exam.end_time = normalized_end_time
+        exam.is_published = is_published
+        exam.assignment_type = normalized_assignment_type
+        exam.max_attempts = normalized_max_attempts
+        exam.updated_at = utc_now()
+        db.commit()
+        db.refresh(exam)
+        assigned_exam = (
+            db.query(Exam)
+            .options(joinedload(Exam.classroom))
+            .options(joinedload(Exam.created_by).joinedload(User.role))
+            .options(joinedload(Exam.questions).joinedload(ExamQuestion.options))
+            .options(joinedload(Exam.attempts))
+            .filter(Exam.id == exam.id)
+            .first()
+        )
+
+    return {
+        "message": "Exam assigned successfully",
+        "exam": _serialize_exam_detail(assigned_exam or exam, is_ai_generated=False),
+    }
 
 
 def get_admin_documents_overview(db: Session) -> dict:

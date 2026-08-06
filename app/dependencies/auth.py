@@ -102,6 +102,24 @@ def get_current_teacher(
     return user
 
 
+def get_current_teacher_or_admin(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.role), joinedload(User.profile))
+        .filter(User.id == current_user.id)
+        .first()
+    )
+    if not user or not user.role or user.role.name not in {"teacher", "admin", "administrator"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Teacher or Admin role is required",
+        )
+    return user
+
+
 def get_current_admin(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),

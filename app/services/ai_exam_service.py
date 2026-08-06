@@ -40,6 +40,7 @@ from app.services.billing_service import (
     settle_ai_qc_usage,
 )
 from app.services.teacher_service import create_teacher_exam
+from app.services.admin_service import create_admin_exam
 
 
 TEACHER_QUESTION_TYPE_SINGLE_CHOICE = "single_choice"
@@ -948,22 +949,41 @@ def save_ai_exam_job_to_quiz(
     if description is None:
         description = job.description or "Đề được tạo bằng AI và giáo viên đã duyệt."
 
-    result = create_teacher_exam(
-        db=db,
-        teacher=teacher,
-        title=title,
-        description=description,
-        grade=job.grade,
-        image_url=None,
-        scope=data.get("scope") or "system",
-        classroom_id=data.get("classroom_id"),
-        duration_minutes=data.get("duration_minutes") or job.duration_minutes,
-        start_time=data.get("start_time"),
-        end_time=data.get("end_time"),
-        is_published=bool(data.get("is_published", False)),
-        is_active=bool(data.get("is_active", True)),
-        questions=questions,
-    )
+    role_name = getattr(getattr(teacher, "role", None), "name", None)
+    if role_name in {"admin", "administrator"}:
+        result = create_admin_exam(
+            db=db,
+            current_admin=teacher,
+            title=title,
+            description=description,
+            grade=job.grade,
+            image_url=None,
+            scope=data.get("scope") or "system",
+            classroom_id=data.get("classroom_id"),
+            duration_minutes=data.get("duration_minutes") or job.duration_minutes,
+            start_time=data.get("start_time"),
+            end_time=data.get("end_time"),
+            is_published=bool(data.get("is_published", False)),
+            is_active=bool(data.get("is_active", True)),
+            questions=questions,
+        )
+    else:
+        result = create_teacher_exam(
+            db=db,
+            teacher=teacher,
+            title=title,
+            description=description,
+            grade=job.grade,
+            image_url=None,
+            scope=data.get("scope") or "system",
+            classroom_id=data.get("classroom_id"),
+            duration_minutes=data.get("duration_minutes") or job.duration_minutes,
+            start_time=data.get("start_time"),
+            end_time=data.get("end_time"),
+            is_published=bool(data.get("is_published", False)),
+            is_active=bool(data.get("is_active", True)),
+            questions=questions,
+        )
 
     exam = result["exam"]
     job.quiz_id = exam["id"]

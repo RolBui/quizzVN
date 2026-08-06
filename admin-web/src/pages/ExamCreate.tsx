@@ -12,6 +12,7 @@ import {
   Loader2,
   Plus,
   Save,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -176,6 +177,7 @@ function validateQuestionForm(question: QuestionForm, index: number) {
 
 export function ExamCreate() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<"select" | "manual">("select");
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [classes, setClasses] = useState<AdminClass[]>([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(true);
@@ -443,6 +445,65 @@ export function ExamCreate() {
   const labelClass = "text-sm font-semibold text-on-surface";
   const mutedClass = "text-sm text-outline";
   const normalizedImageUrl = imageUrl.trim();
+
+  if (mode === "select") {
+    return (
+      <div className="min-h-full bg-background p-4 md:p-5 flex flex-col justify-center items-center">
+        <div className="w-full max-w-4xl space-y-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/exams")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-outline-variant bg-surface-container-lowest text-on-surface shadow-sm hover:bg-surface-container-low"
+              aria-label="Quay lại danh sách bài thi"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-on-surface">Lựa chọn phương thức tạo đề thi phù hợp</h1>
+              <p className="mt-1 text-sm text-outline">
+                Mỗi phương thức đều lưu về cùng hệ thống quản lý đề thi của hệ thống.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div
+              onClick={() => navigate("/exams/ai")}
+              className="group relative flex min-h-[250px] flex-col items-center justify-between overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary hover:shadow-md"
+            >
+              <div className="space-y-2">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <h2 className="text-base font-bold text-on-surface">Tạo đề thi bằng AI</h2>
+                <p className="text-sm text-outline max-w-[280px]">
+                  Tạo đề tự động bằng AI, chọn loại câu hỏi và rà soát từng câu trước khi lưu.
+                </p>
+              </div>
+              <span className="text-sm font-bold text-primary">Chọn phương thức</span>
+            </div>
+
+            <div
+              onClick={() => setMode("manual")}
+              className="group relative flex min-h-[250px] flex-col items-center justify-between overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary hover:shadow-md"
+            >
+              <div className="space-y-2">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <ClipboardList className="h-6 w-6" />
+                </div>
+                <h2 className="text-base font-bold text-on-surface">Trình soạn thảo thủ công</h2>
+                <p className="text-sm text-outline max-w-[280px]">
+                  Tạo đề từ đầu và tự nhập thông tin, câu hỏi, đáp án theo từng bước.
+                </p>
+              </div>
+              <span className="text-sm font-bold text-primary">Chọn phương thức</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full bg-background p-4 md:p-5">

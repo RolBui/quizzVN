@@ -2,7 +2,7 @@ import re
 import secrets
 import string
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -71,11 +71,14 @@ def _validate_assignment_settings(
     return normalized_assignment_type, normalized_start_time, normalized_end_time, max_attempts
 
 
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
+
+
 def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(tzinfo=VIETNAM_TIMEZONE).astimezone(timezone.utc)
     return value.astimezone(timezone.utc)
 
 
@@ -830,6 +833,78 @@ def list_teacher_exams(
     total = int(query.count())
     exams = query.order_by(Exam.created_at.desc()).offset(offset).limit(limit).all()
     ai_generated_exam_ids = get_ai_generated_exam_ids(db, [exam.id for exam in exams])
+    return {
+        "items": [
+            _serialize_exam_summary(exam, is_ai_generated=exam.id in ai_generated_exam_ids)
+            for exam in exams
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def explore_teacher_exams(
+    db: Session,
+    teacher: User,
+    search: str | None = None,
+    grade: str | None = None,
+    assignment_type: str | None = None,
+    sort: str = "newest",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """
+    Khám phá đề thi công khai từ hệ thống hoặc từ giáo viên khác công khai dành cho giáo viên.
+    """
+    query = (
+        db.query(Exam)
+        .options(joinedload(Exam.classroom))
+        .options(joinedload(Exam.created_by).joinedload(User.role))
+        .options(joinedload(Exam.questions))
+        .options(joinedload(Exam.attempts))
+        .filter(
+            Exam.is_published.is_(True),
+            Exam.is_active.is_(True),
+            Exam.scope == SCOPE_SYSTEM,
+        )
+    )
+
+    if search:
+        normalized_search = search.strip()
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            query = query.filter(
+                (Exam.title.ilike(pattern)) | (Exam.description.ilike(pattern))
+            )
+
+    if grade:
+        normalized_grade = grade.strip()
+        if normalized_grade:
+            query = query.filter(Exam.grade.ilike(f"%{normalized_grade}%"))
+
+    if assignment_type is not None:
+        query = query.filter(
+            Exam.assignment_type == _normalize_assignment_type(assignment_type)
+        )
+
+    total = int(query.count())
+
+    if sort == "oldest":
+        query = query.order_by(Exam.created_at.asc())
+    elif sort == "popular":
+        query = (
+            query.outerjoin(ExamAttempt, ExamAttempt.exam_id == Exam.id)
+            .group_by(Exam.id)
+            .order_by(func.count(ExamAttempt.id).desc(), Exam.created_at.desc())
+        )
+    else:
+        # newest
+        query = query.order_by(Exam.created_at.desc())
+
+    exams = query.offset(offset).limit(limit).all()
+    ai_generated_exam_ids = get_ai_generated_exam_ids(db, [exam.id for exam in exams])
+
     return {
         "items": [
             _serialize_exam_summary(exam, is_ai_generated=exam.id in ai_generated_exam_ids)

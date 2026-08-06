@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies.auth import get_current_teacher
+from app.dependencies.auth import get_current_teacher_or_admin
 from app.schemas.ai_exam import (
     AIExamGenerationJobResponse,
     AIQuestionDraftResponse,
@@ -51,7 +51,7 @@ def post_generate_ai_exam(
         max_length=100,
     ),
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> AIExamGenerationJobResponse:
     job, created = create_ai_exam_generation_job(
         db,
@@ -103,7 +103,7 @@ def post_generate_more_questions(
         max_length=100,
     ),
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> AIExamGenerationJobResponse:
     job, request_data, created = start_more_questions_for_teacher(
         db,
@@ -152,7 +152,7 @@ def post_generate_more_questions(
 def get_ai_exam_job(
     job_id: int,
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> AIExamGenerationJobResponse:
     job = get_teacher_ai_exam_job(db, current_teacher, job_id)
     return serialize_ai_exam_job(job)
@@ -164,7 +164,7 @@ def post_save_ai_exam_to_quiz(
     job_id: int,
     payload: SaveAIExamToQuizRequest,
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> SaveAIExamToQuizResponse:
     return save_ai_exam_job_to_quiz(
         db,
@@ -180,7 +180,7 @@ def patch_question_draft(
     draft_id: int,
     payload: UpdateAIQuestionDraftRequest,
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> AIQuestionDraftResponse | JSONResponse:
     data = payload.model_dump(exclude_unset=True)
     if not data:

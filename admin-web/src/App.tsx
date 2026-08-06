@@ -22,6 +22,7 @@ import { Admins } from './pages/Admins';
 import { Classes } from './pages/Classes';
 import { Exams } from './pages/Exams';
 import { ExamCreate } from './pages/ExamCreate';
+import { ExamAICreate } from './pages/ExamAICreate';
 import { Documents } from './pages/Documents';
 import { Chat } from './pages/Chat';
 import { Analytics } from './pages/Analytics';
@@ -100,6 +101,14 @@ export default function App() {
                 element={
                   <RequireAdminPermission permission="exams">
                     <ExamCreate />
+                  </RequireAdminPermission>
+                }
+              />
+              <Route
+                path="exams/ai"
+                element={
+                  <RequireAdminPermission permission="exams">
+                    <ExamAICreate />
                   </RequireAdminPermission>
                 }
               />

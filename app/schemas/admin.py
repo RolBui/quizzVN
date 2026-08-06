@@ -237,6 +237,9 @@ class AdminClassOverviewResponse(BaseModel):
     items: list[AdminClassSchema]
 
 
+AdminAssignmentType = Literal["test", "exam"]
+
+
 class AdminExamSchema(BaseModel):
     id: int
     title: str
@@ -262,6 +265,8 @@ class AdminExamSchema(BaseModel):
     average_score: float | None = None
     is_published: bool
     is_active: bool
+    assignment_type: AdminAssignmentType = "exam"
+    max_attempts: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -312,11 +317,66 @@ class CreateAdminExamRequest(BaseModel):
     total_points: float = Field(default=10, gt=0, le=10)
     point_mode: AdminExamPointMode = "auto"
     questions: list[AdminExamQuestionInput]
+    assignment_type: AdminAssignmentType = "exam"
+    max_attempts: int | None = Field(default=None, ge=1)
+
+
+class AdminExamOptionSchema(BaseModel):
+    id: int
+    option_key: str
+    option_text: str = ""
+    image_url: str | None = None
+
+
+class AdminExamQuestionSchema(BaseModel):
+    id: int
+    question_type: AdminQuestionType
+    order_index: int
+    prompt: str
+    explanation: str = ""
+    image_url: str | None = None
+    points: float
+    options: list[AdminExamOptionSchema]
+    accepted_answers: list[str] = Field(default_factory=list)
+
+
+class AdminExamDetailSchema(AdminExamSchema):
+    questions: list[AdminExamQuestionSchema]
 
 
 class AdminExamResponse(BaseModel):
     message: str
-    exam: AdminExamSchema
+    exam: AdminExamDetailSchema
+
+
+class UpdateAdminExamRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    grade: str | None = Field(default=None, min_length=1, max_length=50)
+    image_url: str | None = None
+    scope: AdminExamScope | None = None
+    classroom_id: int | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    is_published: bool | None = None
+    is_active: bool | None = None
+    total_points: float | None = Field(default=None, gt=0, le=10)
+    point_mode: AdminExamPointMode = "auto"
+    questions: list[AdminExamQuestionInput] | None = None
+    assignment_type: AdminAssignmentType | None = None
+    max_attempts: int | None = Field(default=None, ge=1)
+
+
+class AssignAdminExamRequest(BaseModel):
+    classroom_id: int
+    assignment_type: AdminAssignmentType = "exam"
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    max_attempts: int | None = Field(default=None, ge=1)
+    is_published: bool = True
+    duplicate: bool = True
 
 
 class AdminUploadedImageSchema(BaseModel):

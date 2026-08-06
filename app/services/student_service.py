@@ -48,11 +48,14 @@ def _normalize_assignment_type(value: str | None) -> str:
     return normalized
 
 
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
+
+
 def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(tzinfo=VIETNAM_TIMEZONE).astimezone(timezone.utc)
     return value.astimezone(timezone.utc)
 
 

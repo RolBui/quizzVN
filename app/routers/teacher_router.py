@@ -26,6 +26,7 @@ from app.schemas.teacher import (
     UpdateTeacherClassRequest,
     UpdateTeacherClassExamRequest,
     UpdateTeacherExamRequest,
+    TeacherExploreSort,
 )
 from app.services.media_service import delete_uploaded_image, list_uploaded_images, save_exam_image
 from app.services.teacher_service import (
@@ -53,6 +54,7 @@ from app.services.teacher_service import (
     update_teacher_class,
     update_teacher_class_exam,
     update_teacher_exam,
+    explore_teacher_exams,
 )
 
 router = APIRouter(prefix="/teacher", tags=["Teacher"])
@@ -281,6 +283,30 @@ def get_teacher_system_exams(
     current_teacher=Depends(get_current_teacher),
 ) -> TeacherExamListResponse:
     return list_teacher_exams(db, current_teacher, "system", None, limit, offset, assignment_type)
+
+
+@router.get("/exams/explore", response_model=TeacherExamListResponse)
+def get_explore_teacher_exams(
+    search: str | None = Query(default=None),
+    grade: str | None = Query(default=None),
+    assignment_type: TeacherAssignmentType | None = Query(default=None),
+    sort: TeacherExploreSort = Query(default="newest"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_teacher=Depends(get_current_teacher),
+) -> TeacherExamListResponse:
+    return explore_teacher_exams(
+        db=db,
+        teacher=current_teacher,
+        search=search,
+        grade=grade,
+        assignment_type=assignment_type,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
+
 
 
 @router.get("/classes/{class_id}/exams", response_model=TeacherExamListResponse)
