@@ -305,7 +305,7 @@ class AdminExamQuestionInput(BaseModel):
 class CreateAdminExamRequest(BaseModel):
     title: str
     description: str | None = None
-    grade: str = Field(min_length=1, max_length=50)
+    grade: str = Field(min_length=1, max_length=150)
     image_url: str | None = None
     scope: AdminExamScope = "system"
     classroom_id: int | None = None
@@ -352,7 +352,7 @@ class AdminExamResponse(BaseModel):
 class UpdateAdminExamRequest(BaseModel):
     title: str | None = None
     description: str | None = None
-    grade: str | None = Field(default=None, min_length=1, max_length=50)
+    grade: str | None = Field(default=None, min_length=1, max_length=150)
     image_url: str | None = None
     scope: AdminExamScope | None = None
     classroom_id: int | None = None

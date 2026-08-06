@@ -60,7 +60,7 @@ def _normalize_question_type_distribution(
 
 class GenerateExamRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=100)
-    grade: str = Field(min_length=1, max_length=50)
+    grade: str = Field(min_length=1, max_length=150)
     topic: str = Field(min_length=1, max_length=500)
     duration_minutes: int = Field(gt=0, le=300)
     question_count: int = Field(ge=1, le=50)
