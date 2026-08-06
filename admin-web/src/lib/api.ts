@@ -910,6 +910,22 @@ export const adminApi = {
     apiRequest<{ message: string }>(`/admin/users/${userId}`, {
       method: "DELETE",
     }),
+  generateAiExam: (payload: any) =>
+    apiPost<any>("/api/ai-exams/generate", payload),
+  getAiExamJob: (jobId: number) =>
+    apiGet<any>(`/api/ai-exams/jobs/${jobId}`),
+  saveAiExamToQuiz: (jobId: number, payload: any) =>
+    apiPost<any>(`/api/ai-exams/jobs/${jobId}/save-to-quiz`, payload),
+  updateQuestionDraft: (draftId: number, payload: any) =>
+    apiRequest<any>(`/api/ai-exams/question-drafts/${draftId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+  generateMoreAiQuestions: (jobId: number, payload: any) =>
+    apiPost<any>(`/api/ai-exams/jobs/${jobId}/generate-more`, payload),
 };
 
 export const chatApi = {

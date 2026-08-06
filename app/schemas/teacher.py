@@ -336,3 +336,7 @@ class TeacherImageUploadResponse(BaseModel):
 
 class TeacherImageListResponse(BaseModel):
     items: list[TeacherUploadedImageSchema]
+
+
+TeacherExploreSort = Literal["newest", "oldest", "popular"]
+

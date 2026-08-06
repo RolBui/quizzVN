@@ -34,6 +34,9 @@ from app.schemas.admin import (
     UpdateAdminPermissionsRequest,
     UpdateAdminUserProfileRequest,
     VerifyAdminInvitationOtpRequest,
+    UpdateAdminExamRequest,
+    AssignAdminExamRequest,
+    AdminExamDetailSchema,
 )
 from app.schemas.analytics import (
     AdminPaymentAnalyticsResponse,
@@ -71,6 +74,10 @@ from app.services.admin_service import (
     update_admin_permissions,
     update_admin_student_profile,
     update_admin_teacher_profile,
+    get_admin_exam_detail,
+    update_admin_exam,
+    set_admin_exam_visibility,
+    assign_admin_exam,
 )
 from app.services.analytics_service import (
     get_payment_analytics_overview,
@@ -964,6 +971,8 @@ def post_admin_exam(
         [question.model_dump() for question in payload.questions],
         payload.total_points,
         payload.point_mode,
+        payload.assignment_type,
+        payload.max_attempts,
     )
 
 
@@ -974,6 +983,103 @@ def delete_exam_route(
     current_administrator=Depends(get_current_administrator),
 ) -> MessageResponse:
     return delete_admin_exam(db, current_administrator, exam_id)
+
+
+@router.get("/exams/{exam_id}", response_model=AdminExamDetailSchema)
+def get_admin_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamDetailSchema:
+    _ = current_admin
+    return get_admin_exam_detail(db, exam_id)
+
+
+@router.put("/exams/{exam_id}", response_model=AdminExamResponse)
+def put_admin_exam(
+    exam_id: int,
+    payload: UpdateAdminExamRequest,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamResponse:
+    _ = current_admin
+    update_data = payload.model_dump(exclude_unset=True)
+    update_start_time = "start_time" in update_data
+    update_end_time = "end_time" in update_data
+    update_assignment_type = "assignment_type" in update_data
+    update_max_attempts = "max_attempts" in update_data
+
+    res = update_admin_exam(
+        db=db,
+        exam_id=exam_id,
+        title=payload.title,
+        description=payload.description,
+        grade=payload.grade,
+        image_url=payload.image_url,
+        scope=payload.scope,
+        classroom_id=payload.classroom_id,
+        duration_minutes=payload.duration_minutes,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        update_start_time=update_start_time,
+        update_end_time=update_end_time,
+        is_published=payload.is_published,
+        is_active=payload.is_active,
+        questions=[q.model_dump() for q in payload.questions] if payload.questions is not None else None,
+        total_points=payload.total_points,
+        point_mode=payload.point_mode,
+        assignment_type=payload.assignment_type,
+        max_attempts=payload.max_attempts,
+        update_assignment_type=update_assignment_type,
+        update_max_attempts=update_max_attempts,
+    )
+    return AdminExamResponse(message=res["message"], exam=res["exam"])
+
+
+@router.post("/exams/{exam_id}/publish", response_model=AdminExamResponse)
+def post_admin_publish_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamResponse:
+    _ = current_admin
+    res = set_admin_exam_visibility(db, exam_id, is_published=True)
+    return AdminExamResponse(message=res["message"], exam=res["exam"])
+
+
+@router.post("/exams/{exam_id}/private", response_model=AdminExamResponse)
+def post_admin_private_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamResponse:
+    _ = current_admin
+    res = set_admin_exam_visibility(db, exam_id, is_published=False)
+    return AdminExamResponse(message=res["message"], exam=res["exam"])
+
+
+@router.post("/exams/{exam_id}/assign", response_model=AdminExamResponse)
+def post_admin_assign_exam(
+    exam_id: int,
+    payload: AssignAdminExamRequest,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+) -> AdminExamResponse:
+    _ = current_admin
+    res = assign_admin_exam(
+        db=db,
+        exam_id=exam_id,
+        classroom_id=payload.classroom_id,
+        assignment_type=payload.assignment_type,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        duration_minutes=payload.duration_minutes,
+        max_attempts=payload.max_attempts,
+        is_published=payload.is_published,
+        duplicate=payload.duplicate,
+    )
+    return AdminExamResponse(message=res["message"], exam=res["exam"])
+
 
 
 @router.get("/image", response_model=AdminImageListResponse)
