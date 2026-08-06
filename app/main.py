@@ -10,6 +10,7 @@ from app.routers.chat_router import router as chat_router
 from app.routers.dev_router import router as dev_router
 from app.routers.student_router import router as student_router
 from app.routers.teacher_router import router as teacher_router
+from app.routers.notification_router import router as notification_router
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
@@ -22,6 +23,7 @@ from app.services.ai_exam_service import bootstrap_ai_exam_storage
 from app.services.billing_service import bootstrap_billing_storage
 from app.services.media_service import bootstrap_media_storage
 from app.services.student_service import bootstrap_student_learning_storage
+from app.services.notification_service import bootstrap_notifications_storage
 import asyncio
 from pathlib import Path
 
@@ -79,6 +81,7 @@ def startup_bootstrap() -> None:
     bootstrap_chat_storage()
     bootstrap_ai_exam_storage()
     bootstrap_billing_storage()
+    bootstrap_notifications_storage()
 
 # @app.get("/", response_model=RootResponse)
 # def root() -> RootResponse:
@@ -135,6 +138,7 @@ app.include_router(analytics_router)
 app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(teacher_router)
+app.include_router(notification_router)
 app.include_router(chat_router)
 app.include_router(ai_exam_router)
 app.include_router(ai_agent_router)
