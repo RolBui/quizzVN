@@ -95,7 +95,7 @@ def _ensure_student_learning_columns() -> None:
         "UPDATE learning_documents SET content = COALESCE(content, '')",
         "ALTER TABLE learning_documents ALTER COLUMN content SET DEFAULT ''",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS image_url TEXT",
-        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(50) DEFAULT 'Chưa phân loại'",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS grade VARCHAR(150) DEFAULT 'Chưa phân loại'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS scope VARCHAR(20) DEFAULT 'system'",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS classroom_id INTEGER",
         "ALTER TABLE exams ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 30",

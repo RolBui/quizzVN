@@ -13,7 +13,7 @@ class AIExamGenerationJob(Base):
     quiz_id = Column(Integer, ForeignKey("exams.id", ondelete="SET NULL"), nullable=True)
 
     subject = Column(String(100), nullable=False)
-    grade = Column(String(50), nullable=False)
+    grade = Column(String(150), nullable=False)
     topic = Column(Text, nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     question_count = Column(Integer, nullable=False)
