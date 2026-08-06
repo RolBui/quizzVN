@@ -1433,6 +1433,9 @@ def create_teacher_exam(
     exam.total_points = _replace_exam_questions(exam, normalized_questions)
     db.commit()
     db.refresh(exam)
+    if exam.scope == "class" and exam.classroom_id and exam.is_published:
+        from app.services.notification_service import trigger_assignment_notification_sync
+        trigger_assignment_notification_sync(db, exam.id, teacher.id)
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
         "message": "Exam created successfully",
@@ -1547,6 +1550,9 @@ def update_teacher_exam(
     exam.updated_at = utc_now()
     db.commit()
     db.refresh(exam)
+    if exam.scope == "class" and exam.classroom_id and exam.is_published:
+        from app.services.notification_service import trigger_assignment_notification_sync
+        trigger_assignment_notification_sync(db, exam.id, teacher.id)
     exam = _get_teacher_exam(db, teacher, exam.id)
     return {
         "message": "Exam updated successfully",

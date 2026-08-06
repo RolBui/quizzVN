@@ -1179,6 +1179,21 @@ def submit_student_attempt(db: Session, student: User, attempt_id: int) -> dict:
     db.commit()
 
     refreshed_attempt = _get_attempt_for_student(db, student, attempt.id)
+
+    # Notify teacher if this is a classroom exam
+    if refreshed_attempt.exam.scope == "class" and refreshed_attempt.exam.classroom_id:
+        from app.models.classroom import Classroom
+        classroom = db.query(Classroom).filter(Classroom.id == refreshed_attempt.exam.classroom_id).first()
+        classroom_name = classroom.name if classroom else "Lớp học"
+        teacher_id = refreshed_attempt.exam.created_by_user_id
+        if teacher_id:
+            from app.services.notification_service import create_notification, run_coroutine_sync
+            title = "Học sinh nộp bài"
+            description = f"Học sinh {student.full_name} đã nộp bài thi '{refreshed_attempt.exam.title}' của lớp '{classroom_name}'."
+            link_to = f"/teacher/classes/{classroom.id}"
+            coro = create_notification(db, teacher_id, title, description, "assignment", link_to)
+            run_coroutine_sync(coro)
+
     return {
         "message": "Attempt submitted successfully",
         "result": _serialize_attempt_result(refreshed_attempt),
