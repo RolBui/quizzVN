@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { adminApi, type AdminExam, type AdminExamOverview } from "../lib/api";
 import { PaginationBar } from "../components/PaginationBar";
+import { ExamDetailModal } from "../components/ExamDetailModal";
 import {
   formatDateTime,
   formatDecimal,
@@ -75,6 +76,8 @@ export function Exams() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeDropdownExamId, setActiveDropdownExamId] = useState<number | null>(null);
+  const [selectedExam, setSelectedExam] = useState<AdminExam | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   useEffect(() => {
     const handleOutsideClick = () => {
@@ -389,7 +392,8 @@ export function Exams() {
                           type="button"
                           onClick={() => {
                             setActiveDropdownExamId(null);
-                            toast.info("Xem chi tiết đề thi đang được đồng bộ.");
+                            setSelectedExam(exam);
+                            setIsDetailOpen(true);
                           }}
                           className="w-full px-3 py-2 text-xs font-semibold text-on-surface hover:bg-surface-container-low flex items-center gap-2"
                         >
@@ -400,7 +404,7 @@ export function Exams() {
                           type="button"
                           onClick={() => {
                             setActiveDropdownExamId(null);
-                            toast.info("Chỉnh sửa đề thi đang được đồng bộ.");
+                            navigate(`/exams/edit/${exam.id}`);
                           }}
                           className="w-full px-3 py-2 text-xs font-semibold text-on-surface hover:bg-surface-container-low flex items-center gap-2"
                         >
@@ -548,6 +552,15 @@ export function Exams() {
           </div>
         </div>
       )}
+
+      <ExamDetailModal
+        exam={selectedExam}
+        open={isDetailOpen}
+        onClose={() => {
+          setIsDetailOpen(false);
+          setSelectedExam(null);
+        }}
+      />
     </div>
   );
 }
