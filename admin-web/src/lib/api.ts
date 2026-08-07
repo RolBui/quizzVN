@@ -941,7 +941,7 @@ export const adminApi = {
   generateMoreAiQuestions: (jobId: number, payload: any) =>
     apiPost<any>(`/api/ai-exams/jobs/${jobId}/generate-more`, payload),
   getQCWallet: () =>
-    apiGet<{ balance: number; qc_token: number }>("/api/billing/wallet"),
+    apiGet<{ balance: number; qc_per_question: number }>("/api/billing/wallet"),
 };
 
 export const chatApi = {

@@ -91,7 +91,7 @@ export function ExamAICreate() {
   const [saveDescription, setSaveDescription] = useState("");
   
   const pollIntervalRef = useRef<number | null>(null);
-  const [wallet, setWallet] = useState<{ balance: number; qc_token: number } | null>(null);
+  const [wallet, setWallet] = useState<{ balance: number; qc_per_question: number } | null>(null);
 
   const fetchWallet = async () => {
     try {
@@ -372,10 +372,12 @@ export function ExamAICreate() {
           <div className="flex items-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-2 text-xs font-semibold text-on-surface shadow-sm">
             <span>Ví sử dụng:</span>
             <span className="rounded bg-primary/10 px-2 py-0.5 text-primary font-bold">
-              {wallet.qc_token} QC Token
+              {wallet.balance.toLocaleString("vi-VN")} QC Token
             </span>
             <span className="text-outline">|</span>
-            <span className="font-bold">{wallet.balance} QC</span>
+            <span className="font-bold">
+              {(questionCount * (wallet.qc_per_question ?? 1)).toLocaleString("vi-VN")} QC
+            </span>
           </div>
         )}
       </div>
