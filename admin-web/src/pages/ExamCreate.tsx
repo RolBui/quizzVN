@@ -1,5 +1,5 @@
 import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import {
   AlertCircle,
@@ -94,6 +94,39 @@ function makeQuestion(): QuestionForm {
   };
 }
 
+function mapQuestionDetailToForm(q: any): QuestionForm {
+  let correctOptionIndex = 0;
+  if (q.question_type === "single_choice" && q.options) {
+    const idx = q.options.findIndex((opt: any) => opt.is_correct);
+    if (idx >= 0) {
+      correctOptionIndex = idx;
+    }
+  }
+
+  const trueFalseAnswer = (q.accepted_answers?.[0] === "false" ? "false" : "true") as "true" | "false";
+  const acceptedAnswersText = q.accepted_answers ? q.accepted_answers.join("\n") : "";
+
+  return {
+    id: q.id ? String(q.id) : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    question_type: q.question_type,
+    prompt: q.prompt || "",
+    explanation: q.explanation || "",
+    points: String(q.points || 1),
+    options: q.options ? q.options.map((opt: any) => ({
+      option_key: opt.option_key || "",
+      option_text: opt.option_text || "",
+    })) : [
+      { option_key: "A", option_text: "" },
+      { option_key: "B", option_text: "" },
+      { option_key: "C", option_text: "" },
+      { option_key: "D", option_text: "" },
+    ],
+    correctOptionIndex,
+    trueFalseAnswer,
+    acceptedAnswersText,
+  };
+}
+
 function toIsoDateTime(value: string) {
   if (!value) {
     return null;
@@ -177,6 +210,9 @@ function validateQuestionForm(question: QuestionForm, index: number) {
 
 export function ExamCreate() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const isEditMode = Boolean(id);
+
   const [mode, setMode] = useState<"select" | "manual">("select");
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [classes, setClasses] = useState<AdminClass[]>([]);
@@ -196,6 +232,35 @@ export function ExamCreate() {
   const [questions, setQuestions] = useState<QuestionForm[]>(() => [makeQuestion()]);
   const [activeTab, setActiveTab] = useState<ExamCreateTab>("basic");
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isEditMode && id) {
+      setMode("manual");
+      adminApi
+        .getExamDetail(Number(id))
+        .then((exam) => {
+          setTitle(exam.title || "");
+          setGrade(exam.grade || "");
+          setDescription(exam.description || "");
+          setImageUrl(exam.image_url || "");
+          setScope(exam.scope || "system");
+          setClassroomId(exam.classroom_id ? String(exam.classroom_id) : "");
+          setDurationMinutes(String(exam.duration_minutes || "30"));
+          setStartTime(exam.start_time ? exam.start_time.substring(0, 16) : "");
+          setEndTime(exam.end_time ? exam.end_time.substring(0, 16) : "");
+          
+          if (exam.questions && exam.questions.length > 0) {
+            const mapped = exam.questions.map(mapQuestionDetailToForm);
+            setQuestions(mapped);
+            setSelectedQuestionId(mapped[0].id);
+          }
+        })
+        .catch((err) => {
+          toast.error("Không thể tải chi tiết đề thi cần chỉnh sửa.");
+          console.error(err);
+        });
+    }
+  }, [isEditMode, id]);
 
   useEffect(() => {
     let mounted = true;
@@ -407,11 +472,16 @@ export function ExamCreate() {
     }
 
     try {
-      await adminApi.createExam(payload);
-      toast.success(publish ? "Đã tạo và xuất bản đề thi." : "Đã lưu nháp đề thi.");
+      if (isEditMode && id) {
+        await adminApi.updateExam(Number(id), payload);
+        toast.success(publish ? "Đã cập nhật và xuất bản đề thi." : "Đã cập nhật đề thi.");
+      } else {
+        await adminApi.createExam(payload);
+        toast.success(publish ? "Đã tạo và xuất bản đề thi." : "Đã lưu nháp đề thi.");
+      }
       navigate("/exams");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Không tạo được đề thi.");
+      setError(err instanceof Error ? err.message : "Thao tác thất bại.");
     } finally {
       setIsSubmitting(false);
     }
@@ -458,9 +528,7 @@ export function ExamCreate() {
       {
         title: "Soạn thảo văn bản",
         description: "Nhập trực tiếp câu hỏi và đáp án dạng văn bản theo cú pháp để hệ thống tự động trích xuất và xem trước.",
-        action: () => {
-          toast.info("Tính năng Soạn thảo văn bản dạng text đang được đồng bộ cho Quản trị viên.");
-        },
+        action: () => navigate("/exams/text"),
         imageSrc: "/image/text1.png",
         hoverClassName: "hover:from-[#4F62F2] hover:to-[#7C3AED]",
       },
@@ -474,52 +542,40 @@ export function ExamCreate() {
     ] as const;
 
     return (
-      <div className="min-h-full bg-background p-4 md:p-5 flex flex-col justify-center items-center">
-        <div className="w-full max-w-5xl space-y-6">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/exams")}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-outline-variant bg-surface-container-lowest text-on-surface shadow-sm hover:bg-surface-container-low"
-              aria-label="Quay lại danh sách bài thi"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-on-surface">Lựa chọn phương thức tạo đề thi phù hợp</h1>
-              <p className="mt-1 text-sm text-outline">
-                Mỗi phương thức đều lưu về cùng hệ thống quản lý đề thi của hệ thống.
-              </p>
-            </div>
-          </div>
-
-          <section className="rounded-[10px] border border-[#E0E7FF] bg-[#EEF2FF] p-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              {creationMethods.map((method) => (
-                <div
-                  key={method.title}
-                  onClick={method.action}
-                  className={`group relative flex min-h-[230px] flex-col items-center justify-between overflow-hidden rounded-[10px] bg-white p-5 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:bg-gradient-to-r ${method.hoverClassName} hover:shadow-md`}
-                >
-                  <div>
-                    <h2 className="text-sm font-bold text-[#1E293B] transition-colors group-hover:text-white">{method.title}</h2>
-                    <p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-[#64748B] transition-colors group-hover:text-white/90">{method.description}</p>
-                  </div>
-
-                  <div className="mt-5 flex h-[84px] w-[140px] items-center justify-center">
-                    <img
-                      src={method.imageSrc}
-                      alt=""
-                      className="h-[84px] w-[140px] object-contain"
-                    />
-                  </div>
-
-                  <span className="mt-4 text-xs font-bold text-[#4F62F2] transition-colors group-hover:text-white">Chọn phương thức</span>
-                </div>
-              ))}
-            </div>
-          </section>
+      <div className="min-h-full bg-background p-4 md:p-5 space-y-4">
+        <div>
+          <h1 className="text-lg font-bold text-[#1E293B]">Lựa chọn phương thức tạo đề thi phù hợp</h1>
+          <p className="mt-1 text-xs text-[#64748B]">
+            Mỗi phương thức đều lưu về cùng hệ thống quản lý đề thi của hệ thống.
+          </p>
         </div>
+
+        <section className="rounded-[10px] border border-[#E0E7FF] bg-[#EEF2FF] p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            {creationMethods.map((method) => (
+              <div
+                key={method.title}
+                onClick={method.action}
+                className={`group relative flex min-h-[230px] flex-col items-center justify-between overflow-hidden rounded-[10px] bg-white p-5 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:bg-gradient-to-r ${method.hoverClassName} hover:shadow-md`}
+              >
+                <div>
+                  <h2 className="text-sm font-bold text-[#1E293B] transition-colors group-hover:text-white">{method.title}</h2>
+                  <p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-[#64748B] transition-colors group-hover:text-white/90">{method.description}</p>
+                </div>
+
+                <div className="mt-5 flex h-[84px] w-[140px] items-center justify-center">
+                  <img
+                    src={method.imageSrc}
+                    alt=""
+                    className="h-[84px] w-[140px] object-contain"
+                  />
+                </div>
+
+                <span className="mt-4 text-xs font-bold text-[#4F62F2] transition-colors group-hover:text-white">Chọn phương thức</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     );
   }
@@ -537,7 +593,9 @@ export function ExamCreate() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-on-surface">Tạo đề thi mới</h1>
+            <h1 className="text-xl font-bold text-on-surface">
+              {isEditMode ? "Cập nhật đề thi" : "Tạo đề thi mới"}
+            </h1>
             <p className={mutedClass}>Thiết lập thông tin, lịch làm bài và câu hỏi cho đề thi.</p>
           </div>
         </div>
@@ -549,7 +607,7 @@ export function ExamCreate() {
             className="flex items-center justify-center gap-2 rounded-md border border-outline-variant bg-surface-container-lowest px-4 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low disabled:opacity-60"
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Lưu nháp
+            {isEditMode ? "Cập nhật" : "Lưu nháp"}
           </button>
           <button
             type="button"

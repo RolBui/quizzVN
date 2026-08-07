@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies.auth import get_current_teacher
+from app.dependencies.auth import get_current_teacher, get_current_teacher_or_admin
 from app.schemas.billing import (
     AIQCCostEstimateRequest,
     AIQCCostEstimateResponse,
@@ -90,7 +90,7 @@ def get_payment_orders(
 @router.get("/wallet", response_model=QCWalletResponse)
 def get_qc_wallet(
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> QCWalletResponse:
     return get_teacher_qc_wallet(db, current_teacher)
 
@@ -99,7 +99,7 @@ def get_qc_wallet(
 def post_ai_cost_estimate(
     payload: AIQCCostEstimateRequest,
     db: Session = Depends(get_db),
-    current_teacher=Depends(get_current_teacher),
+    current_teacher=Depends(get_current_teacher_or_admin),
 ) -> AIQCCostEstimateResponse:
     return estimate_ai_qc_cost(
         db,

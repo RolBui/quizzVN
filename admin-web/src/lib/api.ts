@@ -869,6 +869,16 @@ export const adminApi = {
   listExamImages: () => apiGet<AdminImageListResponse>("/admin/image"),
   deleteExam: (examId: number) =>
     apiDelete<{ message: string }>(`/admin/exams/${examId}`),
+  getExamDetail: (examId: number) =>
+    apiGet<any>(`/admin/exams/${examId}`),
+  updateExam: (examId: number, payload: any) =>
+    apiRequest<AdminExamResponse>(`/admin/exams/${examId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
   publishExam: (examId: number) =>
     apiPost<AdminExamResponse>(`/admin/exams/${examId}/publish`),
   privateExam: (examId: number) =>
@@ -930,6 +940,8 @@ export const adminApi = {
     }),
   generateMoreAiQuestions: (jobId: number, payload: any) =>
     apiPost<any>(`/api/ai-exams/jobs/${jobId}/generate-more`, payload),
+  getQCWallet: () =>
+    apiGet<{ balance: number; qc_token: number }>("/api/billing/wallet"),
 };
 
 export const chatApi = {
