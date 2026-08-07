@@ -942,6 +942,8 @@ export const adminApi = {
     apiPost<any>(`/api/ai-exams/jobs/${jobId}/generate-more`, payload),
   getQCWallet: () =>
     apiGet<{ balance: number; qc_per_question: number }>("/api/billing/wallet"),
+  estimateAiQCCost: (payload: { question_count: number; operation: "initial" | "generate_more" }) =>
+    apiPost<{ qc_cost: number; free_questions: number; balance: number }>("/api/billing/ai-cost/estimate", payload),
 };
 
 export const chatApi = {
