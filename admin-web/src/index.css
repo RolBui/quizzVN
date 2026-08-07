@@ -21,6 +21,9 @@
   --color-error-container: #ffdad6;
   --color-on-error-container: #93000a;
 
+  --color-success: #10b981;
+  --color-on-success: #ffffff;
+
   --color-background: #f3f6f9;
   --color-on-background: #1b1b20;
 
@@ -87,6 +90,9 @@
     --color-on-error: #540003;
     --color-error-container: #93000a;
     --color-on-error-container: #ffdad6;
+
+    --color-success: #34d399;
+    --color-on-success: #064e3b;
 
     --color-background: #0f1015;
     --color-on-background: #f5f7fb;
