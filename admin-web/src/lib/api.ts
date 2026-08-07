@@ -869,6 +869,10 @@ export const adminApi = {
   listExamImages: () => apiGet<AdminImageListResponse>("/admin/image"),
   deleteExam: (examId: number) =>
     apiDelete<{ message: string }>(`/admin/exams/${examId}`),
+  publishExam: (examId: number) =>
+    apiPost<AdminExamResponse>(`/admin/exams/${examId}/publish`),
+  privateExam: (examId: number) =>
+    apiPost<AdminExamResponse>(`/admin/exams/${examId}/private`),
   getDocumentsOverview: () => apiGet<AdminDocumentOverview>("/admin/documents"),
   importDocument: (body: FormData) =>
     apiPostForm<AdminDocumentResponse>("/admin/documents", body),
