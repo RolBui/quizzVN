@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
 import {
   AlertCircle,
   ChevronDown,
@@ -8,6 +9,11 @@ import {
   Search,
   Trash2,
   X,
+  MoreVertical,
+  Eye,
+  Pencil,
+  Globe,
+  EyeOff,
 } from "lucide-react";
 import { adminApi, type AdminExam, type AdminExamOverview } from "../lib/api";
 import { PaginationBar } from "../components/PaginationBar";
@@ -28,6 +34,35 @@ const fallbackOverview: AdminExamOverview = {
 
 const PAGE_SIZE = 7;
 
+const renderStatusBadge = (exam: AdminExam) => {
+  if (!exam.is_published && !exam.is_active) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700 border border-amber-200">
+        Bản nháp
+      </span>
+    );
+  }
+  if (exam.is_published && exam.is_active) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+        Công khai
+      </span>
+    );
+  }
+  if (!exam.is_published && exam.is_active) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700 border border-amber-200">
+        Riêng tư
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700 border border-blue-200">
+      Không công khai
+    </span>
+  );
+};
+
 export function Exams() {
   const navigate = useNavigate();
   const [overview, setOverview] = useState<AdminExamOverview>(fallbackOverview);
@@ -39,6 +74,34 @@ export function Exams() {
   const [deletingExam, setDeletingExam] = useState<AdminExam | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeDropdownExamId, setActiveDropdownExamId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      setActiveDropdownExamId(null);
+    };
+    window.addEventListener("click", handleOutsideClick);
+    return () => {
+      window.removeEventListener("click", handleOutsideClick);
+    };
+  }, []);
+
+  const handleToggleVisibility = async (exam: AdminExam) => {
+    setActiveDropdownExamId(null);
+    try {
+      if (exam.is_published) {
+        await adminApi.privateExam(exam.id);
+        toast.success("Đã ẩn đề thi.");
+      } else {
+        await adminApi.publishExam(exam.id);
+        toast.success("Đã xuất bản đề thi.");
+      }
+      const response = await adminApi.getExamsOverview();
+      setOverview(response);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Thao tác thất bại.");
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -234,13 +297,13 @@ export function Exams() {
           <table className="w-full min-w-[900px] table-fixed text-left border-collapse">
             <thead className="bg-surface-container-lowest border-b border-surface-variant">
               <tr className="border-b border-surface-variant bg-surface-container-lowest text-outline">
-                <th className="w-[24%] py-3 px-4 text-xs text-on-surface font-bold whitespace-nowrap">
+                <th className="w-[22%] py-3 px-4 text-xs text-on-surface font-bold whitespace-nowrap">
                   Tên bài thi
                 </th>
-                <th className="w-[11%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                <th className="w-[10%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
                   Phân loại
                 </th>
-                <th className="w-[16%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                <th className="w-[14%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
                   Giáo viên
                 </th>
                 <th className="w-[8%] py-3 px-3 text-xs text-on-surface-variant font-bold text-center whitespace-nowrap">
@@ -249,13 +312,16 @@ export function Exams() {
                 <th className="w-[8%] py-3 px-3 text-xs text-on-surface font-bold text-center whitespace-nowrap">
                   Lượt làm
                 </th>
-                <th className="w-[11%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                <th className="w-[10%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
                   Điểm TB
                 </th>
-                <th className="w-[14%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                <th className="w-[12%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
                   Ngày tạo
                 </th>
-                <th className="w-[8%] py-3 px-3 text-xs text-on-surface font-bold text-center whitespace-nowrap">
+                <th className="w-[10%] py-3 px-3 text-xs text-on-surface font-bold whitespace-nowrap">
+                  Trạng thái
+                </th>
+                <th className="w-[6%] py-3 px-3 text-xs text-on-surface font-bold text-center whitespace-nowrap">
                   Thao tác
                 </th>
               </tr>
@@ -268,7 +334,7 @@ export function Exams() {
                 >
                   <td className="py-4 px-4">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-on-surface">
+                      <p className="truncate text-sm font-semibold text-on-surface">
                         {exam.title}
                       </p>
                       <p className="truncate text-xs text-outline">
@@ -277,7 +343,7 @@ export function Exams() {
                     </div>
                   </td>
                   <td className="py-4 px-3 text-sm text-on-surface font-medium whitespace-nowrap">
-                    {scopeLabel(exam.scope)}
+                    {exam.source === "system" ? "Hệ thống" : "Giáo viên"}
                   </td>
                   <td className="py-4 px-3 text-sm text-on-surface max-w-0 truncate whitespace-nowrap">
                     {exam.teacher_name || "Chưa xác định"}
@@ -296,24 +362,90 @@ export function Exams() {
                   <td className="py-4 px-3 text-sm text-on-surface truncate whitespace-nowrap">
                     {formatDateTime(exam.created_at)}
                   </td>
-                  <td className="py-4 px-3 text-center whitespace-nowrap">
+                  <td className="py-4 px-3 whitespace-nowrap">
+                    {renderStatusBadge(exam)}
+                  </td>
+                  <td className="py-4 px-3 text-center relative whitespace-nowrap">
                     <button
-                      className="text-outline hover:text-error p-2 rounded hover:bg-error-container transition-colors"
-                      title="Xóa bài thi"
-                      onClick={() => {
-                        setDeletingExam(exam);
-                        setDeleteError(null);
+                      type="button"
+                      className="text-outline hover:text-on-surface p-2 rounded hover:bg-surface-container-low transition-colors"
+                      title="Thao tác"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownExamId(
+                          activeDropdownExamId === exam.id ? null : exam.id
+                        );
                       }}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <MoreVertical className="w-4 h-4" />
                     </button>
+                    
+                    {activeDropdownExamId === exam.id && (
+                      <div 
+                        className="absolute right-4 mt-1 w-44 rounded-lg bg-surface-container-lowest border border-outline-variant shadow-lg z-50 py-1 text-left"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDropdownExamId(null);
+                            toast.info("Xem chi tiết đề thi đang được đồng bộ.");
+                          }}
+                          className="w-full px-3 py-2 text-xs font-semibold text-on-surface hover:bg-surface-container-low flex items-center gap-2"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-outline" />
+                          <span>Xem chi tiết</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDropdownExamId(null);
+                            toast.info("Chỉnh sửa đề thi đang được đồng bộ.");
+                          }}
+                          className="w-full px-3 py-2 text-xs font-semibold text-on-surface hover:bg-surface-container-low flex items-center gap-2"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-outline" />
+                          <span>Chỉnh sửa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleVisibility(exam)}
+                          className="w-full px-3 py-2 text-xs font-semibold text-on-surface hover:bg-surface-container-low flex items-center gap-2"
+                        >
+                          {exam.is_published ? (
+                            <>
+                              <EyeOff className="w-3.5 h-3.5 text-outline" />
+                              <span>Tạm ẩn</span>
+                            </>
+                          ) : (
+                            <>
+                              <Globe className="w-3.5 h-3.5 text-outline" />
+                              <span>Công khai</span>
+                            </>
+                          )}
+                        </button>
+                        <div className="border-t border-outline-variant my-1" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDropdownExamId(null);
+                            setDeletingExam(exam);
+                            setDeleteError(null);
+                          }}
+                          className="w-full px-3 py-2 text-xs font-semibold text-error hover:bg-error-container/20 flex items-center gap-2"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-error" />
+                          <span>Xóa đề thi</span>
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
               {!isLoading && filteredExams.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-10 text-center text-sm text-outline"
                   >
                     Chưa có bài thi phù hợp.
@@ -323,7 +455,7 @@ export function Exams() {
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-10 text-center text-sm text-outline"
                   >
                     Đang tải dữ liệu bài thi...

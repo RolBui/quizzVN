@@ -447,9 +447,35 @@ export function ExamCreate() {
   const normalizedImageUrl = imageUrl.trim();
 
   if (mode === "select") {
+    const creationMethods = [
+      {
+        title: "Tạo đề AI",
+        description: "Tạo đề tự động bằng AI, chọn loại câu hỏi và rà soát từng câu trước khi lưu.",
+        action: () => navigate("/exams/ai"),
+        imageSrc: "/image/text2.png",
+        hoverClassName: "hover:from-[#FF5277] hover:to-[#FF855A]",
+      },
+      {
+        title: "Soạn thảo văn bản",
+        description: "Nhập trực tiếp câu hỏi và đáp án dạng văn bản theo cú pháp để hệ thống tự động trích xuất và xem trước.",
+        action: () => {
+          toast.info("Tính năng Soạn thảo văn bản dạng text đang được đồng bộ cho Quản trị viên.");
+        },
+        imageSrc: "/image/text1.png",
+        hoverClassName: "hover:from-[#4F62F2] hover:to-[#7C3AED]",
+      },
+      {
+        title: "Trình soạn thảo thủ công",
+        description: "Tạo đề từ đầu và tự nhập thông tin, câu hỏi, đáp án theo từng bước.",
+        action: () => setMode("manual"),
+        imageSrc: "/image/text3.png",
+        hoverClassName: "hover:from-[#06B6D4] hover:to-[#4F62F2]",
+      },
+    ] as const;
+
     return (
       <div className="min-h-full bg-background p-4 md:p-5 flex flex-col justify-center items-center">
-        <div className="w-full max-w-4xl space-y-6">
+        <div className="w-full max-w-5xl space-y-6">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -467,39 +493,32 @@ export function ExamCreate() {
             </div>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-2">
-            <div
-              onClick={() => navigate("/exams/ai")}
-              className="group relative flex min-h-[250px] flex-col items-center justify-between overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary hover:shadow-md"
-            >
-              <div className="space-y-2">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Sparkles className="h-6 w-6" />
-                </div>
-                <h2 className="text-base font-bold text-on-surface">Tạo đề thi bằng AI</h2>
-                <p className="text-sm text-outline max-w-[280px]">
-                  Tạo đề tự động bằng AI, chọn loại câu hỏi và rà soát từng câu trước khi lưu.
-                </p>
-              </div>
-              <span className="text-sm font-bold text-primary">Chọn phương thức</span>
-            </div>
+          <section className="rounded-[10px] border border-[#E0E7FF] bg-[#EEF2FF] p-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              {creationMethods.map((method) => (
+                <div
+                  key={method.title}
+                  onClick={method.action}
+                  className={`group relative flex min-h-[230px] flex-col items-center justify-between overflow-hidden rounded-[10px] bg-white p-5 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:bg-gradient-to-r ${method.hoverClassName} hover:shadow-md`}
+                >
+                  <div>
+                    <h2 className="text-sm font-bold text-[#1E293B] transition-colors group-hover:text-white">{method.title}</h2>
+                    <p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-[#64748B] transition-colors group-hover:text-white/90">{method.description}</p>
+                  </div>
 
-            <div
-              onClick={() => setMode("manual")}
-              className="group relative flex min-h-[250px] flex-col items-center justify-between overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary hover:shadow-md"
-            >
-              <div className="space-y-2">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <ClipboardList className="h-6 w-6" />
+                  <div className="mt-5 flex h-[84px] w-[140px] items-center justify-center">
+                    <img
+                      src={method.imageSrc}
+                      alt=""
+                      className="h-[84px] w-[140px] object-contain"
+                    />
+                  </div>
+
+                  <span className="mt-4 text-xs font-bold text-[#4F62F2] transition-colors group-hover:text-white">Chọn phương thức</span>
                 </div>
-                <h2 className="text-base font-bold text-on-surface">Trình soạn thảo thủ công</h2>
-                <p className="text-sm text-outline max-w-[280px]">
-                  Tạo đề từ đầu và tự nhập thông tin, câu hỏi, đáp án theo từng bước.
-                </p>
-              </div>
-              <span className="text-sm font-bold text-primary">Chọn phương thức</span>
+              ))}
             </div>
-          </div>
+          </section>
         </div>
       </div>
     );
