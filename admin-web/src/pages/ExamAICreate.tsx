@@ -745,7 +745,7 @@ export function ExamAICreate() {
                         />
 
                         {/* Display options for multiple choice or true/false */}
-                        {(q.question_type === "multiple_choice" || q.question_type === "true_false") && (
+                        {(q.question_type === "multiple_choice" || q.question_type === "true_false") && q.options && Array.isArray(q.options) && q.options.length > 0 && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                             {q.options.map((opt, optIdx) => (
                               <div key={opt.id} className="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant rounded px-2.5 py-1.5 text-xs text-on-surface">
@@ -754,7 +754,7 @@ export function ExamAICreate() {
                                   type="text"
                                   value={opt.option_text}
                                   onChange={(e) => {
-                                    const updatedOpts = [...q.options];
+                                    const updatedOpts = q.options ? [...q.options] : [];
                                     updatedOpts[optIdx] = { ...opt, option_text: e.target.value };
                                     handleEditQuestion(idx, { options: updatedOpts });
                                   }}
@@ -769,11 +769,11 @@ export function ExamAICreate() {
                         <div className="text-xs text-outline mt-2">
                           <span className="font-bold text-success">Đáp án đúng: </span>
                           {q.question_type === "multiple_choice" ? (
-                            q.accepted_answers.join(", ")
+                            q.accepted_answers ? q.accepted_answers.join(", ") : ""
                           ) : (
                             <input
                               type="text"
-                              value={q.accepted_answers.join(", ")}
+                              value={q.accepted_answers ? q.accepted_answers.join(", ") : ""}
                               onChange={(e) =>
                                 handleEditQuestion(idx, {
                                   accepted_answers: e.target.value.split(",").map((s) => s.trim()),
