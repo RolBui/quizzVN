@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ClipboardList,
   Info,
+  ListChecks,
+  FileCheck,
   Loader2,
   Plus,
   Save,
@@ -51,9 +53,9 @@ type QuestionForm = {
 const OPTION_KEYS = ["A", "B", "C", "D", "E", "F"];
 
 const examCreateTabs: Array<{ key: ExamCreateTab; label: string }> = [
-  { key: "basic", label: "Thông tin cơ bản" },
-  { key: "questions", label: "Soạn câu hỏi" },
-  { key: "advanced", label: "Cài đặt nâng cao" },
+  { key: "basic", label: "Thông tin đề thi" },
+  { key: "questions", label: "Xây dựng câu hỏi" },
+  { key: "advanced", label: "Xem lại & lưu" },
 ];
 
 const trueFalseOptions: Array<{ label: string; value: "true" | "false" }> = [
@@ -632,24 +634,46 @@ export function ExamCreate() {
         </div>
       )}
 
-      <div className={`${cardClass} mb-4 w-fit max-w-full overflow-hidden`}>
-        <div className="flex min-w-0 overflow-x-auto pt-1">
-          {examCreateTabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`shrink-0 border-b-2 px-5 py-2.5 text-sm font-semibold transition-colors ${
-                activeTab === tab.key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-outline hover:text-on-surface"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <section className="overflow-hidden rounded-[10px] border border-outline-variant bg-surface-container-lowest p-2.5 shadow-sm mb-4">
+        <div className="grid gap-2.5 md:grid-cols-3">
+          {examCreateTabs.map((tab, index) => {
+            const currentStepIndex = examCreateTabs.findIndex((t) => t.key === activeTab);
+            const isCompleted = index < currentStepIndex;
+            const isCurrent = index === currentStepIndex;
+
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`rounded-[6px] border px-4 py-3 text-left transition-all flex items-center gap-3 cursor-pointer ${
+                  isCurrent
+                    ? "border-primary bg-primary/5 text-primary shadow-sm"
+                    : isCompleted
+                      ? "border-outline-variant bg-surface text-on-surface hover:border-outline"
+                      : "border-outline-variant bg-surface-container-lowest text-outline hover:border-outline-variant"
+                }`}
+              >
+                <div
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                    isCurrent
+                      ? "bg-primary text-white"
+                      : isCompleted
+                        ? "bg-success text-white"
+                        : "bg-surface-variant text-outline"
+                  }`}
+                >
+                  {isCompleted ? "✓" : index + 1}
+                </div>
+
+                <span className="text-xs font-bold truncate">
+                  {tab.label}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </section>
 
       <form
           onSubmit={(event: FormEvent) => {
@@ -860,93 +884,62 @@ export function ExamCreate() {
           )}
 
           {activeTab === "questions" && (
-            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-              <section className={`${cardClass} overflow-hidden`}>
-                <div className="flex items-center justify-between gap-3 px-4 py-4">
-                  <h2 className="text-base font-semibold text-on-surface">Danh sách phần thi</h2>
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+              <section className={`${cardClass} p-4 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-on-surface">
+                    Danh sách câu hỏi
+                  </span>
+                  <span className="text-xs font-semibold text-outline">
+                    {questions.length} câu
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => toast.info("Phần thi sẽ được bổ sung khi backend hỗ trợ lưu nhiều phần.")}
-                    className="rounded-md px-2 py-1 text-sm font-semibold text-primary hover:bg-primary-container"
+                    onClick={addQuestion}
+                    className="flex items-center gap-1 rounded-[6px] bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-primary/90 cursor-pointer"
                   >
-                    Thêm mới
+                    <Plus className="size-3.5" />
+                    <span>Thêm câu hỏi</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toast.info("Tính năng thêm bằng văn bản sẽ được bổ sung sau.")}
+                    className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-outline-variant bg-white px-3 py-1.5 text-xs font-bold text-on-surface hover:bg-surface-container-low"
+                  >
+                    <ClipboardList className="size-3.5" />
+                    <span>Thêm bằng văn bản</span>
                   </button>
                 </div>
-                <div className="px-4 pb-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary"
-                    >
-                      Phần 1
-                    </button>
-                    <button
-                      type="button"
-                      className="flex h-9 w-9 items-center justify-center rounded-md text-primary hover:bg-primary-container"
-                      aria-label="Chỉnh sửa phần thi"
-                    >
-                      <ClipboardList className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
 
-                <div className="border-t border-outline-variant px-4 py-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold text-on-surface">Danh mục câu hỏi</h3>
-                    <span className="text-sm text-outline">{questions.length} câu</span>
-                  </div>
-                  <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                    <button
-                      type="button"
-                      onClick={addQuestion}
-                      className="flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-on-primary hover:bg-primary/90"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Thêm câu hỏi
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toast.info("Tính năng thêm bằng văn bản sẽ được bổ sung sau.")}
-                      className="flex items-center justify-center gap-2 rounded-md border border-outline-variant bg-surface-container-lowest px-3 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low"
-                    >
-                      <ClipboardList className="h-4 w-4" />
-                      Thêm bằng văn bản
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {questions.map((question, questionIndex) => {
+                <div className="flex max-h-[calc(100vh-18rem)] flex-wrap gap-1.5 overflow-y-auto pt-1 pr-1">
+                  {questions.length === 0 ? (
+                    <div className="my-4 w-full text-center text-xs font-medium text-outline">
+                      Không tìm thấy câu hỏi nào!
+                    </div>
+                  ) : (
+                    questions.map((question, index) => {
                       const isSelected = question.id === selectedQuestion?.id;
-                      const preview = question.prompt.trim() || "Chưa nhập nội dung câu hỏi";
+
                       return (
                         <button
                           key={question.id}
                           type="button"
                           onClick={() => setSelectedQuestionId(question.id)}
-                          className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
+                          className={`flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-xs font-bold transition-all ${
                             isSelected
-                              ? "border-primary bg-primary-container/60"
-                              : "border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low"
+                              ? "bg-primary text-white shadow-sm"
+                              : "border border-outline-variant bg-white text-on-surface hover:bg-surface-container-low"
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-on-surface">
-                                Câu {questionIndex + 1}
-                              </p>
-                              <p className="mt-1 line-clamp-2 text-sm text-outline">{preview}</p>
-                            </div>
-                            <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-1 text-xs font-semibold text-outline">
-                              {question.points || 0}đ
-                            </span>
-                          </div>
-                          <p className="mt-2 text-xs font-medium text-primary">
-                            {questionTypeLabels[question.question_type]}
-                          </p>
+                          {index + 1}
                         </button>
                       );
-                    })}
-                  </div>
+                    })
+                  )}
                 </div>
               </section>
 
@@ -1170,119 +1163,181 @@ export function ExamCreate() {
           )}
 
           {activeTab === "advanced" && (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-              <section className={cardClass}>
-                <div className="border-b border-outline-variant px-4 py-3">
-                  <h2 className="text-base font-semibold text-on-surface">Lịch và phạm vi</h2>
-                </div>
-                <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelClass}>
-                      Phạm vi <span className="text-error">*</span>
-                    </span>
-                    <div className="relative">
-                      <select
-                        value={scope}
-                        onChange={(event) => setScope(event.target.value as ExamScope)}
-                        className={selectClass}
-                      >
-                        <option value="system">Hệ thống</option>
-                        <option value="class">Trong lớp</option>
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-outline" />
+            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
+              <div className="lg:col-span-8">
+                <div className="rounded-[10px] border border-outline-variant bg-surface-container-lowest shadow-sm">
+                  <div className="flex items-center gap-3 border-b border-outline-variant p-4">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-primary/10 text-primary">
+                      <ListChecks className="size-4" />
                     </div>
-                  </label>
-
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelClass}>Lớp học</span>
-                    <div className="relative">
-                      <select
-                        value={classroomId}
-                        onChange={(event) => setClassroomId(event.target.value)}
-                        disabled={scope === "system" || isLoadingClasses}
-                        className={`${selectClass} disabled:cursor-not-allowed disabled:opacity-60`}
-                      >
-                        <option value="">
-                          {isLoadingClasses ? "Đang tải lớp học..." : "Chọn lớp học"}
-                        </option>
-                        {classes.map((classroom) => (
-                          <option key={classroom.id} value={classroom.id}>
-                            {classroom.name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-outline" />
+                    <div>
+                      <p className="text-sm font-bold text-on-surface">
+                        Xem lại danh sách câu hỏi
+                      </p>
+                      <p className="text-xs text-outline">
+                        Kiểm tra nhanh nội dung và đáp án trước khi lưu đề thi.
+                      </p>
                     </div>
-                    <span className="text-xs text-outline">
-                      {scope === "system"
-                        ? "Phạm vi Hệ thống không gắn với lớp cụ thể, nên không cần chọn lớp."
-                        : "Chọn lớp để đề chỉ hiển thị cho học viên trong lớp đó."}
-                    </span>
-                  </label>
+                  </div>
 
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelClass}>Thời lượng làm bài</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={durationMinutes}
-                      onChange={(event) => setDurationMinutes(event.target.value)}
-                      className={inputClass}
-                    />
-                  </label>
+                  <div className="space-y-4 p-4 divide-y divide-outline-variant/40">
+                    {questions.length === 0 ? (
+                      <div className="py-16 text-center text-xs font-medium text-outline">
+                        Chưa có câu hỏi nào trong đề thi.
+                      </div>
+                    ) : (
+                      questions.map((question, questionIndex) => {
+                        const isChoice = question.question_type === "single_choice";
+                        const isTrueFalse = question.question_type === "true_false";
+                        const isShortAnswer = question.question_type === "short_answer";
 
-                  <div className="hidden md:block" />
+                        return (
+                          <div
+                            key={question.id}
+                            className="space-y-3 rounded-[8px] border border-outline-variant bg-surface p-4 first:mt-0 mt-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center rounded-[4px] bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+                                  Câu {questionIndex + 1}
+                                </span>
+                                <span className="inline-flex items-center rounded-[4px] border border-outline-variant bg-surface-container-low px-2.5 py-0.5 text-[11px] font-medium text-outline">
+                                  {questionTypeLabels[question.question_type]}
+                                </span>
+                              </div>
+                              <div className="inline-flex shrink-0 items-center gap-1.5 rounded-[6px] border border-outline-variant bg-surface-container-low px-2.5 py-1 text-xs font-semibold text-on-surface">
+                                <FileCheck className="size-3.5 text-primary" />
+                                {question.points} điểm
+                              </div>
+                            </div>
 
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelClass}>Bắt đầu</span>
-                    <input
-                      type="datetime-local"
-                      value={startTime}
-                      onChange={(event) => setStartTime(event.target.value)}
-                      className={inputClass}
-                    />
-                  </label>
+                            <p className="text-sm font-semibold text-on-surface whitespace-pre-wrap">
+                              {question.prompt || "Chưa nhập nội dung câu hỏi"}
+                            </p>
 
-                  <label className="flex flex-col gap-1.5">
-                    <span className={labelClass}>Kết thúc</span>
-                    <input
-                      type="datetime-local"
-                      value={endTime}
-                      onChange={(event) => setEndTime(event.target.value)}
-                      className={inputClass}
-                    />
-                  </label>
+                            {isChoice && (
+                              <div className="space-y-1.5">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-outline">
+                                  Đáp án
+                                </p>
+                                <div className="grid gap-1.5 sm:grid-cols-2">
+                                  {question.options.map((option, optionIndex) => {
+                                    const isCorrect = question.correctOptionIndex === optionIndex;
+                                    return (
+                                      <div
+                                        key={option.option_key}
+                                        className={`flex items-start gap-2 rounded-[6px] border px-3 py-2 text-xs ${
+                                          isCorrect
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                            : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
+                                        }`}
+                                      >
+                                        <span className="shrink-0 font-bold">
+                                          {option.option_key || String.fromCharCode(65 + optionIndex)}
+                                        </span>
+                                        <p className={isCorrect ? "font-semibold" : ""}>
+                                          {option.option_text || "Chưa nhập nội dung đáp án"}
+                                        </p>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {isTrueFalse && (
+                              <div className="space-y-1.5">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-outline">
+                                  Đáp án
+                                </p>
+                                <div className="grid gap-1.5 sm:grid-cols-2">
+                                  {[
+                                    { label: "Đúng", value: "true" },
+                                    { label: "Sai", value: "false" }
+                                  ].map((opt) => {
+                                    const isCorrect = question.trueFalseAnswer === opt.value;
+                                    return (
+                                      <div
+                                        key={opt.value}
+                                        className={`flex items-start gap-2 rounded-[6px] border px-3 py-2 text-xs ${
+                                          isCorrect
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                            : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
+                                        }`}
+                                      >
+                                        <p className={isCorrect ? "font-semibold" : ""}>
+                                          {opt.label}
+                                        </p>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {isShortAnswer && (
+                              <div className="space-y-1.5">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-outline">
+                                  Đáp án chấp nhận
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {splitAcceptedAnswers(question.acceptedAnswersText).map((ans, aIdx) => (
+                                    <span
+                                      key={aIdx}
+                                      className="inline-flex items-center rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-semibold text-emerald-800"
+                                    >
+                                      {ans}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              </section>
+              </div>
 
-              <aside className={`${cardClass} h-fit p-4`}>
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-primary" />
-                  <h2 className="text-base font-semibold text-on-surface">Tóm tắt</h2>
-                </div>
-                <div className="mt-4 space-y-3 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-outline">Phạm vi</span>
-                    <span className="font-semibold text-on-surface">
-                      {scope === "system" ? "Hệ thống" : "Trong lớp"}
-                    </span>
+              <div className="lg:col-span-4">
+                <aside className={`${cardClass} h-fit p-4`}>
+                  <div className="flex items-center gap-2">
+                    <CalendarClock className="h-4 w-4 text-primary" />
+                    <h2 className="text-base font-semibold text-on-surface">Tóm tắt</h2>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-outline">Câu hỏi</span>
-                    <span className="font-semibold text-on-surface">{questions.length}</span>
+                  <div className="mt-4 space-y-3 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-outline">Phạm vi</span>
+                      <span className="font-semibold text-on-surface">
+                        {scope === "system" ? "Hệ thống" : "Trong lớp"}
+                      </span>
+                    </div>
+                    {scope === "class" && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-outline">Lớp học</span>
+                        <span className="font-semibold text-on-surface">
+                          {classes.find((c) => String(c.id) === classroomId)?.name || "Chưa chọn"}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between gap-4">
+                      <span className="text-outline">Câu hỏi</span>
+                      <span className="font-semibold text-on-surface">{questions.length}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-outline">Tổng điểm</span>
+                      <span className="font-semibold text-on-surface">{totalPoints}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-outline">Thời lượng</span>
+                      <span className="font-semibold text-on-surface">
+                        {durationMinutes || 0} phút
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-outline">Tổng điểm</span>
-                    <span className="font-semibold text-on-surface">{totalPoints}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-outline">Thời lượng</span>
-                    <span className="font-semibold text-on-surface">
-                      {durationMinutes || 0} phút
-                    </span>
-                  </div>
-                </div>
-              </aside>
+                </aside>
+              </div>
             </div>
           )}
       </form>

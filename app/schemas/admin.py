@@ -326,6 +326,7 @@ class AdminExamOptionSchema(BaseModel):
     option_key: str
     option_text: str = ""
     image_url: str | None = None
+    is_correct: bool = False
 
 
 class AdminExamQuestionSchema(BaseModel):

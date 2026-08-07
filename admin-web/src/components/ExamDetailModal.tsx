@@ -22,12 +22,21 @@ interface ExamDetailModalProps {
 
 const getQuestionTypeLabel = (type: string) => {
   switch (type) {
+    case "single_choice":
+      return "Một đáp án";
     case "multiple_choice":
       return "Nhiều đáp án";
+    case "true_false":
+      return "Đúng / sai";
     case "fill_in_blank":
-      return "Điền từ";
+      return "Điền vào chỗ trống";
+    case "short_answer":
+      return "Trả lời ngắn";
+    case "text":
+    case "essay":
+      return "Tự luận";
     default:
-      return "Một đáp án";
+      return type;
   }
 };
 
@@ -236,8 +245,8 @@ export function ExamDetailModal({ exam, open, onClose }: ExamDetailModalProps) {
                             </div>
                           )}
 
-                          {question.question_type === "fill_in_blank" ? (
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+                          {question.question_type === "fill_in_blank" || question.question_type === "short_answer" ? (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
                               <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
                                 <FileText className="size-4" />
                                 <span>Đáp án chấp nhận:</span>
@@ -259,16 +268,50 @@ export function ExamDetailModal({ exam, open, onClose }: ExamDetailModalProps) {
                                 )}
                               </div>
                             </div>
+                          ) : question.question_type === "true_false" ? (
+                            <div className="grid gap-2.5 sm:grid-cols-2">
+                              {[
+                                { label: "Đúng", value: "true" },
+                                { label: "Sai", value: "false" }
+                              ].map((opt) => {
+                                const isCorrect = question.accepted_answers?.[0] === opt.value;
+                                return (
+                                  <div
+                                    key={opt.value}
+                                    className={cn(
+                                      "rounded-lg border px-4 py-3 flex items-center gap-3 text-xs transition-colors",
+                                      isCorrect
+                                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                        : "border-outline-variant bg-surface text-on-surface-variant"
+                                    )}
+                                  >
+                                    <div
+                                      className={cn(
+                                        "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold",
+                                        isCorrect
+                                          ? "border-emerald-500 bg-emerald-500 text-white"
+                                          : "border-outline-variant bg-surface-container text-outline"
+                                      )}
+                                    >
+                                      {isCorrect ? "✓" : ""}
+                                    </div>
+                                    <p className={isCorrect ? "font-bold" : ""}>
+                                      {opt.label}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           ) : (
                             <div className="grid gap-2.5 sm:grid-cols-2">
                               {question.options &&
-                                question.options.map((option: any) => (
+                                question.options.map((option: any, oIdx: number) => (
                                   <div
-                                    key={option.id}
+                                    key={option.id || oIdx}
                                     className={cn(
                                       "rounded-lg border px-4 py-3 flex items-start gap-3 text-xs transition-colors",
                                       option.is_correct
-                                        ? "border-emerald-200 bg-emerald-50/40 text-emerald-900"
+                                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                                         : "border-outline-variant bg-surface text-on-surface-variant"
                                     )}
                                   >
@@ -280,10 +323,10 @@ export function ExamDetailModal({ exam, open, onClose }: ExamDetailModalProps) {
                                           : "border-outline-variant bg-surface-container text-outline"
                                       )}
                                     >
-                                      {option.option_key}
+                                      {option.option_key || String.fromCharCode(65 + oIdx)}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                      <p className={option.is_correct ? "font-bold" : ""}>
+                                      <p className={option.is_correct ? "font-bold text-emerald-900" : ""}>
                                         {option.option_text}
                                       </p>
                                       {option.image_url && (
