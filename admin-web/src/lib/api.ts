@@ -50,6 +50,8 @@ const quietErrorPaths = [
   "/admin/analytics/realtime",
   "/chat/contacts",
   "/chat/conversations",
+  "/api/ai-exams",
+  "/api/billing/ai-cost/estimate",
 ];
 
 function shouldToastApiError(path: string, status?: number) {
@@ -408,6 +410,7 @@ export interface AdminExam {
   title: string;
   description: string | null;
   grade: string;
+  image_url: string | null;
   scope: string;
   classroom_id: number | null;
   classroom_name: string | null;
@@ -662,11 +665,70 @@ export interface ChatMessageResponse {
 
 export class ApiError extends Error {
   status: number;
+  detail?: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail?: unknown) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
+}
+
+function getObjectNumber(source: unknown, key: string) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getObjectString(source: unknown, key: string) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatInsufficientQCMessage(detail?: unknown) {
+  const requiredQC = getObjectNumber(detail, "required_qc");
+  const balance = getObjectNumber(detail, "balance");
+
+  if (requiredQC !== null && balance !== null) {
+    return `Bạn không đủ QC Token để tạo đề. Cần ${requiredQC.toLocaleString("vi-VN")} QC, hiện có ${balance.toLocaleString("vi-VN")} QC.`;
+  }
+
+  if (requiredQC !== null) {
+    return `Bạn không đủ QC Token để tạo đề. Cần ${requiredQC.toLocaleString("vi-VN")} QC.`;
+  }
+
+  return "Bạn không đủ QC Token để tạo đề. Vui lòng nạp thêm QC rồi thử lại.";
+}
+
+function resolveApiErrorMessage(status: number, body: unknown) {
+  const detail = body && typeof body === "object"
+    ? (body as Record<string, unknown>).detail
+    : undefined;
+
+  if (status === 402) {
+    return formatInsufficientQCMessage(detail);
+  }
+
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+
+  const detailMessage = getObjectString(detail, "message");
+  if (detailMessage) {
+    return detailMessage;
+  }
+
+  const bodyMessage = getObjectString(body, "message");
+  if (bodyMessage) {
+    return bodyMessage;
+  }
+
+  return `Request failed with status ${status}`;
 }
 
 async function apiRequest<T>(
@@ -701,16 +763,16 @@ async function apiRequest<T>(
       notifyUnauthorized();
     }
     let message = `Request failed with status ${response.status}`;
+    let errorDetail: unknown;
     try {
       const body = await response.json();
-      if (typeof body?.detail === "string") {
-        message = body.detail;
-      }
+      errorDetail = body?.detail ?? body;
+      message = resolveApiErrorMessage(response.status, body);
     } catch {
       // Keep the generic message when the API does not return JSON.
     }
     showApiErrorToast(path, message, response.status);
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, errorDetail);
   }
 
   return response.json() as Promise<T>;

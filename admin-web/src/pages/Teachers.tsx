@@ -4,19 +4,16 @@ import {
   ChevronDown,
   Download,
   Loader2,
-  MessageSquare,
   Pencil,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { MetricSparklineCard } from "../components/MetricSparklineCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { TeacherDetail } from "../components/TeacherDetail";
 import {
   adminApi,
-  chatApi,
   type AdminMetric,
   type AdminTeacher,
   type AdminTeacherOverview,
@@ -34,26 +31,26 @@ const fallbackOverview: AdminTeacherOverview = {
 
 const metricPalettes: Record<string, { stroke: string; fill: string }> = {
   total_teachers: {
-    stroke: "#e5a76f",
-    fill: "rgba(229, 167, 111, 0.16)",
+    stroke: "#f59e0b",
+    fill: "rgba(245, 158, 11, 0.24)",
   },
   active_teachers: {
-    stroke: "#8fd5b5",
-    fill: "rgba(143, 213, 181, 0.18)",
+    stroke: "#10b981",
+    fill: "rgba(16, 185, 129, 0.24)",
   },
   total_exams: {
-    stroke: "#f3a0c4",
-    fill: "rgba(243, 160, 196, 0.18)",
+    stroke: "#ec4899",
+    fill: "rgba(236, 72, 153, 0.24)",
   },
   total_classes: {
-    stroke: "#a8a8f0",
-    fill: "rgba(168, 168, 240, 0.18)",
+    stroke: "#818cf8",
+    fill: "rgba(129, 140, 248, 0.26)",
   },
 };
 
 const fallbackPalette = {
   stroke: "#94a3b8",
-  fill: "rgba(148, 163, 184, 0.16)",
+  fill: "rgba(148, 163, 184, 0.24)",
 };
 
 function MetricCard({ metric }: { metric: AdminMetric }) {
@@ -88,7 +85,6 @@ function TeacherAvatar({ teacher }: { teacher: AdminTeacher }) {
 }
 
 export function Teachers() {
-  const navigate = useNavigate();
   const { addNotification } = useAppNotifications();
   const [overview, setOverview] =
     useState<AdminTeacherOverview>(fallbackOverview);
@@ -96,9 +92,6 @@ export function Teachers() {
   const [status, setStatus] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openingChatTeacherId, setOpeningChatTeacherId] = useState<
-    number | null
-  >(null);
   const [deletingTeacher, setDeletingTeacher] = useState<AdminTeacher | null>(
     null,
   );
@@ -129,26 +122,6 @@ export function Teachers() {
   useEffect(() => {
     void loadTeachers();
   }, [loadTeachers]);
-
-  const openTeacherChat = async (teacher: AdminTeacher) => {
-    if (openingChatTeacherId) {
-      return;
-    }
-
-    setError(null);
-    setOpeningChatTeacherId(teacher.id);
-    try {
-      const response = await chatApi.createConversation(teacher.id);
-      navigate("/chat", {
-        state: { conversationId: response.conversation.id },
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không thể mở tin nhắn.");
-    } finally {
-      setOpeningChatTeacherId(null);
-    }
-  };
-
   const closeDeleteModal = () => {
     if (isDeleting) {
       return;
@@ -296,7 +269,7 @@ export function Teachers() {
           type="button"
           onClick={handleExportTeachers}
           disabled={isLoading || filteredTeachers.length === 0}
-          className="w-full px-4 py-2 bg-surface border border-primary text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+          className="w-full px-4 py-2 bg-surface-container-lowest border border-primary text-primary rounded-lg text-sm font-semibold hover:bg-primary/10 transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           <Download className="w-4 h-4" /> Xuất dữ liệu
         </button>
@@ -369,7 +342,7 @@ export function Teachers() {
                 <th className="py-3 px-4 text-xs font-bold text-on-surface-variant tracking-wider">
                   Trạng thái
                 </th>
-                <th className="py-3 px-4 w-[132px] text-xs font-bold text-on-surface-variant tracking-wider text-center">
+                <th className="py-3 px-4 w-[96px] text-xs font-bold text-on-surface-variant tracking-wider text-center">
                   Thao tác
                 </th>
               </tr>
@@ -416,23 +389,8 @@ export function Teachers() {
                       {teacher.is_online ? "Hoạt động" : "Không hoạt động"}
                     </span>
                   </td>
-                  <td className="py-3 px-4 w-[132px] text-center">
+                  <td className="py-3 px-4 w-[96px] text-center">
                     <div className="inline-flex items-center gap-1">
-                      <button
-                        className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors disabled:opacity-60"
-                        title="Nhắn tin"
-                        disabled={openingChatTeacherId === teacher.id}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void openTeacherChat(teacher);
-                        }}
-                      >
-                        {openingChatTeacherId === teacher.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <MessageSquare className="w-4 h-4" />
-                        )}
-                      </button>
                       <button
                         className="text-outline hover:text-primary p-2 rounded hover:bg-surface-container-low transition-colors"
                         title="Sửa giáo viên"

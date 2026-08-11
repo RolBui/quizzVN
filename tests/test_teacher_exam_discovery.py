@@ -16,9 +16,16 @@ from app.models.classroom import Classroom
 from app.models.exam import Exam
 from app.models.role import Role
 from app.models.user import User
+from app.services.exam_cover_service import DEFAULT_EXAM_COVER_FILENAMES
 
 for module in pkgutil.iter_modules(models_pkg.__path__):
     importlib.import_module(f"app.models.{module.name}")
+
+
+def _is_default_exam_cover_url(value: str | None) -> bool:
+    return bool(value) and any(
+        value.endswith(f"/assets/{filename}") for filename in DEFAULT_EXAM_COVER_FILENAMES
+    )
 
 
 class TeacherExamDiscoveryTests(unittest.TestCase):
@@ -139,6 +146,7 @@ class TeacherExamDiscoveryTests(unittest.TestCase):
         self.assertIn("Đề thi thử Toán B", titles)
         self.assertNotIn("Đề Toán nháp B", titles)
         self.assertNotIn("Đề lớp học B", titles)
+        self.assertTrue(all(_is_default_exam_cover_url(item["image_url"]) for item in items))
 
     def test_explore_exams_filtered_for_teacher(self):
         # Filter by search

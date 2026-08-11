@@ -298,7 +298,7 @@ export function Dashboard() {
           return;
         }
         setError(
-          err instanceof Error ? err.message : "Không lấy được dữ liệu CRM",
+          err instanceof Error ? err.message : "Không lấy được dữ liệu tổng quan",
         );
       })
       .finally(() => {
@@ -380,7 +380,7 @@ export function Dashboard() {
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-on-surface">
           <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold">Chưa lấy được dữ liệu CRM</p>
+            <p className="font-semibold">Chưa lấy được dữ liệu tổng quan</p>
             <p className="text-on-surface-variant">{error}</p>
           </div>
         </div>

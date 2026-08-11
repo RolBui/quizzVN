@@ -279,6 +279,7 @@ class UpdateAIQuestionDraftRequest(BaseModel):
 class SaveAIExamToQuizRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     description: str | None = None
+    image_url: str | None = Field(default=None, max_length=2000)
     scope: AIExamSaveScope = "system"
     classroom_id: int | None = None
     duration_minutes: int | None = Field(default=None, ge=1, le=300)
@@ -287,7 +288,7 @@ class SaveAIExamToQuizRequest(BaseModel):
     is_published: bool = False
     is_active: bool = True
 
-    @field_validator("title", "description")
+    @field_validator("title", "description", "image_url")
     @classmethod
     def strip_optional_save_text(cls, value: str | None) -> str | None:
         if value is None:

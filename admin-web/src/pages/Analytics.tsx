@@ -195,7 +195,7 @@ export function Analytics() {
         setError(
           err instanceof Error
             ? err.message
-            : "Không lấy được dữ liệu analytics.",
+            : "Không lấy được dữ liệu phân tích.",
         );
       })
       .finally(() => {
@@ -297,7 +297,7 @@ export function Analytics() {
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-on-surface">
           <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold">Chưa lấy được dữ liệu analytics</p>
+            <p className="font-semibold">Chưa lấy được dữ liệu phân tích</p>
             <p className="text-on-surface-variant">{error}</p>
           </div>
         </div>

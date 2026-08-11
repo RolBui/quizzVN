@@ -21,6 +21,7 @@ from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
+from app.services.exam_cover_service import resolve_exam_image_url
 from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 from app.services.exam_scoring import apply_exam_scoring
 from app.services.media_service import delete_document_file, upload_document_file
@@ -695,7 +696,7 @@ def _get_exam_preview_image_url(exam: Exam) -> str | None:
     for question in sorted(exam.questions, key=lambda item: item.order_index):
         if question.image_url:
             return question.image_url
-    return None
+    return resolve_exam_image_url(None, exam.title, exam.grade, exam.id)
 
 
 def _is_ai_generated_exam(db: Session, exam_id: int | None) -> bool:
@@ -1393,7 +1394,7 @@ def create_teacher_exam(
     classroom = _validate_scope_for_teacher(db, teacher, scope, classroom_id)
     normalized_title = title.strip()
     normalized_grade = _normalize_exam_grade(grade)
-    normalized_image_url = image_url.strip() if image_url else None
+    normalized_image_url = resolve_exam_image_url(image_url, normalized_title, normalized_grade)
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
 
@@ -1415,7 +1416,7 @@ def create_teacher_exam(
         title=normalized_title,
         description=description.strip() if description else None,
         grade=normalized_grade,
-        image_url=normalized_image_url or None,
+        image_url=normalized_image_url,
         scope=scope,
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
@@ -1491,7 +1492,7 @@ def update_teacher_exam(
         exam.grade = _normalize_exam_grade(grade)
 
     if image_url is not None:
-        exam.image_url = image_url.strip() or None
+        exam.image_url = resolve_exam_image_url(image_url, exam.title, exam.grade, exam.id)
 
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes
@@ -1693,7 +1694,7 @@ def assign_teacher_exam(
             title=original_exam.title,
             description=original_exam.description,
             grade=original_exam.grade,
-            image_url=original_exam.image_url,
+            image_url=resolve_exam_image_url(original_exam.image_url, original_exam.title, original_exam.grade, original_exam.id),
             scope=SCOPE_CLASS,
             classroom_id=classroom.id,
             duration_minutes=effective_duration,

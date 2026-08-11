@@ -245,6 +245,7 @@ class AdminExamSchema(BaseModel):
     title: str
     description: str | None = None
     grade: str
+    image_url: str | None = None
     scope: str
     classroom_id: int | None = None
     classroom_name: str | None = None

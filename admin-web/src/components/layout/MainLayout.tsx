@@ -11,7 +11,11 @@ export default function MainLayout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/exams/new")) {
+    if (
+      location.pathname.startsWith("/exams/new") ||
+      location.pathname === "/exams/ai" ||
+      /^\/exams\/edit\/\d+$/.test(location.pathname)
+    ) {
       setIsSidebarPinned(false);
       return;
     }

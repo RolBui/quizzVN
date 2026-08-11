@@ -17,6 +17,7 @@ from app.models.exam_question import ExamQuestion
 from app.models.exam_question_option import ExamQuestionOption
 from app.models.learning_document import LearningDocument
 from app.models.user import User
+from app.services.exam_cover_service import resolve_exam_image_url
 from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 
 STUDENT_ROLE_NAME = "student"
@@ -496,7 +497,7 @@ def _get_exam_preview_image_url(exam: Exam) -> str | None:
     for question in sorted(exam.questions, key=lambda item: item.order_index):
         if question.image_url:
             return question.image_url
-    return None
+    return resolve_exam_image_url(None, exam.title, exam.grade, exam.id)
 
 
 def _calculate_score_percent(score: float | None, total_points: float | None) -> float:
