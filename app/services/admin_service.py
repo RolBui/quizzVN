@@ -40,6 +40,7 @@ from app.services.auth_service import (
 )
 from app.services.email_templates import render_action_email, render_notice_email, render_otp_email
 from app.services.email_verification_service import send_email
+from app.services.exam_cover_service import resolve_exam_image_url
 from app.services.exam_creator_metadata import build_exam_creator_metadata, get_ai_generated_exam_ids
 from app.services.exam_scoring import apply_exam_scoring
 from app.services.media_service import delete_document_file, upload_document_file
@@ -952,6 +953,7 @@ def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> d
             Exam.title,
             Exam.description,
             Exam.grade,
+            Exam.image_url,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -1040,6 +1042,7 @@ def get_admin_exams_overview(db: Session, limit: int = 50, offset: int = 0) -> d
                 "title": row.title,
                 "description": row.description,
                 "grade": _serialize_exam_grade(row.grade),
+                "image_url": resolve_exam_image_url(row.image_url, row.title, row.grade, row.id),
                 "scope": row.scope,
                 "classroom_id": row.classroom_id,
                 "classroom_name": row.classroom_name,
@@ -1095,6 +1098,8 @@ def create_admin_exam(
     if not normalized_title:
         raise HTTPException(status_code=400, detail="title is required")
 
+    normalized_grade = _normalize_exam_grade(grade)
+    normalized_image_url = resolve_exam_image_url(image_url, normalized_title, normalized_grade)
     normalized_scope = (scope or SCOPE_SYSTEM).strip().lower()
     if normalized_scope not in {SCOPE_SYSTEM, SCOPE_CLASS}:
         raise HTTPException(status_code=400, detail="scope must be system or class")
@@ -1126,8 +1131,8 @@ def create_admin_exam(
         created_by_user_id=current_admin.id,
         title=normalized_title,
         description=description.strip() if description else None,
-        grade=_normalize_exam_grade(grade),
-        image_url=image_url.strip() if image_url else None,
+        grade=normalized_grade,
+        image_url=normalized_image_url,
         scope=normalized_scope,
         classroom_id=classroom.id if classroom else None,
         duration_minutes=duration_minutes,
@@ -1247,7 +1252,7 @@ def update_admin_exam(
         exam.grade = _normalize_exam_grade(grade)
 
     if image_url is not None:
-        exam.image_url = image_url.strip() or None
+        exam.image_url = resolve_exam_image_url(image_url, exam.title, exam.grade, exam.id)
 
     if duration_minutes is not None:
         exam.duration_minutes = duration_minutes
@@ -1386,7 +1391,7 @@ def assign_admin_exam(
             title=exam.title,
             description=exam.description,
             grade=exam.grade,
-            image_url=exam.image_url,
+            image_url=resolve_exam_image_url(exam.image_url, exam.title, exam.grade, exam.id),
             scope=SCOPE_CLASS,
             classroom_id=classroom.id,
             duration_minutes=duration_minutes if duration_minutes is not None else exam.duration_minutes,
@@ -3029,6 +3034,7 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
             Exam.title,
             Exam.description,
             Exam.grade,
+            Exam.image_url,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -3113,6 +3119,7 @@ def get_admin_teacher_detail(db: Session, teacher_id: int) -> dict:
                 "title": exam.title,
                 "description": exam.description,
                 "grade": _serialize_exam_grade(exam.grade),
+                "image_url": resolve_exam_image_url(exam.image_url, exam.title, exam.grade, exam.id),
                 "scope": exam.scope,
                 "classroom_id": exam.classroom_id,
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,
@@ -3226,6 +3233,7 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
             Exam.title,
             Exam.description,
             Exam.grade,
+            Exam.image_url,
             Exam.scope,
             Exam.classroom_id,
             Exam.duration_minutes,
@@ -3357,6 +3365,7 @@ def get_admin_student_detail(db: Session, student_id: int) -> dict:
                 "title": exam.title,
                 "description": exam.description,
                 "grade": _serialize_exam_grade(exam.grade),
+                "image_url": resolve_exam_image_url(exam.image_url, exam.title, exam.grade, exam.id),
                 "scope": exam.scope,
                 "classroom_id": exam.classroom_id,
                 "classroom_name": classroom_map[exam.classroom_id].name if exam.classroom_id in classroom_map else None,

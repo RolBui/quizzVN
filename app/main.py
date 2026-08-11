@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.admin_router import router as admin_router
 from app.routers.analytics_router import router as analytics_router
@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.database import test_db_connection
 from app.schemas.common import DbCheckResponse, HealthResponse, RootResponse
 from app.services.auth_service import bootstrap_auth_storage
+from app.services.exam_cover_service import get_default_exam_cover_path
 from app.services.analytics_service import bootstrap_web_analytics_storage
 from app.services.chat_service import bootstrap_chat_storage
 from app.services.ai_exam_service import bootstrap_ai_exam_storage
@@ -54,6 +55,17 @@ def favicon() -> FileResponse:
 @app.get("/assets/email-logo.png", include_in_schema=False)
 def email_logo() -> FileResponse:
     return FileResponse(EMAIL_LOGO_PATH, media_type="image/png")
+
+
+@app.get("/assets/{filename}", include_in_schema=False)
+def default_exam_cover(filename: str) -> FileResponse:
+    try:
+        cover_path = get_default_exam_cover_path(filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Asset not found") from exc
+    if not cover_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(cover_path, media_type="image/jpeg")
 
 
 app.add_middleware(

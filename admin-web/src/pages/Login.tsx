@@ -36,6 +36,13 @@ function getAdminOauthNotice(
       message: `Yêu cầu quản trị${emailLabel} đang chờ Administrator duyệt.`,
     };
   }
+  if (status === "admin_email_exists") {
+    const existingEmailLabel = email ? `Email ${email}` : "Email này";
+    return {
+      tone: "warning",
+      message: `${existingEmailLabel} đã có tài khoản quản trị. Vui lòng đăng nhập bằng email và mật khẩu đã được cấp. Nếu cần đăng ký lại, Administrator gốc phải xóa tài khoản cũ trước.`,
+    };
+  }
 
   if (status === "admin_disabled") {
     return {
@@ -47,7 +54,8 @@ function getAdminOauthNotice(
   if (status === "google_state_mismatch") {
     return {
       tone: "error",
-      message: "Phiên đăng nhập Google đã hết hạn hoặc bị lệch host. Vui lòng bấm đăng nhập Google lại.",
+      message:
+        "Phiên đăng nhập Google đã hết hạn hoặc bị lệch host. Vui lòng bấm đăng ký Google lại.",
     };
   }
 
@@ -108,7 +116,7 @@ export function Login() {
     return <Navigate to="/" replace />;
   }
 
-  const handleGoogleLogin = () => {
+  const handleGoogleRegistration = () => {
     setIsGoogleLoading(true);
     window.location.href = getGoogleLoginUrl();
   };
@@ -161,7 +169,8 @@ export function Login() {
               Đăng nhập
             </h1>
             <p className="mt-2 max-w-[420px] text-sm leading-6 text-on-surface-variant">
-              Chỉ tài khoản do Administrator cấp mới vào được hệ thống.
+              Đăng nhập bằng tài khoản đã được cấp, hoặc gửi yêu cầu đăng ký
+              quản trị .
             </p>
           </div>
 
@@ -191,7 +200,7 @@ export function Login() {
           <div className="mb-7 space-y-5">
             <button
               type="button"
-              onClick={handleGoogleLogin}
+              onClick={handleGoogleRegistration}
               disabled={isGoogleLoading}
               className="relative flex h-[56px] w-full items-center justify-center rounded-[8px] bg-[linear-gradient(90deg,#3478ff_0%,#6557f5_54%,#d63cf4_100%)] px-5 text-base font-semibold text-white shadow-[0_8px_18px_rgba(103,85,245,0.28)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_22px_rgba(103,85,245,0.34)] disabled:cursor-not-allowed disabled:opacity-75 disabled:hover:translate-y-0 disabled:hover:shadow-none"
             >
@@ -202,12 +211,16 @@ export function Login() {
                   <GoogleMark />
                 )}
               </span>
-              {isGoogleLoading ? "Đang chuyển hướng..." : "Đăng nhập bằng Google"}
+              {isGoogleLoading
+                ? "Đang chuyển hướng..."
+                : "Đăng ký quản trị bằng Google"}
             </button>
 
             <div className="flex items-center gap-3 text-sm text-[#2e2e2e]">
               <div className="h-px flex-1 bg-[#e0e0e0]" />
-              <span className="shrink-0">hoặc tiếp tục với</span>
+              <span className="shrink-0">
+                hoặc đăng nhập bằng tài khoản được cấp
+              </span>
               <div className="h-px flex-1 bg-[#e0e0e0]" />
             </div>
           </div>

@@ -1032,6 +1032,30 @@ def handle_google_admin_callback(
         if not provider.is_active:
             raise HTTPException(status_code=400, detail="Google login is disabled")
 
+        google_email = (user_info.get("email") or "").strip().lower()
+        if not google_email:
+            raise HTTPException(status_code=400, detail="Google account has no email")
+
+        existing_admin_user = (
+            db.query(User)
+            .options(joinedload(User.role))
+            .filter(User.email == google_email)
+            .first()
+        )
+        if existing_admin_user and _admin_role_name(existing_admin_user) in ADMIN_ACCESS_ROLE_NAMES:
+            existing_email = existing_admin_user.email
+            if existing_admin_user.status != "active":
+                db.rollback()
+                return {
+                    "status": "admin_disabled",
+                    "email": existing_email,
+                }
+            db.rollback()
+            return {
+                "status": "admin_email_exists",
+                "email": existing_email,
+            }
+
         user, is_new_user = find_or_create_user_from_google(db, user_info)
         upsert_google_oauth_account(db, user, provider, token, user_info)
         db.flush()
@@ -1046,23 +1070,11 @@ def handle_google_admin_callback(
             }
 
         if _has_active_admin_access(user):
-            session = create_user_session(db, user, "google", ip_address, user_agent)
-            user.last_login_at = utc_now()
-            if not is_new_user:
-                user.is_first_login = False
-            db.commit()
-            db.refresh(user)
-            db.refresh(session)
+            db.rollback()
             return {
-                "status": "authenticated",
+                "status": "admin_email_exists",
                 "email": user.email,
-                "message": "Google admin login success",
-                "is_new_user": is_new_user,
-                "user": build_user_payload(db, user),
-                "session": serialize_session(session),
-                "tokens": serialize_session_tokens(session),
             }
-
         invitation, invitation_status = _create_or_refresh_admin_oauth_invitation(db, user)
         return {
             "status": invitation_status,

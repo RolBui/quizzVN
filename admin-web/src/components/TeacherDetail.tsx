@@ -23,10 +23,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import {
   adminApi,
-  chatApi,
   type AdminMetric,
   type AdminTeacher,
   type AdminTeacherDetail as AdminTeacherDetailData,
@@ -127,7 +125,6 @@ export function TeacherDetail({
   onSaved,
   onDeleted,
 }: TeacherDetailProps) {
-  const navigate = useNavigate();
   const [detail, setDetail] = useState<AdminTeacherDetailData | null>(null);
   const [activeTab, setActiveTab] = useState("classes");
   const [isLoading, setIsLoading] = useState(true);
@@ -141,7 +138,6 @@ export function TeacherDetail({
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isOpeningChat, setIsOpeningChat] = useState(false);
 
   const currentTeacher = detail?.teacher ?? teacher;
   const metrics = useMemo(
@@ -219,25 +215,6 @@ export function TeacherDetail({
       isMounted = false;
     };
   }, [teacher.id]);
-
-  const handleOpenChat = async () => {
-    if (isOpeningChat) return;
-    setActionError(null);
-    setIsOpeningChat(true);
-    try {
-      const response = await chatApi.createConversation(currentTeacher.id);
-      navigate("/chat", {
-        state: { conversationId: response.conversation.id },
-      });
-    } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Không mở được tin nhắn.",
-      );
-    } finally {
-      setIsOpeningChat(false);
-    }
-  };
-
   const handleSaveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setActionError(null);
@@ -330,18 +307,6 @@ export function TeacherDetail({
             className="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg text-sm font-medium hover:bg-surface-variant/30 transition-colors"
           >
             <RefreshCw className="w-4 h-4" /> Đặt lại mật khẩu
-          </button>
-          <button
-            onClick={() => void handleOpenChat()}
-            disabled={isOpeningChat}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-70"
-          >
-            {isOpeningChat ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Mail className="w-4 h-4" />
-            )}
-            Gửi tin nhắn
           </button>
           <button
             onClick={() => {

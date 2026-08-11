@@ -963,9 +963,9 @@ const viToZhTw: Record<string, string> = {
 
 const supplementalTranslations = {
   en: {
-    "Analysis": "Analytics",
-    "Analytics": "Analytics",
-    "CRM": "CRM",
+    "Analysis": "Phân tích dữ liệu",
+    "Analytics": "Phân tích dữ liệu",
+    "CRM": "Tổng quan",
     "0 phiên": "0 sessions",
     "Bạn": "You",
     "Bạn không có quyền xem danh sách quản trị viên.":

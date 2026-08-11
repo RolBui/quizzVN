@@ -25,13 +25,26 @@ import {
   type AdminExamQuestionType,
   type CreateAdminExamPayload,
 } from "../lib/api";
-import examCover1Url from "../assets/exam-cover-1.jpeg";
-import examCover2Url from "../assets/exam-cover-2.jpeg";
-import examCover3Url from "../assets/exam-cover-3.jpeg";
-import examCover4Url from "../assets/exam-cover-4.jpeg";
+import { examCoverPresets } from "../lib/exam-covers";
 
 type ExamScope = "system" | "class";
 type ExamCreateTab = "basic" | "questions" | "advanced";
+type ExamSubmitIntent = "save" | "publish";
+
+type ExamSubmitPayload = {
+  title: string;
+  description: string | null;
+  grade: string;
+  image_url: string | null;
+  scope: ExamScope;
+  classroom_id: number | null;
+  duration_minutes: number;
+  start_time?: string | null;
+  end_time?: string | null;
+  is_published?: boolean;
+  is_active?: boolean;
+  questions?: AdminExamQuestionPayload[];
+};
 
 type OptionForm = {
   option_key: string;
@@ -69,13 +82,6 @@ const questionTypeLabels: Record<AdminExamQuestionType, string> = {
   short_answer: "Trả lời ngắn",
   text: "Tự luận",
 };
-
-const examCoverPresets = [
-  { label: "Ảnh 1", src: examCover1Url },
-  { label: "Ảnh 2", src: examCover2Url },
-  { label: "Ảnh 3", src: examCover3Url },
-  { label: "Ảnh 4", src: examCover4Url },
-];
 
 function makeQuestion(): QuestionForm {
   return {
@@ -184,6 +190,18 @@ function buildQuestionPayload(question: QuestionForm, index: number): AdminExamQ
   };
 }
 
+function getQuestionSignature(questions: QuestionForm[]) {
+  return JSON.stringify(questions.map(buildQuestionPayload));
+}
+
+function normalizeSubmitError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Thao tác thất bại.";
+  if (message.includes("Cannot replace questions after students have started attempts")) {
+    return "Đề này đã có học sinh bắt đầu làm bài nên không thể thay đổi danh sách câu hỏi. Bạn vẫn có thể cập nhật thông tin, lịch làm bài, ảnh và trạng thái xuất bản nếu không sửa câu hỏi.";
+  }
+  return message;
+}
+
 function validateQuestionForm(question: QuestionForm, index: number) {
   const label = `Câu ${index + 1}`;
   if (!question.prompt.trim()) {
@@ -232,6 +250,9 @@ export function ExamCreate() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [questions, setQuestions] = useState<QuestionForm[]>(() => [makeQuestion()]);
+  const [originalQuestionSignature, setOriginalQuestionSignature] = useState<string | null>(null);
+  const [hasStartedAttempts, setHasStartedAttempts] = useState(false);
+  const [isPublished, setIsPublished] = useState(false);
   const [activeTab, setActiveTab] = useState<ExamCreateTab>("basic");
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
 
@@ -250,10 +271,13 @@ export function ExamCreate() {
           setDurationMinutes(String(exam.duration_minutes || "30"));
           setStartTime(exam.start_time ? exam.start_time.substring(0, 16) : "");
           setEndTime(exam.end_time ? exam.end_time.substring(0, 16) : "");
+          setHasStartedAttempts((exam.attempt_count || 0) > 0);
+          setIsPublished(Boolean(exam.is_published && exam.is_active));
           
           if (exam.questions && exam.questions.length > 0) {
             const mapped = exam.questions.map(mapQuestionDetailToForm);
             setQuestions(mapped);
+            setOriginalQuestionSignature(getQuestionSignature(mapped));
             setSelectedQuestionId(mapped[0].id);
           }
         })
@@ -443,7 +467,7 @@ export function ExamCreate() {
     return null;
   };
 
-  const handleSubmit = async (publish: boolean) => {
+  const handleSubmit = async (intent: ExamSubmitIntent) => {
     const validationError = validateForm();
     if (validationError) {
       setError(validationError);
@@ -452,7 +476,18 @@ export function ExamCreate() {
 
     setIsSubmitting(true);
     setError(null);
-    const payload: CreateAdminExamPayload = {
+
+    const questionPayloads = questions.map(buildQuestionPayload);
+    const questionsChanged = !isEditMode || getQuestionSignature(questions) !== originalQuestionSignature;
+    if (isEditMode && hasStartedAttempts && questionsChanged) {
+      setIsSubmitting(false);
+      setError(
+        "Đề này đã có học sinh bắt đầu làm bài nên không thể thay đổi danh sách câu hỏi. Hãy hoàn tác thay đổi ở phần câu hỏi hoặc tạo đề mới nếu cần đổi nội dung câu hỏi.",
+      );
+      return;
+    }
+
+    const payload: ExamSubmitPayload = {
       title: title.trim(),
       description: description.trim() || null,
       grade: grade.trim(),
@@ -460,30 +495,42 @@ export function ExamCreate() {
       scope,
       classroom_id: scope === "class" ? Number(classroomId) : null,
       duration_minutes: Number(durationMinutes),
-      is_published: publish,
-      is_active: publish,
-      questions: questions.map(buildQuestionPayload),
     };
     const normalizedStartTime = toIsoDateTime(startTime);
     const normalizedEndTime = toIsoDateTime(endTime);
-    if (normalizedStartTime) {
+    if (isEditMode) {
       payload.start_time = normalizedStartTime;
-    }
-    if (normalizedEndTime) {
       payload.end_time = normalizedEndTime;
+    } else {
+      if (normalizedStartTime) {
+        payload.start_time = normalizedStartTime;
+      }
+      if (normalizedEndTime) {
+        payload.end_time = normalizedEndTime;
+      }
     }
 
     try {
       if (isEditMode && id) {
+        if (questionsChanged) {
+          payload.questions = questionPayloads;
+        }
+        if (intent === "publish") {
+          payload.is_published = true;
+          payload.is_active = true;
+        }
         await adminApi.updateExam(Number(id), payload);
-        toast.success(publish ? "Đã cập nhật và xuất bản đề thi." : "Đã cập nhật đề thi.");
+        toast.success(intent === "publish" ? "Đã lưu thay đổi và xuất bản đề thi." : "Đã cập nhật đề thi.");
       } else {
-        await adminApi.createExam(payload);
-        toast.success(publish ? "Đã tạo và xuất bản đề thi." : "Đã lưu nháp đề thi.");
+        payload.is_published = intent === "publish";
+        payload.is_active = intent === "publish";
+        payload.questions = questionPayloads;
+        await adminApi.createExam(payload as CreateAdminExamPayload);
+        toast.success(intent === "publish" ? "Đã tạo và xuất bản đề thi." : "Đã lưu nháp đề thi.");
       }
       navigate("/exams");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Thao tác thất bại.");
+      setError(normalizeSubmitError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -546,23 +593,23 @@ export function ExamCreate() {
     return (
       <div className="min-h-full bg-background p-4 md:p-5 space-y-4">
         <div>
-          <h1 className="text-lg font-bold text-[#1E293B]">Lựa chọn phương thức tạo đề thi phù hợp</h1>
-          <p className="mt-1 text-xs text-[#64748B]">
+          <h1 className="text-lg font-bold text-on-surface">Lựa chọn phương thức tạo đề thi phù hợp</h1>
+          <p className="mt-1 text-xs text-outline">
             Mỗi phương thức đều lưu về cùng hệ thống quản lý đề thi của hệ thống.
           </p>
         </div>
 
-        <section className="rounded-[10px] border border-[#E0E7FF] bg-[#EEF2FF] p-4">
+        <section className="rounded-[10px] border border-outline-variant bg-surface-container-low p-4">
           <div className="grid gap-4 md:grid-cols-3">
             {creationMethods.map((method) => (
               <div
                 key={method.title}
                 onClick={method.action}
-                className={`group relative flex min-h-[230px] flex-col items-center justify-between overflow-hidden rounded-[10px] bg-white p-5 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:bg-gradient-to-r ${method.hoverClassName} hover:shadow-md`}
+                className={`group relative flex min-h-[230px] flex-col items-center justify-between overflow-hidden rounded-[10px] bg-surface-container-lowest p-5 text-center shadow-sm cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:bg-gradient-to-r ${method.hoverClassName} hover:shadow-md`}
               >
                 <div>
-                  <h2 className="text-sm font-bold text-[#1E293B] transition-colors group-hover:text-white">{method.title}</h2>
-                  <p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-[#64748B] transition-colors group-hover:text-white/90">{method.description}</p>
+                  <h2 className="text-sm font-bold text-on-surface transition-colors group-hover:text-white">{method.title}</h2>
+                  <p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-outline transition-colors group-hover:text-white/90">{method.description}</p>
                 </div>
 
                 <div className="mt-5 flex h-[84px] w-[140px] items-center justify-center">
@@ -573,7 +620,7 @@ export function ExamCreate() {
                   />
                 </div>
 
-                <span className="mt-4 text-xs font-bold text-[#4F62F2] transition-colors group-hover:text-white">Chọn phương thức</span>
+                <span className="mt-4 text-xs font-bold text-primary transition-colors group-hover:text-white">Chọn phương thức</span>
               </div>
             ))}
           </div>
@@ -605,25 +652,36 @@ export function ExamCreate() {
           <button
             type="button"
             disabled={isSubmitting}
-            onClick={() => void handleSubmit(false)}
+            onClick={() => void handleSubmit("save")}
             className="flex items-center justify-center gap-2 rounded-md border border-outline-variant bg-surface-container-lowest px-4 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low disabled:opacity-60"
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {isEditMode ? "Cập nhật" : "Lưu nháp"}
           </button>
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={() => void handleSubmit(true)}
-            className="flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-sm hover:bg-primary/90 disabled:opacity-60"
-          >
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+          {isEditMode && isPublished ? (
+            <div
+              className="flex items-center justify-center gap-2 rounded-md border border-success/30 bg-success/10 px-4 py-2 text-sm font-semibold text-success"
+              title="Đề này đang được xuất bản. Bấm Cập nhật sẽ lưu thay đổi và vẫn giữ trạng thái xuất bản."
+            >
               <CheckCircle2 className="h-4 w-4" />
-            )}
-            Xuất bản
-          </button>
+              Đã xuất bản
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => void handleSubmit("publish")}
+              className="flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-sm hover:bg-primary/90 disabled:opacity-60"
+              title={isEditMode ? "Lưu thay đổi hiện tại và cho phép học sinh nhìn thấy đề." : "Tạo đề và cho phép học sinh nhìn thấy đề."}
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Xuất bản
+            </button>
+          )}
         </div>
       </div>
 
@@ -678,7 +736,7 @@ export function ExamCreate() {
       <form
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
-            void handleSubmit(true);
+            void handleSubmit("save");
           }}
           className="flex flex-col gap-4"
         >
@@ -706,7 +764,7 @@ export function ExamCreate() {
                       <img
                         src={normalizedImageUrl}
                         alt="Ảnh đề thi"
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain p-1"
                       />
                     ) : (
                       <div className="flex flex-col items-center gap-2 text-on-surface">
@@ -741,7 +799,7 @@ export function ExamCreate() {
                           <img
                             src={preset.src}
                             alt={preset.label}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain p-1"
                           />
                         </button>
                       );
@@ -908,7 +966,7 @@ export function ExamCreate() {
                   <button
                     type="button"
                     onClick={() => toast.info("Tính năng thêm bằng văn bản sẽ được bổ sung sau.")}
-                    className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-outline-variant bg-white px-3 py-1.5 text-xs font-bold text-on-surface hover:bg-surface-container-low"
+                    className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-bold text-on-surface hover:bg-surface-container-low"
                   >
                     <ClipboardList className="size-3.5" />
                     <span>Thêm bằng văn bản</span>
@@ -932,7 +990,7 @@ export function ExamCreate() {
                           className={`flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-xs font-bold transition-all ${
                             isSelected
                               ? "bg-primary text-white shadow-sm"
-                              : "border border-outline-variant bg-white text-on-surface hover:bg-surface-container-low"
+                              : "border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container-low"
                           }`}
                         >
                           {index + 1}
@@ -1228,7 +1286,7 @@ export function ExamCreate() {
                                         key={option.option_key}
                                         className={`flex items-start gap-2 rounded-[6px] border px-3 py-2 text-xs ${
                                           isCorrect
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                            ? "border-success/30 bg-success/10 text-success"
                                             : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
                                         }`}
                                       >
@@ -1261,7 +1319,7 @@ export function ExamCreate() {
                                         key={opt.value}
                                         className={`flex items-start gap-2 rounded-[6px] border px-3 py-2 text-xs ${
                                           isCorrect
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                            ? "border-success/30 bg-success/10 text-success"
                                             : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
                                         }`}
                                       >
@@ -1284,7 +1342,7 @@ export function ExamCreate() {
                                   {splitAcceptedAnswers(question.acceptedAnswersText).map((ans, aIdx) => (
                                     <span
                                       key={aIdx}
-                                      className="inline-flex items-center rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-semibold text-emerald-800"
+                                      className="inline-flex items-center rounded border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-semibold text-success"
                                     >
                                       {ans}
                                     </span>

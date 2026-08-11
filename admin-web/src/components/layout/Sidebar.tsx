@@ -104,8 +104,8 @@ export function Sidebar({
   );
 
   const dashboardRoutes = [
-    { name: "CRM", path: "/" },
-    { name: "Analytics", path: "/analytics" },
+    { name: "Tổng quan", path: "/" },
+    { name: "Phân tích dữ liệu", path: "/analytics" },
   ];
 
   return (

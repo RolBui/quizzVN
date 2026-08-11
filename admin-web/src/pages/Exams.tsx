@@ -37,31 +37,15 @@ const PAGE_SIZE = 7;
 
 const renderStatusBadge = (exam: AdminExam) => {
   if (!exam.is_published && !exam.is_active) {
-    return (
-      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700 border border-amber-200">
-        Bản nháp
-      </span>
-    );
+    return <span className="badge badge-warning">Bản nháp</span>;
   }
   if (exam.is_published && exam.is_active) {
-    return (
-      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
-        Công khai
-      </span>
-    );
+    return <span className="badge badge-success">Công khai</span>;
   }
   if (!exam.is_published && exam.is_active) {
-    return (
-      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700 border border-amber-200">
-        Riêng tư
-      </span>
-    );
+    return <span className="badge badge-warning">Riêng tư</span>;
   }
-  return (
-    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700 border border-blue-200">
-      Không công khai
-    </span>
-  );
+  return <span className="badge badge-info">Không công khai</span>;
 };
 
 export function Exams() {
@@ -223,14 +207,14 @@ export function Exams() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-4 py-3 text-sm text-on-surface flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-[#F59E0B]" />
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-on-surface flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-500" />
           {error}
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-outline-variant flex flex-col items-start">
           <div>
             <p className="text-sm text-on-surface font-medium">Tổng đề thi</p>
           </div>
@@ -240,7 +224,7 @@ export function Exams() {
           <p className="text-xs text-on-surface mt-2">bài thi trong hệ thống</p>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-outline-variant flex flex-col items-start">
           <div>
             <p className="text-sm text-on-surface font-medium">
               {submittedMetric?.label || "Lượt hoàn thành"}
@@ -254,7 +238,7 @@ export function Exams() {
           </p>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-surface-variant flex flex-col items-start">
+        <div className="bg-surface-container-lowest rounded-xl p-5 shadow-(--shadow-level-1) border border-outline-variant flex flex-col items-start">
           <div>
             <p className="text-sm text-on-surface font-medium">
               {activeMetric?.label || "Bài thi đang mở"}
@@ -269,7 +253,7 @@ export function Exams() {
         </div>
       </div>
 
-      <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-surface-variant overflow-hidden">
+      <div className="bg-surface-container-lowest rounded-xl shadow-(--shadow-level-1) border border-outline-variant overflow-hidden">
         <div className="p-4 border-b border-surface-variant bg-surface-container-lowest">
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full md:w-96">
@@ -285,7 +269,7 @@ export function Exams() {
               <select
                 value={sourceFilter}
                 onChange={(event) => setSourceFilter(event.target.value)}
-                className="w-full appearance-none bg-surface-container-low border border-surface-variant text-sm py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
+                className="w-full appearance-none bg-surface-container-low border border-outline-variant text-sm py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-primary cursor-pointer text-on-surface"
               >
                 <option value="all">Tất cả</option>
                 <option value="system">Hệ thống</option>
@@ -329,7 +313,7 @@ export function Exams() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-surface-variant">
+            <tbody className="divide-y divide-outline-variant/70">
               {paginatedExams.map((exam) => (
                 <tr
                   key={exam.id}

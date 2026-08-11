@@ -128,6 +128,174 @@ function upsertAIExamHistoryItem(job: any) {
   writeAIExamHistoryItems(nextDrafts);
 }
 
+const AI_QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  multiple_choice: "Trắc nghiệm",
+  true_false: "Đúng / sai",
+  short_answer: "Trả lời ngắn",
+  essay: "Tự luận",
+};
+
+function describeQuestionTypePlan(types: QuestionType[]) {
+  const uniqueTypes = Array.from(new Set(types));
+  if (uniqueTypes.length === 1) {
+    return `Tạo đề thi ${AI_QUESTION_TYPE_LABELS[uniqueTypes[0]].toLowerCase()}`;
+  }
+  if (uniqueTypes.length > 1) {
+    return `Tạo đề thi hỗn hợp: ${uniqueTypes.map((type) => AI_QUESTION_TYPE_LABELS[type].toLowerCase()).join(", ")}`;
+  }
+  return "Tạo đề thi theo cấu hình đã chọn";
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function formatLocalInsufficientQCMessage(requiredQC: number, balance: number) {
+  return `Bạn không đủ QC Token để tạo đề. Cần ${requiredQC.toLocaleString("vi-VN")} QC, hiện có ${balance.toLocaleString("vi-VN")} QC.`;
+}
+
+function getAIProgressStage(job: any) {
+  if (!job) {
+    return 0;
+  }
+  if (job.status === "completed") {
+    return 3;
+  }
+  const progressCurrent = Number(job.progress_current || 0);
+  const progressTotal = Number(job.progress_total || 0);
+  if (progressTotal > 0 && progressCurrent >= progressTotal) {
+    return 3;
+  }
+  if (progressCurrent > 0 || job.progress_message) {
+    return 2;
+  }
+  if (job.status === "processing" || job.status === "pending") {
+    return 1;
+  }
+  return 0;
+}
+
+function AIExamGenerationProgress({
+  currentJob,
+  durationMinutes,
+  questionCount,
+  selectedTypes,
+}: {
+  currentJob: any;
+  durationMinutes: number;
+  questionCount: number;
+  selectedTypes: QuestionType[];
+}) {
+  const activeStage = getAIProgressStage(currentJob);
+  const progressCurrent = Number(currentJob?.progress_current || 0);
+  const progressTotal = Number(currentJob?.progress_total || 0);
+  const questionProgressRatio = progressTotal > 0 ? Math.min(progressCurrent / progressTotal, 1) : 0;
+  const progressPercent = Math.min(
+    activeStage === 3 ? 100 : 94,
+    Math.round(((activeStage + (activeStage === 2 ? questionProgressRatio : 0.35)) / 4) * 100),
+  );
+  const generatedLabel = describeQuestionTypePlan(selectedTypes);
+  const steps = [
+    {
+      title: "Phân tích yêu cầu",
+      description: "Đọc bối cảnh, môn học, lớp, chủ đề và độ khó.",
+      icon: CircleHelp,
+    },
+    {
+      title: "Tạo cấu trúc đề thi",
+      description: `Chia bố cục ${questionCount} câu trong ${durationMinutes} phút.`,
+      icon: Sparkles,
+    },
+    {
+      title: generatedLabel,
+      description: currentJob?.progress_message || "Soạn nội dung câu hỏi, đáp án và giải thích.",
+      icon: WandSparkles,
+    },
+    {
+      title: "Hoàn thành",
+      description: "Mở bản nháp để duyệt câu hỏi trước khi lưu vào hệ thống.",
+      icon: CheckCircle2,
+    },
+  ];
+  const currentStep = steps[activeStage] ?? steps[0];
+
+  return (
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm overflow-hidden">
+      <div className="border-b border-outline-variant bg-surface px-5 py-4 sm:px-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase text-primary">Tiến trình AI</p>
+            <h2 className="mt-1 text-lg font-bold text-on-surface">{currentStep.title}</h2>
+            <p className="mt-1 text-sm text-outline">{currentStep.description}</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary">
+            <Loader2 className="size-4 animate-spin" />
+            Đang xử lý
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-6">
+        <div className="mb-6 h-2 overflow-hidden rounded-full bg-surface-variant">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[#4F62F2] to-[#7C3AED] transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+            const completed = index < activeStage;
+            const active = index === activeStage;
+            return (
+              <div
+                key={step.title}
+                className={`rounded-lg border p-4 transition-colors ${
+                  completed
+                    ? "border-success/30 bg-success/5"
+                    : active
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-outline-variant bg-surface-container-low"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`flex size-8 items-center justify-center rounded-full ${
+                      completed
+                        ? "bg-success text-white"
+                        : active
+                          ? "bg-primary text-white"
+                          : "bg-surface-variant text-outline"
+                    }`}
+                  >
+                    {completed ? <CheckCircle2 className="size-4" /> : <Icon className="size-4" />}
+                  </span>
+                  <span className={`text-xs font-bold ${active || completed ? "text-on-surface" : "text-outline"}`}>
+                    Bước {index + 1}
+                  </span>
+                </div>
+                <h3 className="mt-3 text-sm font-bold text-on-surface">{step.title}</h3>
+                <p className="mt-1 min-h-10 text-xs leading-5 text-outline">{step.description}</p>
+                <div className="mt-3 text-[11px] font-bold uppercase">
+                  {completed && <span className="text-success">Hoàn thành</span>}
+                  {active && <span className="text-primary">Đang thực hiện</span>}
+                  {!completed && !active && <span className="text-outline">Chờ xử lý</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {progressTotal > 0 && (
+          <div className="mt-5 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 text-sm text-on-surface">
+            Đã tạo {progressCurrent}/{progressTotal} câu hỏi
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
 export function ExamAICreate() {
   const navigate = useNavigate();
   const [examContext, setExamContext] = useState("");
@@ -357,6 +525,16 @@ export function ExamAICreate() {
       return;
     }
 
+    if (isLoadingCost) {
+      toast.info("Đang tính chi phí QC, vui lòng chờ vài giây.");
+      return;
+    }
+
+    if (wallet && estimatedCost > wallet.balance) {
+      toast.error(formatLocalInsufficientQCMessage(estimatedCost, wallet.balance));
+      return;
+    }
+
     setIsGenerating(true);
     setCurrentJob(null);
     setDraftQuestions([]);
@@ -381,8 +559,7 @@ export function ExamAICreate() {
       syncHistory();
       startPolling(response.id);
     } catch (err: any) {
-      const errMsg = err.response?.data?.detail?.message || err.message || "Tạo yêu cầu AI thất bại.";
-      toast.error(errMsg);
+      toast.error(getErrorMessage(err, "Tạo yêu cầu AI thất bại."));
       setIsGenerating(false);
       void fetchWallet();
     }
@@ -471,14 +648,24 @@ export function ExamAICreate() {
   // Generate More questions
   const handleGenerateMore = async () => {
     if (!currentJob) return;
-    setIsGenerating(true);
 
     const distTotal = generateMoreQuestionTypes.reduce((sum, t) => sum + (generateMoreTypeDistribution[t] || 0), 0);
     if (distTotal !== generateMoreCount) {
       toast.error(`Tổng số câu tạo thêm theo loại (${distTotal}) phải bằng số câu cần thêm (${generateMoreCount}).`);
-      setIsGenerating(false);
       return;
     }
+
+    if (isLoadingMoreCost) {
+      toast.info("Đang tính chi phí QC, vui lòng chờ vài giây.");
+      return;
+    }
+
+    if (wallet && estimatedMoreCost > wallet.balance) {
+      toast.error(formatLocalInsufficientQCMessage(estimatedMoreCost, wallet.balance));
+      return;
+    }
+
+    setIsGenerating(true);
 
     try {
       const payload = {
@@ -494,7 +681,7 @@ export function ExamAICreate() {
       startPolling(response.id);
       setGenerateMoreInstructions("");
     } catch (err: any) {
-      toast.error(err.message || "Tạo thêm câu hỏi thất bại.");
+      toast.error(getErrorMessage(err, "Tạo thêm câu hỏi thất bại."));
       setIsGenerating(false);
     }
   };
@@ -559,6 +746,8 @@ export function ExamAICreate() {
   const currentCost = currentJob
     ? (currentJob.qc_charged || currentJob.qc_reserved || 0)
     : estimatedCost;
+  const hasInsufficientInitialQC = Boolean(wallet && !isLoadingCost && estimatedCost > wallet.balance);
+  const hasInsufficientMoreQC = Boolean(wallet && !isLoadingMoreCost && estimatedMoreCost > wallet.balance);
 
   return (
     <div className="min-h-full bg-background p-4 md:p-5">
@@ -579,13 +768,13 @@ export function ExamAICreate() {
         </div>
 
         {wallet && (
-          <div className="flex items-center gap-1.5 rounded-full border border-[#DDE2EB] bg-white px-4 py-1.5 text-xs text-on-surface shadow-sm">
+          <div className="flex items-center gap-1.5 rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-1.5 text-xs text-on-surface shadow-sm">
             <span>Ví sử dụng:</span>
-            <span className="font-bold text-[#4F62F2]">
+            <span className="font-bold text-primary">
               {wallet.balance.toLocaleString("vi-VN")} QC Token
             </span>
-            <span className="h-4 w-px bg-[#DDE2EB]" />
-            <span className="font-bold text-[#1E293B]">
+            <span className="h-4 w-px bg-outline-variant" />
+            <span className="font-bold text-on-surface">
               {isLoadingCost ? "..." : `${currentCost.toLocaleString("vi-VN")} QC`}
             </span>
           </div>
@@ -685,12 +874,12 @@ export function ExamAICreate() {
                   </div>
                 </label>
 
-                <div className="rounded-lg border border-[#E0E7FF] bg-[#EEF2FF] p-4 text-primary">
-                  <div className="flex items-center gap-2 text-xs font-bold text-[#1E293B]">
+                <div className="rounded-lg border border-outline-variant bg-surface-container-low p-4 text-primary">
+                  <div className="flex items-center gap-2 text-xs font-bold text-on-surface">
                     <Sparkles className="w-4 h-4 text-primary" />
                     Tại sao cần nhập bối cảnh đề thi?
                   </div>
-                  <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[11px] leading-5 text-[#64748B]">
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[11px] leading-5 text-outline">
                     <li>Xác định mục tiêu: luyện thi, kiểm tra hoặc ôn tập.</li>
                     <li>Giới hạn đúng môn học, chủ đề và trình độ.</li>
                     <li>Giúp AI phân bổ câu hỏi sát yêu cầu và dễ duyệt hơn.</li>
@@ -770,7 +959,7 @@ export function ExamAICreate() {
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         hasBalancedQuestionTypes
                           ? "bg-surface-container-lowest text-outline"
-                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                          : "border border-amber-500/30 bg-amber-500/10 text-amber-500"
                       }`}
                     >
                       {typeTotal}/{questionCount} câu
@@ -802,7 +991,7 @@ export function ExamAICreate() {
                   </div>
 
                   {!hasBalancedQuestionTypes && (
-                    <p className="text-[11px] font-medium text-amber-700">
+                    <p className="text-[11px] font-medium text-amber-500">
                       {missingQuestionTypeCount > 0
                         ? `Còn thiếu ${missingQuestionTypeCount} câu. Hãy cộng vào một loại phù hợp.`
                         : `Đang dư ${Math.abs(missingQuestionTypeCount)} câu. Hãy giảm ở một loại.`}
@@ -838,16 +1027,22 @@ export function ExamAICreate() {
                   ))}
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="mt-auto flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#4F62F2] to-[#7C3AED] text-sm font-bold text-white shadow-sm hover:opacity-95 disabled:opacity-50"
-              >
-                <WandSparkles className="w-4 h-4" />
-                Tạo đề bằng AI
-              </button>
+              <div className="mt-auto space-y-2">
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  disabled={isGenerating || isLoadingCost}
+                  className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#4F62F2] to-[#7C3AED] text-sm font-bold text-white shadow-sm hover:opacity-95 disabled:opacity-50"
+                >
+                  <WandSparkles className="w-4 h-4" />
+                  {hasInsufficientInitialQC ? "Không đủ QC Token" : isLoadingCost ? "Đang tính QC..." : "Tạo đề bằng AI"}
+                </button>
+                {wallet && hasInsufficientInitialQC && (
+                  <p className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-xs font-semibold text-error">
+                    {formatLocalInsufficientQCMessage(estimatedCost, wallet.balance)}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -859,9 +1054,9 @@ export function ExamAICreate() {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className={isGenerating ? "space-y-5" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
           {/* Left column: Saving status panel & Generate More */}
-          <div className="lg:col-span-1 space-y-5">
+          <div className={isGenerating ? "hidden" : "lg:col-span-1 space-y-5"}>
             {currentJob && currentJob.status === "completed" && (
               <>
                 {/* Result summary card */}
@@ -902,7 +1097,7 @@ export function ExamAICreate() {
 
                     <div className="space-y-3">
                       <label className="block space-y-1">
-                        <span className="text-xs font-semibold text-[#1E293B]">Số câu thêm</span>
+                        <span className="text-xs font-semibold text-on-surface">Số câu thêm</span>
                         <input
                           type="number"
                           min={1}
@@ -920,7 +1115,7 @@ export function ExamAICreate() {
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-xs font-semibold text-[#1E293B]">Hướng dẫn thêm</span>
+                        <span className="text-xs font-semibold text-on-surface">Hướng dẫn thêm</span>
                         <textarea
                           value={generateMoreInstructions}
                           onChange={(e) => setGenerateMoreInstructions(e.target.value)}
@@ -947,7 +1142,7 @@ export function ExamAICreate() {
                                 className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
                                   checked
                                     ? "border-primary bg-primary/5 text-primary"
-                                    : "border-outline-variant bg-white text-on-surface-variant"
+                                    : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
                                 }`}
                               >
                                 <input
@@ -994,23 +1189,29 @@ export function ExamAICreate() {
                                       [type]: val,
                                     }));
                                   }}
-                                  className="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1 text-xs focus:outline-none focus:border-primary"
+                                  className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-2.5 py-1 text-xs focus:outline-none focus:border-primary"
                                 />
                               </label>
                             ))}
                           </div>
                         )}
                       </div>
-
-                      <button
-                        type="button"
-                        disabled={isGenerating || generateMoreQuestionTypes.length === 0}
-                        onClick={handleGenerateMore}
-                        className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-primary text-primary py-2 text-xs font-bold hover:bg-primary/5 transition-colors disabled:opacity-50"
-                      >
-                        <Plus className="size-3.5" />
-                        Tạo thêm
-                      </button>
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          disabled={isGenerating || isLoadingMoreCost || generateMoreQuestionTypes.length === 0}
+                          onClick={handleGenerateMore}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-primary text-primary py-2 text-xs font-bold hover:bg-primary/5 transition-colors disabled:opacity-50"
+                        >
+                          <Plus className="size-3.5" />
+                          {hasInsufficientMoreQC ? "Không đủ QC Token" : isLoadingMoreCost ? "Đang tính QC..." : "Tạo thêm"}
+                        </button>
+                        {wallet && hasInsufficientMoreQC && (
+                          <p className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[11px] font-semibold text-error">
+                            {formatLocalInsufficientQCMessage(estimatedMoreCost, wallet.balance)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1060,28 +1261,14 @@ export function ExamAICreate() {
           </div>
 
           {/* Right column: Generated Question list/status */}
-          <div className="lg:col-span-2 space-y-5">
+          <div className={isGenerating ? "space-y-5" : "lg:col-span-2 space-y-5"}>
             {isGenerating && (
-              <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-10 shadow-sm flex flex-col items-center justify-center text-center">
-                <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
-                <h3 className="text-lg font-bold text-on-surface">AI đang thực hiện soạn thảo đề thi</h3>
-                <p className="text-sm text-outline mt-1 max-w-md">
-                  {currentJob?.progress_message || "Đang phân tích chủ đề và phân bố các câu hỏi tương ứng..."}
-                </p>
-                {currentJob && currentJob.progress_total > 0 && (
-                  <div className="w-full max-w-xs bg-surface-variant rounded-full h-2.5 mt-4">
-                    <div
-                      className="bg-primary h-2.5 rounded-full transition-all duration-300"
-                      style={{
-                        width: `${(currentJob.progress_current / currentJob.progress_total) * 100}%`,
-                      }}
-                    />
-                    <span className="text-xs text-outline mt-2 block">
-                      Đã hoàn thành {currentJob.progress_current}/{currentJob.progress_total} câu hỏi
-                    </span>
-                  </div>
-                )}
-              </div>
+              <AIExamGenerationProgress
+                currentJob={currentJob}
+                durationMinutes={durationMinutes}
+                questionCount={questionCount}
+                selectedTypes={selectedTypes}
+              />
             )}
 
             {!isGenerating && draftQuestions.length > 0 && (
@@ -1141,7 +1328,7 @@ export function ExamAICreate() {
                                       updatedOpts[optIdx] = e.target.value;
                                       handleEditQuestion(idx, { options: updatedOpts });
                                     }}
-                                    className="bg-transparent border-none outline-none flex-1 text-xs text-[#1E293B]"
+                                    className="bg-transparent border-none outline-none flex-1 text-xs text-on-surface"
                                   />
                                 </div>
                               );
@@ -1157,7 +1344,7 @@ export function ExamAICreate() {
                               <select
                                 value={q.correct_answer || ""}
                                 onChange={(e) => handleEditQuestion(idx, { correct_answer: e.target.value })}
-                                className="max-w-xs rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-primary"
+                                className="max-w-xs rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-on-surface focus:outline-none focus:border-primary"
                               >
                                 <option value="">-- Chọn đáp án đúng --</option>
                                 {q.options?.map((opt, optIdx) => {
@@ -1173,7 +1360,7 @@ export function ExamAICreate() {
                               <select
                                 value={q.correct_answer === true || q.correct_answer === "true" ? "true" : "false"}
                                 onChange={(e) => handleEditQuestion(idx, { correct_answer: e.target.value === "true" })}
-                                className="max-w-xs rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-primary"
+                                className="max-w-xs rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-on-surface focus:outline-none focus:border-primary"
                               >
                                 <option value="true">Đúng</option>
                                 <option value="false">Sai</option>
@@ -1187,14 +1374,14 @@ export function ExamAICreate() {
                                     correct_answer: e.target.value.split(",").map((s) => s.trim()),
                                   })
                                 }
-                                className="max-w-md rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-primary"
+                                className="max-w-md rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-on-surface focus:outline-none focus:border-primary"
                                 placeholder="Nhập các đáp án chấp nhận, cách nhau bằng dấu phẩy"
                               />
                             ) : (
                               <textarea
                                 value={String(q.correct_answer || "")}
                                 onChange={(e) => handleEditQuestion(idx, { correct_answer: e.target.value })}
-                                className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-primary"
+                                className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-xs font-semibold text-on-surface focus:outline-none focus:border-primary"
                                 rows={2}
                                 placeholder="Nhập hướng dẫn chấm hoặc đáp án tự luận tham khảo"
                               />
@@ -1413,7 +1600,7 @@ function AIJobHistoryTable({ items, onOpen, onRefresh }: AIJobHistoryTableProps)
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        failed ? "bg-error/10 text-error" : running ? "bg-amber-500/10 text-amber-700" : "bg-success/10 text-success"
+                        failed ? "border border-error/30 bg-error/10 text-error" : running ? "border border-amber-500/30 bg-amber-500/10 text-amber-500" : "border border-success/30 bg-success/10 text-success"
                       }`}>
                         {getStatusLabel(item.status)}
                       </span>
