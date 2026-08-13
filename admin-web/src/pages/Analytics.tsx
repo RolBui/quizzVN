@@ -97,16 +97,25 @@ const deviceConfig: Record<
   string,
   { label: string; color: string; icon: typeof Monitor }
 > = {
-  desktop: { label: "Desktop", color: "#4F46E5", icon: Monitor },
-  mobile: { label: "Mobile", color: "#10B981", icon: Smartphone },
-  tablet: { label: "Tablet", color: "#F59E0B", icon: Tablet },
+  desktop: { label: "Máy tính", color: "#4F46E5", icon: Monitor },
+  mobile: { label: "Điện thoại", color: "#10B981", icon: Smartphone },
+  tablet: { label: "Máy tính bảng", color: "#F59E0B", icon: Tablet },
 };
 
 const sourceLabels: Record<string, string> = {
-  direct: "Trực tiếp",
-  internal: "website",
+  direct: "Link trực tiếp",
+  internal: "Nội bộ website",
   search: "Tìm kiếm",
   social: "Mạng xã hội",
+  referral: "Website khác",
+};
+
+const sourceDescriptions: Record<string, string> = {
+  direct: "Mở thẳng link web, bookmark hoặc app không gửi nguồn truy cập.",
+  internal: "Chuyển trang bên trong cùng website QuizzVN.",
+  search: "Đến từ Google, Bing, Cốc Cốc hoặc công cụ tìm kiếm.",
+  social: "Đến từ Facebook, TikTok, YouTube, Instagram hoặc Zalo.",
+  referral: "Đến từ một website bên ngoài khác.",
 };
 const sourceOrder = Object.keys(sourceLabels);
 
@@ -129,6 +138,21 @@ function formatChartMoney(value: number) {
     return `${Math.round(value / 1_000).toLocaleString("vi-VN")}k`;
   }
   return value.toLocaleString("vi-VN");
+}
+
+function formatBreakdownPercent(value: number, total: number) {
+  if (total <= 0 || value <= 0) {
+    return "0%";
+  }
+
+  const percent = (value / total) * 100;
+  if (percent < 0.1) {
+    return "<0,1%";
+  }
+  if (percent < 1 || percent > 99) {
+    return `${percent.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+  }
+  return `${Math.round(percent).toLocaleString("vi-VN")}%`;
 }
 
 function metricByKey(metrics: AnalyticsMetric[], key: string) {
@@ -253,6 +277,7 @@ export function Analytics() {
     [overview.sources],
   );
   const sourceChartHeight = Math.max(210, sourceData.length * 32 + 28);
+  const sourceTotal = sourceData.reduce((total, item) => total + item.value, 0);
   const showSourceChart = !isLoading || overview.sources.length > 0;
   const deviceTotal = deviceData.reduce((total, item) => total + item.value, 0);
   const selectedPeriodLabel =
@@ -547,19 +572,23 @@ export function Analytics() {
           <div className="flex justify-between items-center px-4 mt-auto">
             {Object.entries(deviceConfig).map(([key, config]) => {
               const item = deviceData.find((device) => device.name === key);
-              const percent =
-                deviceTotal > 0
-                  ? Math.round(((item?.value ?? 0) / deviceTotal) * 100)
-                  : 0;
+              const itemValue = item?.value ?? 0;
+              const percentLabel = formatBreakdownPercent(itemValue, deviceTotal);
               const Icon = config.icon;
               return (
-                <div key={key} className="flex flex-col items-center">
+                <div key={key} className="flex min-w-20 flex-col items-center text-center">
                   <Icon
-                    className="w-5 h-5 mb-1"
+                    className="mb-1 h-5 w-5"
                     style={{ color: config.color }}
                   />
-                  <span className="text-xs font-medium text-outline">
-                    {percent}%
+                  <span className="text-[11px] font-semibold text-on-surface">
+                    {config.label}
+                  </span>
+                  <span className="text-xs font-bold text-outline">
+                    {percentLabel}
+                  </span>
+                  <span className="text-[11px] text-outline">
+                    {itemValue.toLocaleString("vi-VN")} lượt
                   </span>
                 </div>
               );
@@ -579,7 +608,7 @@ export function Analytics() {
                 <BarChart
                   data={sourceData}
                   layout="vertical"
-                  margin={{ top: 0, right: 0, left: 20, bottom: 0 }}
+                  margin={{ top: 0, right: 0, left: 8, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -603,7 +632,7 @@ export function Analytics() {
                       fill: "var(--color-on-surface)",
                       fontWeight: 500,
                     }}
-                    width={100}
+                    width={120}
                   />
                   <Tooltip
                     cursor={{ fill: "var(--color-surface-container-low)" }}
@@ -629,8 +658,20 @@ export function Analytics() {
               </div>
             )}
           </div>
-        </div>
 
+          <div className="mt-4 grid gap-2 border-t border-surface-variant pt-4 text-xs text-outline sm:grid-cols-2">
+            {sourceData.map((item) => (
+              <div key={item.name} className="rounded-lg bg-surface-container-low px-3 py-2">
+                <div className="flex items-center justify-between gap-2 font-semibold text-on-surface">
+                  <span>{item.label}</span>
+                  <span>{formatBreakdownPercent(item.value, sourceTotal)}</span>
+                </div>
+                <p className="mt-1 leading-5">{sourceDescriptions[item.name] ?? "Nguồn truy cập khác."}</p>
+                <p className="mt-1 font-semibold text-primary">{item.value.toLocaleString("vi-VN")} lượt xem</p>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="bg-surface-container-lowest p-0 rounded-xl border border-surface-variant shadow-(--shadow-level-1) overflow-hidden">
           <div className="p-5 border-b border-surface-variant">
             <h3 className="text-base font-bold text-on-surface">
