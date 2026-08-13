@@ -157,12 +157,27 @@ class AttemptSummarySchema(BaseModel):
     total_questions: int
     answered_count: int
     started_at: datetime
+    expires_at: datetime | None = None
+    remaining_seconds: int = 0
     submitted_at: datetime | None = None
+
+
+class AttemptSavedAnswerSchema(BaseModel):
+    question_id: int
+    selected_option_id: int | None = None
+    selected_option_ids: list[int] | None = None
+    answer_text: str | None = None
+    answered_at: datetime | None = None
+
+
+class AttemptDetailSchema(AttemptSummarySchema):
+    exam: StudentExamDetailSchema
+    answers: list[AttemptSavedAnswerSchema]
 
 
 class StartAttemptResponse(BaseModel):
     message: str
-    attempt: AttemptSummarySchema
+    attempt: AttemptDetailSchema
 
 
 class AttemptAnswerInput(BaseModel):
@@ -178,6 +193,7 @@ class SaveAttemptAnswersRequest(BaseModel):
 
 class SaveAttemptAnswersResponse(BaseModel):
     message: str
+    saved_at: datetime
     attempt: AttemptSummarySchema
 
 
@@ -221,6 +237,10 @@ class AttemptResultSchema(BaseModel):
 class SubmitAttemptResponse(BaseModel):
     message: str
     result: AttemptResultSchema
+
+
+class AttemptDetailResponse(BaseModel):
+    attempt: AttemptDetailSchema
 
 
 class AttemptResultResponse(BaseModel):

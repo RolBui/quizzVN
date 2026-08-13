@@ -60,6 +60,13 @@ def _normalize_exam_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _normalize_attempt_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 def _normalize_question_type(question_type: str | None) -> str:
     if question_type in {
         QUESTION_TYPE_SINGLE_CHOICE,
@@ -813,6 +820,27 @@ def _get_visible_exam(db: Session, student: User, exam_id: int) -> Exam:
     return exam
 
 
+def _serialize_student_question(question: ExamQuestion) -> dict:
+    question_type = _normalize_question_type(question.question_type)
+    return {
+        "id": question.id,
+        "question_type": question_type,
+        "order_index": question.order_index,
+        "prompt": question.prompt,
+        "image_url": question.image_url,
+        "points": question.points,
+        "options": [
+            {
+                "id": option.id,
+                "option_key": option.option_key,
+                "option_text": option.option_text,
+                "image_url": option.image_url,
+            }
+            for option in sorted(question.options, key=lambda item: item.id)
+            if _is_selection_question_type(question_type)
+        ],
+    }
+
 def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
     exam = _get_visible_exam(db, student, exam_id)
     existing_attempt = (
@@ -827,36 +855,126 @@ def get_student_exam_detail(db: Session, student: User, exam_id: int) -> dict:
     )
 
     detail = _serialize_exam_summary(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id))
-    detail["questions"] = [
-        {
-            "id": question.id,
-            "question_type": _normalize_question_type(question.question_type),
-            "order_index": question.order_index,
-            "prompt": question.prompt,
-            "image_url": question.image_url,
-            "points": question.points,
-            "options": [
-                {
-                    "id": option.id,
-                    "option_key": option.option_key,
-                    "option_text": option.option_text,
-                    "image_url": option.image_url,
-                }
-                for option in sorted(question.options, key=lambda item: item.id)
-                if _is_selection_question_type(_normalize_question_type(question.question_type))
-            ],
-        }
-        for question in sorted(exam.questions, key=lambda item: item.order_index)
-    ]
-    detail["in_progress_attempt_id"] = existing_attempt.id if existing_attempt else None
+    detail["questions"] = [_serialize_student_question(question) for question in sorted(exam.questions, key=lambda item: item.order_index)]
+    if existing_attempt:
+        existing_attempt = _get_attempt_for_student(db, student, existing_attempt.id)
+        existing_attempt = _sync_attempt_expiration(db, student, existing_attempt)
+    detail["in_progress_attempt_id"] = existing_attempt.id if existing_attempt and existing_attempt.status == ATTEMPT_STATUS_IN_PROGRESS else None
     return detail
 
+
+def _attempt_expires_at(attempt: ExamAttempt) -> datetime | None:
+    duration_minutes = int(getattr(attempt.exam, "duration_minutes", 0) or 0)
+    if duration_minutes <= 0:
+        return None
+    started_at = _normalize_attempt_datetime(attempt.started_at)
+    if started_at is None:
+        return None
+    return started_at + timedelta(minutes=duration_minutes)
+
+
+def _attempt_remaining_seconds(attempt: ExamAttempt) -> int:
+    if attempt.status != ATTEMPT_STATUS_IN_PROGRESS:
+        return 0
+    expires_at = _attempt_expires_at(attempt)
+    if expires_at is None:
+        return 0
+    return max(0, int((expires_at - utc_now()).total_seconds()))
+
+
+def _finalize_attempt_score(attempt: ExamAttempt, submitted_at: datetime | None = None) -> None:
+    answer_map = {answer.question_id: answer for answer in attempt.answers}
+    score = 0.0
+    correct_answers_count = 0
+
+    for question in attempt.exam.questions:
+        selected_answer = answer_map.get(question.id)
+        is_correct = _eval_question_correctness(question, selected_answer)
+        if is_correct:
+            score += float(question.points or 0)
+            correct_answers_count += 1
+
+    now = submitted_at or utc_now()
+    attempt.status = ATTEMPT_STATUS_SUBMITTED
+    attempt.score = score
+    attempt.total_points = _get_exam_total_points(attempt.exam)
+    attempt.correct_answers_count = correct_answers_count
+    attempt.submitted_at = now
+    attempt.updated_at = now
+
+
+def _sync_attempt_expiration(db: Session, student: User, attempt: ExamAttempt) -> ExamAttempt:
+    expires_at = _attempt_expires_at(attempt)
+    if attempt.status == ATTEMPT_STATUS_IN_PROGRESS and expires_at is not None and utc_now() >= expires_at:
+        _finalize_attempt_score(attempt, submitted_at=expires_at)
+        db.commit()
+        return _get_attempt_for_student(db, student, attempt.id)
+    return attempt
+
+
+def _serialize_attempt_saved_answer(answer: ExamAttemptAnswer) -> dict:
+    question_type = _normalize_question_type(answer.question.question_type if answer.question else None)
+    selected_option_ids = (
+        sorted(list(_get_selected_option_ids_from_answer(answer)))
+        if question_type == QUESTION_TYPE_MULTIPLE_CHOICE
+        else None
+    )
+    return {
+        "question_id": answer.question_id,
+        "selected_option_id": answer.selected_option_id,
+        "selected_option_ids": selected_option_ids,
+        "answer_text": answer.answer_text if _is_text_answer_question_type(question_type) else None,
+        "answered_at": answer.answered_at,
+    }
+
+
+def _serialize_attempt_detail(db: Session, student: User, attempt: ExamAttempt) -> dict:
+    exam = attempt.exam
+    existing_attempt_id = attempt.id if attempt.status == ATTEMPT_STATUS_IN_PROGRESS else None
+    exam_detail = _serialize_exam_summary(exam, is_ai_generated=_is_ai_generated_exam(db, exam.id))
+    exam_detail["questions"] = [_serialize_student_question(question) for question in sorted(exam.questions, key=lambda item: item.order_index)]
+    exam_detail["in_progress_attempt_id"] = existing_attempt_id
+    detail = _serialize_attempt_summary(attempt)
+    detail["exam"] = exam_detail
+    detail["answers"] = [
+        _serialize_attempt_saved_answer(answer)
+        for answer in sorted(attempt.answers, key=lambda item: item.question.order_index if item.question else item.question_id)
+    ]
+    return detail
+
+
+def get_student_attempt_detail(db: Session, student: User, attempt_id: int) -> dict:
+    attempt = _get_attempt_for_student(db, student, attempt_id)
+    attempt = _sync_attempt_expiration(db, student, attempt)
+    return {"attempt": _serialize_attempt_detail(db, student, attempt)}
+
+
+def get_student_active_exam_attempt(db: Session, student: User, exam_id: int) -> dict | None:
+    exam = _get_visible_exam(db, student, exam_id)
+    attempt = (
+        db.query(ExamAttempt)
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.selected_option))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.question))
+        .filter(
+            ExamAttempt.exam_id == exam.id,
+            ExamAttempt.user_id == student.id,
+            ExamAttempt.status == ATTEMPT_STATUS_IN_PROGRESS,
+        )
+        .order_by(ExamAttempt.updated_at.desc(), ExamAttempt.started_at.desc())
+        .first()
+    )
+    if not attempt:
+        return None
+    attempt = _sync_attempt_expiration(db, student, attempt)
+    return {"attempt": _serialize_attempt_detail(db, student, attempt)}
 
 def _get_attempt_for_student(db: Session, student: User, attempt_id: int) -> ExamAttempt:
     attempt = (
         db.query(ExamAttempt)
         .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions).joinedload(ExamQuestion.options))
         .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.selected_option))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.question))
         .filter(ExamAttempt.id == attempt_id, ExamAttempt.user_id == student.id)
         .first()
     )
@@ -884,6 +1002,8 @@ def _serialize_attempt_summary(attempt: ExamAttempt) -> dict:
         "total_questions": len(attempt.exam.questions),
         "answered_count": answered_count,
         "started_at": attempt.started_at,
+        "expires_at": _attempt_expires_at(attempt),
+        "remaining_seconds": _attempt_remaining_seconds(attempt),
         "submitted_at": attempt.submitted_at,
     }
 
@@ -903,8 +1023,9 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
 
     existing_attempt = (
         db.query(ExamAttempt)
-        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions))
-        .options(joinedload(ExamAttempt.answers))
+        .options(joinedload(ExamAttempt.exam).joinedload(Exam.questions).joinedload(ExamQuestion.options))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.selected_option))
+        .options(joinedload(ExamAttempt.answers).joinedload(ExamAttemptAnswer.question))
         .filter(
             ExamAttempt.exam_id == exam.id,
             ExamAttempt.user_id == student.id,
@@ -914,10 +1035,12 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
         .first()
     )
     if existing_attempt:
-        return {
-            "message": "Existing in-progress attempt returned",
-            "attempt": _serialize_attempt_summary(existing_attempt),
-        }
+        existing_attempt = _sync_attempt_expiration(db, student, existing_attempt)
+        if existing_attempt.status == ATTEMPT_STATUS_IN_PROGRESS:
+            return {
+                "message": "Existing in-progress attempt returned",
+                "attempt": _serialize_attempt_detail(db, student, existing_attempt),
+            }
 
     max_attempts = getattr(exam, "max_attempts", None)
     if max_attempts is not None:
@@ -953,7 +1076,7 @@ def start_student_exam_attempt(db: Session, student: User, exam_id: int) -> dict
     attempt = _get_attempt_for_student(db, student, attempt.id)
     return {
         "message": "Attempt created successfully",
-        "attempt": _serialize_attempt_summary(attempt),
+        "attempt": _serialize_attempt_detail(db, student, attempt),
     }
 
 
@@ -1005,6 +1128,7 @@ def save_student_attempt_answers(
     answers: list[dict],
 ) -> dict:
     attempt = _get_attempt_for_student(db, student, attempt_id)
+    attempt = _sync_attempt_expiration(db, student, attempt)
     if attempt.status != ATTEMPT_STATUS_IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Attempt is no longer editable")
 
@@ -1081,12 +1205,14 @@ def save_student_attempt_answers(
         attempt_answer.answer_text = normalized_answer_text
         attempt_answer.answered_at = utc_now()
 
-    attempt.updated_at = utc_now()
+    saved_at = utc_now()
+    attempt.updated_at = saved_at
     db.commit()
 
     refreshed_attempt = _get_attempt_for_student(db, student, attempt.id)
     return {
         "message": "Answers saved successfully",
+        "saved_at": saved_at,
         "attempt": _serialize_attempt_summary(refreshed_attempt),
     }
 
@@ -1160,23 +1286,15 @@ def submit_student_attempt(db: Session, student: User, attempt_id: int) -> dict:
             "result": _serialize_attempt_result(attempt),
         }
 
-    answer_map = {answer.question_id: answer for answer in attempt.answers}
-    score = 0.0
-    correct_answers_count = 0
+    attempt = _sync_attempt_expiration(db, student, attempt)
+    if attempt.status == ATTEMPT_STATUS_SUBMITTED:
+        refreshed_attempt = _get_attempt_for_student(db, student, attempt.id)
+        return {
+            "message": "Attempt already submitted",
+            "result": _serialize_attempt_result(refreshed_attempt),
+        }
 
-    for question in attempt.exam.questions:
-        selected_answer = answer_map.get(question.id)
-        is_correct = _eval_question_correctness(question, selected_answer)
-        if is_correct:
-            score += float(question.points or 0)
-            correct_answers_count += 1
-
-    attempt.status = ATTEMPT_STATUS_SUBMITTED
-    attempt.score = score
-    attempt.total_points = _get_exam_total_points(attempt.exam)
-    attempt.correct_answers_count = correct_answers_count
-    attempt.submitted_at = utc_now()
-    attempt.updated_at = utc_now()
+    _finalize_attempt_score(attempt)
     db.commit()
 
     refreshed_attempt = _get_attempt_for_student(db, student, attempt.id)

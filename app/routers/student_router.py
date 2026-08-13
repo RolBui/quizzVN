@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import get_current_student
 from app.schemas.student import (
+    AttemptDetailResponse,
     AttemptResultResponse,
     JoinClassRequest,
     JoinClassResponse,
@@ -29,6 +30,8 @@ from app.schemas.student import (
 from app.services.student_service import (
     explore_student_exams,
     get_student_activity_chart,
+    get_student_active_exam_attempt,
+    get_student_attempt_detail,
     get_student_attempt_result,
     get_student_dashboard_classes,
     get_student_dashboard_metrics,
@@ -232,6 +235,14 @@ def get_class_exam_results(
     return list_student_exam_results(db, current_student, "class", class_id)
 
 
+@router.get("/exams/{exam_id}/attempts/active", response_model=AttemptDetailResponse | None)
+def get_active_exam_attempt(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> AttemptDetailResponse | None:
+    return get_student_active_exam_attempt(db, current_student, exam_id)
+
 @router.get("/exams/{exam_id}", response_model=StudentExamDetailSchema)
 def get_exam_detail(
     exam_id: int,
@@ -260,6 +271,14 @@ def put_attempt_answers(
     serialized_answers = [answer.model_dump() for answer in payload.answers]
     return save_student_attempt_answers(db, current_student, attempt_id, serialized_answers)
 
+
+@router.get("/attempts/{attempt_id}", response_model=AttemptDetailResponse)
+def get_attempt_detail(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    current_student=Depends(get_current_student),
+) -> AttemptDetailResponse:
+    return get_student_attempt_detail(db, current_student, attempt_id)
 
 @router.post("/attempts/{attempt_id}/submit", response_model=SubmitAttemptResponse)
 def post_submit_attempt(
