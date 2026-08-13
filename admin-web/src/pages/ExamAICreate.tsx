@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Coins,
+  Clock3,
 } from "lucide-react";
 import { adminApi } from "../lib/api";
 
@@ -154,41 +155,67 @@ function formatLocalInsufficientQCMessage(requiredQC: number, balance: number) {
   return `Bạn không đủ QC Token để tạo đề. Cần ${requiredQC.toLocaleString("vi-VN")} QC, hiện có ${balance.toLocaleString("vi-VN")} QC.`;
 }
 
+function getAIJobProgressCurrent(job: any) {
+  return Number(job?.agent_progress_current ?? job?.progress_current ?? 0);
+}
+
+function getAIJobProgressTotal(job: any) {
+  return Number(job?.agent_progress_total ?? job?.progress_total ?? job?.question_count ?? 0);
+}
+
+function getAIJobProgressMessage(job: any) {
+  return String(job?.agent_progress_message || job?.progress_message || "").trim();
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function getAIProgressStage(job: any) {
   if (!job) {
     return 0;
   }
-  if (job.status === "completed") {
+
+  const status = String(job.status || "").toLowerCase();
+  const stage = String(job.agent_stage || job.stage || "").toLowerCase();
+  const progressCurrent = getAIJobProgressCurrent(job);
+  const progressTotal = getAIJobProgressTotal(job);
+
+  if (status === "completed" || stage === "completed" || (progressTotal > 0 && progressCurrent >= progressTotal)) {
     return 3;
   }
-  const progressCurrent = Number(job.progress_current || 0);
-  const progressTotal = Number(job.progress_total || 0);
-  if (progressTotal > 0 && progressCurrent >= progressTotal) {
-    return 3;
+  if (stage === "queued") {
+    return 0;
   }
-  if (progressCurrent > 0 || job.progress_message) {
+  if (["generating", "repairing", "validating"].includes(stage) || progressCurrent > 0) {
     return 2;
   }
-  if (job.status === "processing" || job.status === "pending") {
+  if (["analyzing", "structuring", "running"].includes(stage)) {
     return 1;
   }
   return 0;
 }
-
 function AIExamGenerationProgress({
   currentJob,
   durationMinutes,
+  elapsedSeconds,
   questionCount,
   selectedTypes,
+  visibleStage,
 }: {
   currentJob: any;
   durationMinutes: number;
+  elapsedSeconds: number;
   questionCount: number;
   selectedTypes: QuestionType[];
+  visibleStage: number;
 }) {
-  const activeStage = getAIProgressStage(currentJob);
-  const progressCurrent = Number(currentJob?.progress_current || 0);
-  const progressTotal = Number(currentJob?.progress_total || 0);
+  const activeStage = Math.max(visibleStage, getAIProgressStage(currentJob));
+  const progressCurrent = getAIJobProgressCurrent(currentJob);
+  const progressTotal = getAIJobProgressTotal(currentJob);
   const questionProgressRatio = progressTotal > 0 ? Math.min(progressCurrent / progressTotal, 1) : 0;
   const progressPercent = Math.min(
     activeStage === 3 ? 100 : 94,
@@ -208,7 +235,7 @@ function AIExamGenerationProgress({
     },
     {
       title: generatedLabel,
-      description: currentJob?.progress_message || "Soạn nội dung câu hỏi, đáp án và giải thích.",
+      description: getAIJobProgressMessage(currentJob) || "Soạn nội dung câu hỏi, đáp án và giải thích.",
       icon: WandSparkles,
     },
     {
@@ -231,6 +258,9 @@ function AIExamGenerationProgress({
           <div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary">
             <Loader2 className="size-4 animate-spin" />
             Đang xử lý
+            <span className="h-4 w-px bg-primary/25" />
+            <Clock3 className="size-3.5" />
+            <span className="font-mono tabular-nums">{formatElapsedTime(elapsedSeconds)}</span>
           </div>
         </div>
       </div>
@@ -335,6 +365,10 @@ export function ExamAICreate() {
   });
 
   const pollIntervalRef = useRef<number | null>(null);
+  const completionTimeoutRef = useRef<number | null>(null);
+  const [visibleProgressStage, setVisibleProgressStage] = useState(0);
+  const [progressRunKey, setProgressRunKey] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [wallet, setWallet] = useState<{ balance: number; qc_per_question: number } | null>(null);
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
   const [isLoadingCost, setIsLoadingCost] = useState(false);
@@ -415,11 +449,48 @@ export function ExamAICreate() {
     };
   }, [generateMoreCount, wallet, currentJob]);
 
+  useEffect(() => {
+    if (!isGenerating) {
+      return;
+    }
+
+    setElapsedSeconds(0);
+    const startedAt = Date.now();
+    const elapsedTimer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => {
+      clearInterval(elapsedTimer);
+    };
+  }, [isGenerating, progressRunKey]);
+  useEffect(() => {
+    if (!isGenerating) {
+      return;
+    }
+
+    setVisibleProgressStage(0);
+    const structureTimer = window.setTimeout(() => {
+      setVisibleProgressStage((stage) => Math.max(stage, 1));
+    }, 900);
+    const generationTimer = window.setTimeout(() => {
+      setVisibleProgressStage((stage) => Math.max(stage, 2));
+    }, 2200);
+
+    return () => {
+      clearTimeout(structureTimer);
+      clearTimeout(generationTimer);
+    };
+  }, [isGenerating, progressRunKey]);
+
   // Clean up polling on unmount
   useEffect(() => {
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
+      }
+      if (completionTimeoutRef.current) {
+        clearTimeout(completionTimeoutRef.current);
       }
     };
   }, []);
@@ -501,6 +572,36 @@ export function ExamAICreate() {
   };
 
   // Start AI Generation Job
+  const beginAIProgress = () => {
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current);
+      completionTimeoutRef.current = null;
+    }
+    setElapsedSeconds(0);
+    setVisibleProgressStage(0);
+    setProgressRunKey((key) => key + 1);
+  };
+
+  const finishCompletedGeneration = (job: any) => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current);
+    }
+
+    setCurrentJob(job);
+    setDraftQuestions(job.question_drafts || []);
+    setVisibleProgressStage(3);
+
+    completionTimeoutRef.current = window.setTimeout(() => {
+      setIsGenerating(false);
+      toast.success("Đã tạo đề thi AI thành công!");
+      void fetchWallet();
+      completionTimeoutRef.current = null;
+    }, 1000);
+  };
   const handleGenerate = async () => {
     const examContextParsed = parseExamContext(examContext);
     if (!examContextParsed) {
@@ -536,6 +637,7 @@ export function ExamAICreate() {
     }
 
     setIsGenerating(true);
+    beginAIProgress();
     setCurrentJob(null);
     setDraftQuestions([]);
 
@@ -557,7 +659,11 @@ export function ExamAICreate() {
       setCurrentJob(response);
       upsertAIExamHistoryItem(response);
       syncHistory();
-      startPolling(response.id);
+      if (response.status === "completed") {
+        finishCompletedGeneration(response);
+      } else {
+        startPolling(response.id);
+      }
     } catch (err: any) {
       toast.error(getErrorMessage(err, "Tạo yêu cầu AI thất bại."));
       setIsGenerating(false);
@@ -579,13 +685,7 @@ export function ExamAICreate() {
         syncHistory();
 
         if (job.status === "completed") {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-          }
-          setIsGenerating(false);
-          setDraftQuestions(job.question_drafts || []);
-          toast.success("Đã tạo đề thi AI thành công!");
-          void fetchWallet();
+          finishCompletedGeneration(job);
         } else if (job.status === "failed") {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
@@ -597,7 +697,7 @@ export function ExamAICreate() {
       } catch (err: any) {
         console.error("Polling error", err);
       }
-    }, 2500);
+    }, 1200);
   };
 
   // Toggle approve status of a draft question
@@ -666,6 +766,7 @@ export function ExamAICreate() {
     }
 
     setIsGenerating(true);
+    beginAIProgress();
 
     try {
       const payload = {
@@ -678,7 +779,11 @@ export function ExamAICreate() {
       setCurrentJob(response);
       upsertAIExamHistoryItem(response);
       syncHistory();
-      startPolling(response.id);
+      if (response.status === "completed") {
+        finishCompletedGeneration(response);
+      } else {
+        startPolling(response.id);
+      }
       setGenerateMoreInstructions("");
     } catch (err: any) {
       toast.error(getErrorMessage(err, "Tạo thêm câu hỏi thất bại."));
@@ -689,6 +794,7 @@ export function ExamAICreate() {
   // Open past task from history table
   const openAIExamDraft = async (jobId: number) => {
     setIsGenerating(true);
+    beginAIProgress();
     setCurrentJob(null);
     setDraftQuestions([]);
     try {
@@ -1266,8 +1372,10 @@ export function ExamAICreate() {
               <AIExamGenerationProgress
                 currentJob={currentJob}
                 durationMinutes={durationMinutes}
+                elapsedSeconds={elapsedSeconds}
                 questionCount={questionCount}
                 selectedTypes={selectedTypes}
+                visibleStage={visibleProgressStage}
               />
             )}
 

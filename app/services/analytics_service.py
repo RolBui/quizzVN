@@ -181,9 +181,13 @@ def _hostname(value: str | None) -> str:
     return (parsed.hostname or "").lower()
 
 
-def _traffic_source(referrer: str | None, origin: str | None) -> str:
+def _traffic_source(referrer: str | None, origin: str | None, path: str | None = None) -> str:
     referrer_host = _hostname(referrer)
     origin_host = _hostname(origin)
+    normalized_path = _normalize_path(path)
+
+    if normalized_path == "/" and (not referrer_host or (origin_host and referrer_host == origin_host)):
+        return "direct"
     if not referrer_host:
         return "direct"
     if origin_host and referrer_host == origin_host:
@@ -288,7 +292,7 @@ def record_page_view(
         title=title,
         referrer=referrer,
         origin=origin,
-        source=_traffic_source(referrer, origin),
+        source=_traffic_source(referrer, origin, path),
         device_type=_device_type(user_agent),
         browser=_browser(user_agent),
         os=_os(user_agent),
